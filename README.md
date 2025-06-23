@@ -135,7 +135,3 @@ Currently supported:
 1. Create a new LLM client in `integrations/llm/`
 2. Register the provider in `config/settings.py`
 3. Update the LLM manager to support the new provider
-
-## License
-
-MIT License 
