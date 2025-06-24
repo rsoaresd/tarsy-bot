@@ -4,7 +4,7 @@ Application settings and configuration management.
 
 import os
 from functools import lru_cache
-from typing import Dict, List
+from typing import Dict, List, Any, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     default_llm_provider: str = Field(default="gemini")
     
     # GitHub Configuration
-    github_token: str = Field(default="")
+    github_token: Optional[str] = Field(default=None)
     
     # MCP Server Configuration
     kubernetes_mcp_url: str = Field(default="http://localhost:8080")
@@ -61,13 +61,17 @@ class Settings(BaseSettings):
     })
     
     # MCP Servers Configuration
-    mcp_servers: Dict = Field(default={
-        "kubernetes": {
-            "url_env": "KUBERNETES_MCP_URL",
-            "type": "kubernetes",
-            "enabled": True
-        }
-    })
+    mcp_servers: Dict[str, Any] = Field(
+        default={
+            "kubernetes": {
+                "type": "kubernetes",
+                "enabled": True,
+                "command": "npx",
+                "args": ["-y", "kubernetes-mcp-server@latest"]
+            }
+        },
+        description="MCP server configurations"
+    )
     
     # Supported Alert Types
     supported_alerts: List[str] = Field(default=[

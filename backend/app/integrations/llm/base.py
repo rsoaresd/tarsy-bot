@@ -103,6 +103,15 @@ class BaseLLMClient(ABC):
                           **kwargs) -> str:
         """Analyze an alert with runbook and MCP data."""
         pass
+    
+    @abstractmethod
+    async def determine_mcp_tools(self,
+                                alert_data: Dict,
+                                runbook_data: Dict,
+                                available_tools: Dict,
+                                **kwargs) -> List[Dict]:
+        """Determine which MCP tools to call based on alert and runbook."""
+        pass
 
 
 class LLMManager:
@@ -153,6 +162,19 @@ class LLMManager:
             raise Exception(f"LLM provider not available. Available: {available}")
         
         return await client.analyze_alert(alert_data, runbook_data, mcp_data)
+    
+    async def determine_mcp_tools(self,
+                                alert_data: Dict,
+                                runbook_data: Dict,
+                                available_tools: Dict,
+                                provider: str = None) -> List[Dict]:
+        """Determine which MCP tools to call using the specified or default LLM provider."""
+        client = self.get_client(provider)
+        if not client:
+            available = list(self.clients.keys())
+            raise Exception(f"LLM provider not available. Available: {available}")
+        
+        return await client.determine_mcp_tools(alert_data, runbook_data, available_tools)
     
     def list_available_providers(self) -> List[str]:
         """List available LLM providers."""

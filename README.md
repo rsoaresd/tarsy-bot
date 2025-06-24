@@ -2,23 +2,42 @@
 
 An intelligent Site Reliability Engineering agent that automatically processes alerts, retrieves runbooks, and uses MCP (Model Context Protocol) servers to gather system information for comprehensive incident analysis.
 
+## Key Features
+
+### 🧠 LLM-Driven MCP Tool Selection
+The agent uses Large Language Models to intelligently determine which MCP tools to call based on:
+- Alert context and severity
+- Runbook content and troubleshooting steps  
+- Available MCP server capabilities
+
+This adaptive approach means the agent can handle various alert types without hardcoded rules.
+
 ## Architecture
 
 The SRE AI Agent consists of:
 
 - **Backend**: FastAPI-based service that processes alerts and orchestrates LLM analysis
 - **Frontend**: React TypeScript application for alert simulation and result viewing  
-- **MCP Integration**: Kubernetes MCP server integration for system data gathering
-- **LLM Support**: Multiple LLM providers (Gemini, OpenAI, Grok)
+- **MCP Integration**: Uses `mcp-use` library for seamless MCP server integration
+- **LLM Support**: Multiple LLM providers (OpenAI, Gemini, Anthropic, Grok)
 
 ## Features
 
-- **Alert Processing**: Handles "Namespace stuck in Terminating" alerts
+- **Intelligent Alert Processing**: LLM determines relevant MCP tools dynamically
 - **Runbook Integration**: Downloads and processes runbooks from GitHub
 - **MCP Server Communication**: Integrates with Kubernetes MCP server for real-time data
-- **Multi-LLM Support**: Configurable LLM providers for analysis
+- **Multi-LLM Support**: Configurable LLM providers for analysis and tool selection
 - **Real-time Updates**: WebSocket-based progress tracking
 - **Extensible Design**: Easy to add new alert types and MCP servers
+- **Fallback Logic**: Graceful degradation when LLM is unavailable
+
+## How It Works
+
+1. **Alert Received**: System receives an alert (e.g., "Namespace stuck in Terminating")
+2. **Runbook Downloaded**: Fetches the relevant runbook from GitHub
+3. **LLM Tool Selection**: LLM analyzes the alert and runbook to determine which MCP tools to call
+4. **Data Collection**: Selected MCP tools gather system data
+5. **Final Analysis**: LLM provides comprehensive analysis and recommendations
 
 ## Project Structure
 
@@ -30,8 +49,12 @@ sre/
 │   │   ├── models/         # Pydantic models
 │   │   ├── services/       # Business logic services
 │   │   ├── integrations/   # MCP and LLM integrations
+│   │   │   ├── mcp/        # MCP server integrations
+│   │   │   │   └── mcp_use_client.py  # New mcp-use based client
+│   │   │   └── llm/        # LLM provider integrations
 │   │   ├── config/         # Configuration management
 │   │   └── utils/          # Utility functions
+│   ├── MCP_LLM_INTEGRATION.md  # Documentation for MCP/LLM integration
 │   ├── pyproject.toml      # uv project configuration
 │   └── requirements.txt    # Python dependencies
 ├── frontend/               # React TypeScript frontend
@@ -53,7 +76,7 @@ sre/
 - Python 3.11+
 - Node.js 18+
 - uv (Python package manager)
-- Kubernetes MCP Server running
+- npx (for running Kubernetes MCP server)
 
 ### Backend Setup
 
@@ -62,8 +85,8 @@ cd backend
 uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
-cp ../.env.example .env
-# Edit .env with your API keys and configuration
+cp env.template .env
+# Edit .env with your API keys
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -77,24 +100,23 @@ npm start
 
 ### Environment Configuration
 
-Copy `.env.example` to `.env` and configure:
+Copy `backend/env.template` to `backend/.env` and configure:
 
 ```env
-# LLM API Keys
-GEMINI_API_KEY=your_gemini_api_key
-OPENAI_API_KEY=your_openai_api_key
-GROK_API_KEY=your_grok_api_key
+# GitHub Configuration (for downloading runbooks)
+GITHUB_TOKEN=your_github_token_here
 
-# GitHub Configuration
-GITHUB_TOKEN=your_github_token
+# LLM API Keys (add the ones you want to use)
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_API_KEY=AI...
+X_AI_API_KEY=xai-...
 
-# MCP Server Configuration
-KUBERNETES_MCP_URL=http://localhost:8080
-
-# Application Settings
-DEFAULT_LLM_PROVIDER=gemini
-LOG_LEVEL=INFO
+# Default LLM Provider
+DEFAULT_LLM_PROVIDER=openai
 ```
+
+Note: The Kubernetes MCP server is now automatically configured to use `npx` command.
 
 ## Usage
 
@@ -109,6 +131,10 @@ LOG_LEVEL=INFO
 Currently supported:
 - **Namespace stuck in Terminating**: Analyzes stuck Kubernetes namespaces
 
+The LLM-driven approach means new alert types can be handled without code changes, as long as:
+- A runbook exists for the alert
+- The MCP servers have relevant tools available
+
 ## API Endpoints
 
 - `POST /alerts` - Submit a new alert for processing
@@ -121,17 +147,14 @@ Currently supported:
 ### Adding New Alert Types
 
 1. Add the alert type to `supported_alerts` in `config/settings.py`
-2. Create corresponding runbook processing logic
-3. Update the frontend form options
+2. Create a runbook in your GitHub repository
+3. The LLM will automatically determine relevant MCP tools
 
 ### Adding New MCP Servers
 
-1. Create a new MCP client in `integrations/mcp/`
-2. Register the server in `config/settings.py`
-3. Update the MCP orchestrator to handle the new server
+1. Update the MCP server configuration in `settings.py`
+2. The new server's tools will be automatically available to the LLM
 
 ### Adding New LLM Providers
 
-1. Create a new LLM client in `integrations/llm/`
-2. Register the provider in `config/settings.py`
-3. Update the LLM manager to support the new provider
+Follow the existing pattern in `integrations/llm/` - the system uses LangChain for unified LLM access.

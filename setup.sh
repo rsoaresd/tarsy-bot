@@ -8,18 +8,52 @@ set -e
 echo "🚀 SRE AI Agent - Quick Setup"
 echo "================================"
 
-# Check if required commands exist
-check_command() {
-    if ! command -v $1 &> /dev/null; then
-        echo "❌ Error: $1 is not installed. Please install it first."
-        exit 1
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Function to check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Function to print colored output
+print_status() {
+    if [ "$1" = "success" ]; then
+        echo -e "${GREEN}✓ $2${NC}"
+    elif [ "$1" = "error" ]; then
+        echo -e "${RED}✗ $2${NC}"
+    elif [ "$1" = "warning" ]; then
+        echo -e "${YELLOW}⚠ $2${NC}"
+    else
+        echo "$2"
     fi
 }
 
 echo "📋 Checking prerequisites..."
-check_command "python3"
-check_command "node"
-check_command "npm"
+
+if ! command_exists python3; then
+    print_status "error" "Python 3 is not installed. Please install Python 3.11 or higher."
+    exit 1
+else
+    print_status "success" "Python 3 found"
+fi
+
+if ! command_exists node; then
+    print_status "error" "Node.js is not installed. Please install Node.js 18 or higher."
+    exit 1
+else
+    print_status "success" "Node.js found"
+fi
+
+if ! command_exists npx; then
+    print_status "error" "npx is not installed. Please install npm/npx."
+    exit 1
+else
+    print_status "success" "npx found (needed for Kubernetes MCP server)"
+fi
 
 # Check Python version
 python_version=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
@@ -35,7 +69,7 @@ if [ $node_version -lt 18 ]; then
     exit 1
 fi
 
-echo "✅ Prerequisites check passed!"
+print_status "success" "Prerequisites check passed!"
 
 # Setup backend
 echo ""
@@ -66,7 +100,7 @@ if [ ! -f ".env" ]; then
     echo "   You need at least one LLM API key and a GitHub token."
     echo ""
 else
-    echo "✅ Environment file already exists"
+    print_status "success" ".env file already exists"
 fi
 
 cd ..
@@ -138,4 +172,14 @@ echo "   - Frontend: http://localhost:3001"
 echo "   - Backend API: http://localhost:8000"
 echo "   - API Docs: http://localhost:8000/docs"
 echo ""
-echo "📚 For more information, see README.md and DEPLOYMENT.md" 
+echo "📚 For more information, see README.md and DEPLOYMENT.md"
+
+# Test MCP integration (optional)
+echo -e "\nWould you like to test the MCP integration? (y/n)"
+read -r response
+if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    cd backend
+    source .venv/bin/activate || . .venv/Scripts/activate
+    echo "Running MCP integration test..."
+    python test_mcp_integration.py
+fi 

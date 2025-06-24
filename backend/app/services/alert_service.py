@@ -9,7 +9,7 @@ from typing import Callable, Dict, Optional
 from app.config.settings import Settings
 from app.models.alert import Alert
 from app.services.runbook_service import RunbookService
-from app.integrations.mcp.base import MCPOrchestrator
+from app.integrations.mcp.mcp_client import MCPClient
 from app.integrations.llm.base import LLMManager
 from app.utils.prompt_builder import PromptBuilder
 
@@ -20,14 +20,14 @@ class AlertService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.runbook_service = RunbookService(settings)
-        self.mcp_orchestrator = MCPOrchestrator(settings)
+        self.mcp_client = MCPClient(settings)
         self.llm_manager = LLMManager(settings)
         self.prompt_builder = PromptBuilder()
     
     async def initialize(self):
         """Initialize the alert service and all dependencies."""
         # Initialize MCP servers
-        await self.mcp_orchestrator.initialize()
+        await self.mcp_client.initialize()
         
         print("Alert service initialized successfully")
     
@@ -44,11 +44,15 @@ class AlertService:
             runbook_content = await self.runbook_service.download_runbook(alert.runbook)
             runbook_data = self.runbook_service.parse_runbook(runbook_content)
             
-            # Step 2: Determine which MCP tools to call
+            # Step 2: Get available MCP tools and let LLM determine which ones to call
             if progress_callback:
                 await progress_callback(30, "Analyzing runbook and determining data requirements")
             
-            mcp_tools_to_call = await self._determine_mcp_tools(alert, runbook_data)
+            # Get available tools from MCP servers
+            available_tools = await self.mcp_client.list_tools()
+            
+            # Use LLM to determine which tools to call
+            mcp_tools_to_call = await self._determine_mcp_tools_with_llm(alert, runbook_data, available_tools)
             
             # Step 3: Gather data from MCP servers
             if progress_callback:
@@ -74,46 +78,84 @@ class AlertService:
                 await progress_callback(0, error_msg)
             raise Exception(error_msg)
     
-    async def _determine_mcp_tools(self, alert: Alert, runbook_data: Dict) -> list:
-        """Determine which MCP tools to call based on alert and runbook."""
+    async def _determine_mcp_tools_with_llm(self, alert: Alert, runbook_data: Dict, available_tools: Dict) -> list:
+        """Use LLM to determine which MCP tools to call based on alert and runbook."""
         
-        # Get available tools from all MCP servers
-        available_tools = await self.mcp_orchestrator.list_all_tools()
+        # Get the default LLM client
+        llm_client = self.llm_manager.get_client()
+        if not llm_client:
+            print("ERROR: No LLM client available")
+            # Fallback to basic tool selection if no LLM is available
+            return self._get_fallback_tools(alert)
         
-        # For now, use a simple rule-based approach for "Namespace stuck in Terminating"
-        # In the future, this could be enhanced with LLM-based tool selection
-        if alert.alert == "Namespace is stuck in Terminating":
-            return [
-                {
-                    "server": "kubernetes",
-                    "tool": "get_namespace_status",
-                    "parameters": {
-                        "cluster": alert.cluster,
-                        "namespace": alert.namespace
-                    },
-                    "reason": "Check namespace status and finalizers"
-                },
-                {
-                    "server": "kubernetes",
-                    "tool": "list_namespace_resources",
-                    "parameters": {
-                        "cluster": alert.cluster,
-                        "namespace": alert.namespace
-                    },
-                    "reason": "List resources that might be preventing deletion"
-                },
-                {
-                    "server": "kubernetes",
-                    "tool": "get_events_in_namespace",
-                    "parameters": {
-                        "cluster": alert.cluster,
-                        "namespace": alert.namespace
-                    },
-                    "reason": "Check for events that might explain the stuck state"
-                }
-            ]
+        try:
+            # Prepare alert data
+            alert_data = alert.model_dump()
+            
+            # Let the LLM determine which tools to call
+            tools_to_call = await llm_client.determine_mcp_tools(
+                alert_data, runbook_data, available_tools
+            )
+            
+            # Update cluster information in parameters
+            for tool_call in tools_to_call:
+                if "parameters" in tool_call and "cluster" in tool_call["parameters"]:
+                    # Replace placeholder with actual cluster
+                    tool_call["parameters"]["cluster"] = alert.cluster
+                if "parameters" in tool_call and "namespace" in tool_call["parameters"]:
+                    # Ensure namespace is set correctly
+                    if tool_call["parameters"]["namespace"] in ["namespace_name_here", ""]:
+                        tool_call["parameters"]["namespace"] = alert.namespace
+            
+            return tools_to_call
+            
+        except Exception as e:
+            print(f"ERROR: LLM tool selection failed: {str(e)}")
+            # Fallback to basic tool selection
+            return self._get_fallback_tools(alert)
+    
+    def _get_fallback_tools(self, alert: Alert) -> list:
+        """Fallback tool selection when LLM is not available."""
+        # Basic rule-based fallback for common alerts
+        # if alert.alert == "Namespace is stuck in Terminating":
+        #     return [
+        #         {
+        #             "server": "kubernetes",
+        #             "tool": "namespaces_list",
+        #             "parameters": {},
+        #             "reason": "List all namespaces to verify the stuck namespace"
+        #         },
+        #         {
+        #             "server": "kubernetes",
+        #             "tool": "resources_get",
+        #             "parameters": {
+        #                 "apiVersion": "v1",
+        #                 "kind": "Namespace",
+        #                 "name": alert.namespace
+        #             },
+        #             "reason": "Get namespace details including finalizers"
+        #         },
+        #         {
+        #             "server": "kubernetes",
+        #             "tool": "resources_list",
+        #             "parameters": {
+        #                 "apiVersion": "v1",
+        #                 "kind": "Pod",
+        #                 "namespace": alert.namespace
+        #             },
+        #             "reason": "List pods that might be preventing deletion"
+        #         },
+        #         {
+        #             "server": "kubernetes",
+        #             "tool": "events_list",
+        #             "parameters": {
+        #                 "namespace": alert.namespace
+        #             },
+        #             "reason": "Check for events that might explain the stuck state"
+        #         }
+        #     ]
         
-        # Default fallback for other alert types
+        # Default fallback for other alerts
         return []
     
     async def _gather_mcp_data(self, alert: Alert, tools_to_call: list) -> Dict:
@@ -137,7 +179,7 @@ class AlertService:
                     tool_name = tool_call["tool"]
                     parameters = tool_call["parameters"]
                     
-                    result = await self.mcp_orchestrator.call_tool(
+                    result = await self.mcp_client.call_tool(
                         server_name, tool_name, parameters
                     )
                     
@@ -215,4 +257,4 @@ class AlertService:
     async def close(self):
         """Clean up resources."""
         await self.runbook_service.close()
-        await self.mcp_orchestrator.close_all() 
+        await self.mcp_client.close() 

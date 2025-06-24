@@ -133,7 +133,7 @@ Please be specific and reference the actual data provided. Format your response 
                 return str(data)
         return str(data)
     
-    def build_mcp_instruction_prompt(self, 
+    def build_mcp_tool_selection_prompt(self, 
                                    alert_data: Dict, 
                                    runbook_data: Dict, 
                                    available_tools: Dict) -> str:
