@@ -133,7 +133,7 @@ messages = [
 ### Using LLM Manager
 
 ```python
-from app.integrations.llm.base import LLMManager
+from app.integrations.llm.client import LLMManager
 from app.config.settings import Settings
 
 # Initialize

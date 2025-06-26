@@ -10,7 +10,7 @@ from app.config.settings import Settings
 from app.models.alert import Alert
 from app.services.runbook_service import RunbookService
 from app.integrations.mcp.mcp_client import MCPClient
-from app.integrations.llm.base import LLMManager
+from app.integrations.llm.client import LLMManager
 from app.utils.prompt_builder import PromptBuilder
 
 
@@ -223,7 +223,7 @@ class AlertService:
         """Generate a basic analysis when LLM is not available."""
         
         analysis_parts = [
-            "# Alert Analysis (Fallback Mode)",
+            "# LLM not available!!! Alert Analysis (Fallback Mode)",
             "",
             f"**Alert:** {alert.alert}",
             f"**Severity:** {alert.severity}",
@@ -233,10 +233,8 @@ class AlertService:
             f"**Message:** {alert.message}",
             "",
             "## Runbook Information",
-            "The following runbook was retrieved and parsed:",
-            f"- Sections identified: {len(runbook_data.get('sections', {}))}", 
-            f"- Troubleshooting steps: {len(runbook_data.get('troubleshooting_steps', []))}",
-            f"- Commands found: {len(runbook_data.get('commands', []))}",
+            "The following runbook was retrieved:",
+            f"- Raw content: {runbook_data.get('raw_content', 'No runbook available')}",
             "",
             "## System Data",
             "The following data was gathered from MCP servers:",

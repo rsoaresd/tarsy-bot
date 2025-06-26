@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 
 from app.config.settings import Settings
-from app.integrations.llm.base import LLMManager
+from app.integrations.llm.client import LLMManager
 from app.models.llm import LLMMessage
 
 # Load environment variables
@@ -67,9 +67,11 @@ async def test_langchain_integration():
                     "cluster": "test-cluster",
                     "namespace": "test-namespace"
                 }
-                mock_runbook = {"sections": {"troubleshooting": "Test runbook"}}
+                mock_runbook = {
+                    "raw_content": "Test runbook",
+                }
                 mock_mcp_data = {"kubernetes": {"status": "healthy"}}
-                
+
                 analysis = await client.analyze_alert(mock_alert, mock_runbook, mock_mcp_data)
                 print(f"  ✅ Analysis: {analysis[:100]}...")
                 

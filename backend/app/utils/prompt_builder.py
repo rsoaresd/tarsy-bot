@@ -52,9 +52,6 @@ Please provide detailed, actionable insights about what's happening and potentia
     
     def _build_runbook_section(self, runbook_data: Dict) -> str:
         """Build the runbook section of the prompt."""
-        sections = runbook_data.get('sections', {})
-        troubleshooting_steps = runbook_data.get('troubleshooting_steps', [])
-        commands = runbook_data.get('commands', [])
         
         runbook_text = f"""## Associated Runbook
 
@@ -62,15 +59,7 @@ Please provide detailed, actionable insights about what's happening and potentia
 ```
 {runbook_data.get('raw_content', 'No runbook content available')}
 ```
-
-**Extracted Sections:**
-{json.dumps(sections, indent=2)}
-
-**Troubleshooting Steps:**
-{chr(10).join(f"- {step}" for step in troubleshooting_steps)}
-
-**Identified Commands:**
-{chr(10).join(f"- `{cmd}`" for cmd in commands)}"""
+"""
         
         return runbook_text
     
@@ -96,33 +85,70 @@ Please provide detailed, actionable insights about what's happening and potentia
         """Build the analysis instructions section."""
         return """## Analysis Instructions
 
-Please provide a comprehensive analysis that includes:
+Please provide your analysis in the following structured format:
 
-1. **Root Cause Analysis:**
-   - What is the primary cause of this alert?
-   - What evidence from the system data supports this conclusion?
+# 🚨 1. QUICK SUMMARY
+**Provide a brief, concrete summary (2-3 sentences maximum):**
+- What specific resource is affected (include **name**, **type**, **namespace** if applicable)
+- What exactly is wrong with it
+- Root cause in simple terms
 
-2. **Current System State:**
-   - What is the current state of the affected resources?
-   - Are there any stuck resources or finalizers preventing cleanup?
+---
 
-3. **Impact Assessment:**
-   - What is the impact of this issue?
-   - How does this affect system functionality?
+# ⚡ 2. RECOMMENDED ACTIONS
 
-4. **Recommended Actions:**
-   - What immediate actions should be taken?
-   - What commands need to be executed (if any)?
+## 🔧 Immediate Fix Actions (if any):
+**List specific commands that could potentially resolve the issue, in order of priority:**
+- Command 1. Explanation of what this does
+```command
+command here
+```
+- Command 2. Explanation of what this does
+```command
+command here
+```
 
-5. **Prevention Measures:**
-   - How can this issue be prevented in the future?
-   - What monitoring or automation improvements are recommended?
+## 🔍 Investigation Actions (if needed):
+**List commands for further investigation:**
+- Command 1. What information this will provide
+```command
+command here
+```
+- Command 2. What information this will provide
+```command
+command here
+```
 
-6. **Additional Investigation:**
-   - What additional data or investigation might be needed?
-   - Are there related systems that should be checked?
+---
 
-Please be specific and reference the actual data provided. Format your response with clear sections and actionable recommendations."""
+## 3. DETAILED ANALYSIS
+
+### Root Cause Analysis:
+- What is the primary cause of this alert?
+- What evidence from the system data supports this conclusion?
+- Technical details and context
+
+### Current System State:
+- Detailed state of affected resources
+- Any stuck resources or finalizers preventing cleanup
+- Related resource dependencies
+
+### Impact Assessment:
+- Current impact on system functionality
+- Potential escalation scenarios
+- Affected services or users
+
+### Prevention Measures:
+- How can this issue be prevented in the future?
+- Monitoring improvements needed
+- Process or automation recommendations
+
+### Additional Context:
+- Related systems that should be monitored
+- Historical patterns or similar incidents
+- Any other relevant technical details
+
+Please be specific and reference the actual data provided. Use exact resource names, namespaces, and status information from the system data."""
     
     def _format_data(self, data) -> str:
         """Format data for display in prompt."""

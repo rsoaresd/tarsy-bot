@@ -65,94 +65,14 @@ class RunbookService:
         return github_url
     
     def parse_runbook(self, content: str) -> dict:
-        """Parse runbook content and extract structured information."""
-        # Convert markdown to HTML for better parsing
-        html = markdown.markdown(content)
+        """Parse runbook. For now, just return the raw content."""
         
         result = {
             "raw_content": content,
-            "html_content": html,
-            "sections": self._extract_sections(content),
-            "troubleshooting_steps": self._extract_troubleshooting_steps(content),
-            "commands": self._extract_commands(content)
         }
         
         return result
-    
-    def _extract_sections(self, content: str) -> dict:
-        """Extract sections from the runbook."""
-        sections = {}
-        current_section = None
-        current_content = []
-        
-        for line in content.split('\n'):
-            if line.startswith('#'):
-                # Save previous section
-                if current_section:
-                    sections[current_section] = '\n'.join(current_content)
-                
-                # Start new section
-                current_section = line.strip('#').strip().lower()
-                current_content = []
-            else:
-                current_content.append(line)
-        
-        # Save last section
-        if current_section:
-            sections[current_section] = '\n'.join(current_content)
-        
-        return sections
-    
-    def _extract_troubleshooting_steps(self, content: str) -> list:
-        """Extract troubleshooting steps from the runbook."""
-        steps = []
-        
-        # Look for the troubleshooting section
-        lines = content.split('\n')
-        in_troubleshooting = False
-        
-        for line in lines:
-            if "troubleshooting" in line.lower() and line.startswith('#'):
-                in_troubleshooting = True
-                continue
-            
-            if in_troubleshooting:
-                if line.startswith('#') and "troubleshooting" not in line.lower():
-                    # End of troubleshooting section
-                    break
-                
-                # Look for numbered steps or bullet points
-                if re.match(r'^\d+\.', line) or line.strip().startswith('-') or line.strip().startswith('*'):
-                    steps.append(line.strip())
-        
-        return steps
-    
-    def _extract_commands(self, content: str) -> list:
-        """Extract shell commands from the runbook."""
-        commands = []
-        
-        # Look for code blocks with shell commands
-        code_block_pattern = r'```(?:shell|bash|sh)?\n(.*?)```'
-        matches = re.findall(code_block_pattern, content, re.DOTALL)
-        
-        for match in matches:
-            # Split by lines and clean up
-            for line in match.split('\n'):
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    commands.append(line)
-        
-        # Also look for inline code that looks like commands
-        inline_pattern = r'`([^`]+)`'
-        inline_matches = re.findall(inline_pattern, content)
-        
-        for match in inline_matches:
-            # Check if it looks like a command (contains common command prefixes)
-            if any(match.startswith(cmd) for cmd in ['oc ', 'kubectl ', 'docker ', 'curl ']):
-                commands.append(match)
-        
-        return commands
-    
+
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose() 

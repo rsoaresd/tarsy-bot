@@ -6,7 +6,7 @@ import asyncio
 import json
 from app.config.settings import Settings
 from app.integrations.mcp.mcp_client import MCPClient
-from app.integrations.llm.base import LLMManager
+from app.integrations.llm.client import LLMManager
 from app.models.alert import Alert
 
 
@@ -88,19 +88,8 @@ A namespace is stuck in the Terminating state.
 1. Remove finalizers if safe to do so
 2. Force delete stuck resources
 3. Patch the namespace to remove finalizers
-""",
-            "sections": {
-                "Problem": "A namespace is stuck in the Terminating state.",
-                "Investigation Steps": "1. Check namespace status...",
-                "Resolution": "1. Remove finalizers..."
-            },
-            "troubleshooting_steps": [
-                "Check the namespace status and finalizers",
-                "List all resources in the namespace",
-                "Check for any pods that are not terminating",
-                "Look for events that might explain the issue"
-            ]
-        }
+"""
+}
         
         # Get LLM to determine tools
         llm_client = llm_manager.get_client()
