@@ -4,6 +4,7 @@ MCP client using the official MCP SDK for integration with MCP servers.
 
 import asyncio
 import json
+import uuid
 from typing import Any, Dict, List, Optional
 from contextlib import AsyncExitStack
 
@@ -13,6 +14,13 @@ from langchain.tools import Tool
 from langchain_core.utils.function_calling import convert_to_openai_function
 
 from app.config.settings import Settings
+from app.utils.logger import get_module_logger
+
+# Setup logger for this module
+logger = get_module_logger(__name__)
+
+# Setup separate logger for MCP communications
+mcp_comm_logger = get_module_logger("mcp.communications")
 
 
 class MCPClient:
@@ -55,10 +63,10 @@ class MCPClient:
                 await session.initialize()
                 
                 self.sessions[server_name] = session
-                print(f"Initialized MCP server: {server_name}")
+                logger.info(f"Initialized MCP server: {server_name}")
                 
             except Exception as e:
-                print(f"Failed to initialize MCP server {server_name}: {str(e)}")
+                logger.error(f"Failed to initialize MCP server {server_name}: {str(e)}")
         
         self._initialized = True
     
@@ -66,6 +74,12 @@ class MCPClient:
         """List available tools from MCP servers."""
         if not self._initialized:
             await self.initialize()
+        
+        # Generate unique request ID for tracking
+        request_id = str(uuid.uuid4())[:8]
+        
+        # Log the tools listing request
+        self._log_mcp_list_tools_request(server_name, request_id)
         
         all_tools = {}
         
@@ -84,8 +98,13 @@ class MCPClient:
                         }
                         tools.append(tool_dict)
                     all_tools[server_name] = tools
+                    
+                    # Log the successful response
+                    self._log_mcp_list_tools_response(server_name, tools, request_id)
+                    
                 except Exception as e:
-                    print(f"Error listing tools from {server_name}: {str(e)}")
+                    logger.error(f"Error listing tools from {server_name}: {str(e)}")
+                    self._log_mcp_list_tools_error(server_name, str(e), request_id)
                     all_tools[server_name] = []
         else:
             # List tools from all servers
@@ -101,8 +120,13 @@ class MCPClient:
                         }
                         tools.append(tool_dict)
                     all_tools[name] = tools
+                    
+                    # Log the successful response for this server
+                    self._log_mcp_list_tools_response(name, tools, request_id)
+                    
                 except Exception as e:
-                    print(f"Error listing tools from {name}: {str(e)}")
+                    logger.error(f"Error listing tools from {name}: {str(e)}")
+                    self._log_mcp_list_tools_error(name, str(e), request_id)
                     all_tools[name] = []
         
         return all_tools
@@ -154,7 +178,7 @@ class MCPClient:
                 tools.append(langchain_tool)
                 
         except Exception as e:
-            print(f"Error creating tools for {server_name}: {str(e)}")
+            logger.error(f"Error creating tools for {server_name}: {str(e)}")
         
         return tools
     
@@ -165,6 +189,12 @@ class MCPClient:
         
         if server_name not in self.sessions:
             raise Exception(f"MCP server not found: {server_name}")
+        
+        # Generate unique request ID for tracking
+        request_id = str(uuid.uuid4())[:8]
+        
+        # Log the outgoing tool call
+        self._log_mcp_request(server_name, tool_name, parameters, request_id)
         
         session = self.sessions[server_name]
         
@@ -183,15 +213,82 @@ class MCPClient:
                             text_parts.append(item.text)
                         elif hasattr(item, 'type') and item.type == 'text':
                             text_parts.append(str(item))
-                    return {"result": "\n".join(text_parts)}
+                    response_dict = {"result": "\n".join(text_parts)}
                 else:
-                    return {"result": str(content)}
+                    response_dict = {"result": str(content)}
             else:
-                return {"result": str(result)}
+                response_dict = {"result": str(result)}
+            
+            # Log the successful response
+            self._log_mcp_response(server_name, tool_name, response_dict, request_id)
+            
+            return response_dict
                 
         except Exception as e:
-            raise Exception(f"Failed to call tool {tool_name} on {server_name}: {str(e)}")
+            # Log the error
+            error_msg = f"Failed to call tool {tool_name} on {server_name}: {str(e)}"
+            self._log_mcp_error(server_name, tool_name, str(e), request_id)
+            raise Exception(error_msg)
     
+    def _log_mcp_request(self, server_name: str, tool_name: str, parameters: Dict[str, Any], request_id: str):
+        """Log the outgoing MCP tool call request."""
+        mcp_comm_logger.info(f"=== MCP REQUEST [{server_name}] [ID: {request_id}] ===")
+        mcp_comm_logger.info(f"Request ID: {request_id}")
+        mcp_comm_logger.info(f"Server: {server_name}")
+        mcp_comm_logger.info(f"Tool: {tool_name}")
+        mcp_comm_logger.info(f"Parameters: {json.dumps(parameters, indent=2, default=str)}")
+        mcp_comm_logger.info(f"=== END REQUEST [ID: {request_id}] ===")
+    
+    def _log_mcp_response(self, server_name: str, tool_name: str, response: Dict[str, Any], request_id: str):
+        """Log the MCP tool call response."""
+        response_content = response.get("result", str(response))
+        mcp_comm_logger.info(f"=== MCP RESPONSE [{server_name}] [ID: {request_id}] ===")
+        mcp_comm_logger.info(f"Request ID: {request_id}")
+        mcp_comm_logger.info(f"Server: {server_name}")
+        mcp_comm_logger.info(f"Tool: {tool_name}")
+        mcp_comm_logger.info(f"Response length: {len(response_content)} characters")
+        mcp_comm_logger.info("--- RESPONSE CONTENT ---")
+        mcp_comm_logger.info(response_content)
+        mcp_comm_logger.info(f"=== END RESPONSE [ID: {request_id}] ===")
+    
+    def _log_mcp_error(self, server_name: str, tool_name: str, error_message: str, request_id: str):
+        """Log MCP tool call errors."""
+        mcp_comm_logger.error(f"=== MCP ERROR [{server_name}] [ID: {request_id}] ===")
+        mcp_comm_logger.error(f"Request ID: {request_id}")
+        mcp_comm_logger.error(f"Server: {server_name}")
+        mcp_comm_logger.error(f"Tool: {tool_name}")
+        mcp_comm_logger.error(f"Error: {error_message}")
+        mcp_comm_logger.error(f"=== END ERROR [ID: {request_id}] ===")
+    
+    def _log_mcp_list_tools_request(self, server_name: Optional[str], request_id: str):
+        """Log the MCP list tools request."""
+        target = server_name if server_name else "ALL_SERVERS"
+        mcp_comm_logger.info(f"=== MCP LIST TOOLS REQUEST [{target}] [ID: {request_id}] ===")
+        mcp_comm_logger.info(f"Request ID: {request_id}")
+        mcp_comm_logger.info(f"Target: {target}")
+        mcp_comm_logger.info(f"=== END LIST TOOLS REQUEST [ID: {request_id}] ===")
+    
+    def _log_mcp_list_tools_response(self, server_name: str, tools: List[Dict[str, Any]], request_id: str):
+        """Log the MCP list tools response."""
+        mcp_comm_logger.info(f"=== MCP LIST TOOLS RESPONSE [{server_name}] [ID: {request_id}] ===")
+        mcp_comm_logger.info(f"Request ID: {request_id}")
+        mcp_comm_logger.info(f"Server: {server_name}")
+        mcp_comm_logger.info(f"Tools count: {len(tools)}")
+        mcp_comm_logger.info("--- TOOLS ---")
+        for i, tool in enumerate(tools):
+            mcp_comm_logger.info(f"Tool {i+1}: {tool['name']}")
+            mcp_comm_logger.info(f"  Description: {tool['description']}")
+            mcp_comm_logger.info(f"  Schema: {json.dumps(tool['inputSchema'], indent=2, default=str)}")
+        mcp_comm_logger.info(f"=== END LIST TOOLS RESPONSE [ID: {request_id}] ===")
+    
+    def _log_mcp_list_tools_error(self, server_name: str, error_message: str, request_id: str):
+        """Log MCP list tools errors."""
+        mcp_comm_logger.error(f"=== MCP LIST TOOLS ERROR [{server_name}] [ID: {request_id}] ===")
+        mcp_comm_logger.error(f"Request ID: {request_id}")
+        mcp_comm_logger.error(f"Server: {server_name}")
+        mcp_comm_logger.error(f"Error: {error_message}")
+        mcp_comm_logger.error(f"=== END LIST TOOLS ERROR [ID: {request_id}] ===")
+
     async def close(self):
         """Close all MCP client connections."""
         await self.exit_stack.aclose()

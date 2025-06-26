@@ -39,8 +39,7 @@ Please provide detailed, actionable insights about what's happening and potentia
     
     def _build_alert_section(self, alert_data: Dict) -> str:
         """Build the alert section of the prompt."""
-        return f"""## Alert Information
-
+        return f"""
 **Alert Type:** {alert_data.get('alert', 'Unknown')}
 **Severity:** {alert_data.get('severity', 'Unknown')}
 **Environment:** {alert_data.get('environment', 'Unknown')}
@@ -56,8 +55,10 @@ Please provide detailed, actionable insights about what's happening and potentia
         runbook_text = f"""## Associated Runbook
 
 **Raw Content:**
-```
+```markdown
+<!-- RUNBOOK START -->
 {runbook_data.get('raw_content', 'No runbook content available')}
+<!-- RUNBOOK END -->
 ```
 """
         
@@ -173,7 +174,11 @@ Based on the following alert and runbook, determine which MCP tools should be ca
 {self._build_alert_section(alert_data)}
 
 ## Runbook Content
+```markdown
+<!-- RUNBOOK START -->
 {runbook_data.get('raw_content', 'No runbook available')}
+<!-- RUNBOOK END -->
+```
 
 ## Available MCP Tools
 {json.dumps(available_tools, indent=2)}

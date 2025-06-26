@@ -4,6 +4,7 @@ Handles all LLM providers through LangChain's abstraction.
 """
 
 import json
+import uuid
 from typing import Dict, List, Optional
 
 from langchain_openai import ChatOpenAI
@@ -15,6 +16,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from app.config.settings import Settings
 from app.models.llm import LLMMessage
 from app.utils.prompt_builder import PromptBuilder
+from app.utils.logger import get_module_logger
+
+# Setup logger for this module
+logger = get_module_logger(__name__)
+
+# Setup separate logger for LLM communications
+llm_comm_logger = get_module_logger("llm.communications")
 
 
 # LLM Providers mapping using LangChain
@@ -55,7 +63,7 @@ class LLMClient:
         try:
             if self.provider_name in LLM_PROVIDERS:
                 if not self.api_key:
-                    print(f"No API key provided for {self.provider_name}")
+                    logger.warning(f"No API key provided for {self.provider_name}")
                     self.available = False
                     return
                 
@@ -65,12 +73,12 @@ class LLMClient:
                     self.model
                 )
                 self.available = True
-                print(f"Successfully initialized {self.provider_name} with LangChain")
+                logger.info(f"Successfully initialized {self.provider_name} with LangChain")
             else:
-                print(f"Unknown LLM provider: {self.provider_name}")
+                logger.error(f"Unknown LLM provider: {self.provider_name}")
                 self.available = False
         except Exception as e:
-            print(f"Failed to initialize {self.provider_name}: {str(e)}")
+            logger.error(f"Failed to initialize {self.provider_name}: {str(e)}")
             self.available = False
     
     def _convert_messages(self, messages: List[LLMMessage]) -> List:
@@ -90,12 +98,58 @@ class LLMClient:
         if not self.available or not self.llm_client:
             raise Exception(f"{self.provider_name} client not available")
         
+        # Generate unique request ID for tracking
+        request_id = str(uuid.uuid4())[:8]
+        
+        # Log the outgoing prompt/messages
+        self._log_llm_request(messages, request_id, **kwargs)
+        
         try:
             langchain_messages = self._convert_messages(messages)
             response = await self.llm_client.ainvoke(langchain_messages)
+            
+            # Log the response
+            self._log_llm_response(response.content, request_id)
+            
             return response.content
         except Exception as e:
+            # Log the error
+            self._log_llm_error(str(e), request_id)
             raise Exception(f"{self.provider_name} API error: {str(e)}")
+    
+    def _log_llm_request(self, messages: List[LLMMessage], request_id: str, **kwargs):
+        """Log the outgoing LLM request."""
+        llm_comm_logger.info(f"=== LLM REQUEST [{self.provider_name}] [ID: {request_id}] ===")
+        llm_comm_logger.info(f"Request ID: {request_id}")
+        llm_comm_logger.info(f"Provider: {self.provider_name}")
+        llm_comm_logger.info(f"Model: {self.model}")
+        llm_comm_logger.info(f"Temperature: {self.temperature}")
+        if kwargs:
+            llm_comm_logger.info(f"Additional kwargs: {kwargs}")
+        
+        llm_comm_logger.info("--- MESSAGES ---")
+        for i, msg in enumerate(messages):
+            llm_comm_logger.info(f"Message {i+1} [{msg.role.upper()}]:")
+            llm_comm_logger.info(f"{msg.content}")
+            llm_comm_logger.info("---")
+        
+        llm_comm_logger.info(f"=== END REQUEST [ID: {request_id}] ===")
+    
+    def _log_llm_response(self, response_content: str, request_id: str):
+        """Log the LLM response."""
+        llm_comm_logger.info(f"=== LLM RESPONSE [{self.provider_name}] [ID: {request_id}] ===")
+        llm_comm_logger.info(f"Request ID: {request_id}")
+        llm_comm_logger.info(f"Response length: {len(response_content)} characters")
+        llm_comm_logger.info("--- RESPONSE CONTENT ---")
+        llm_comm_logger.info(response_content)
+        llm_comm_logger.info(f"=== END RESPONSE [ID: {request_id}] ===")
+    
+    def _log_llm_error(self, error_message: str, request_id: str):
+        """Log LLM communication errors."""
+        llm_comm_logger.error(f"=== LLM ERROR [{self.provider_name}] [ID: {request_id}] ===")
+        llm_comm_logger.error(f"Request ID: {request_id}")
+        llm_comm_logger.error(f"Error: {error_message}")
+        llm_comm_logger.error(f"=== END ERROR [ID: {request_id}] ===")
     
     async def analyze_alert(self, 
                           alert_data: Dict, 
@@ -105,6 +159,9 @@ class LLMClient:
         """Analyze an alert using any LLM provider via LangChain."""
         if not self.available:
             raise Exception(f"{self.provider_name} client not available")
+        
+        # Log the context of this alert analysis
+        logger.info(f"Starting alert analysis with {self.provider_name} - Alert: {alert_data.get('alert', 'unknown')}")
         
         # Build comprehensive prompt
         prompt = self.prompt_builder.build_analysis_prompt(
@@ -124,8 +181,11 @@ class LLMClient:
         ]
         
         try:
-            return await self.generate_response(messages, **kwargs)
+            result = await self.generate_response(messages, **kwargs)
+            logger.info(f"Alert analysis completed with {self.provider_name}")
+            return result
         except Exception as e:
+            logger.error(f"Alert analysis failed with {self.provider_name}: {str(e)}")
             raise Exception(f"{self.provider_name} analysis error: {str(e)}")
     
     async def determine_mcp_tools(self,
@@ -136,6 +196,9 @@ class LLMClient:
         """Determine which MCP tools to call based on alert and runbook."""
         if not self.available:
             raise Exception(f"{self.provider_name} client not available")
+        
+        # Log the context of this tool selection
+        logger.info(f"Starting MCP tool selection with {self.provider_name} - Alert: {alert_data.get('alert', 'unknown')}")
         
         # Build prompt for tool selection
         prompt = self.prompt_builder.build_mcp_tool_selection_prompt(
@@ -188,11 +251,14 @@ class LLMClient:
                     if field not in tool_call:
                         raise ValueError(f"Missing required field: {field}")
             
+            logger.info(f"MCP tool selection completed with {self.provider_name} - Selected {len(tools_to_call)} tools")
             return tools_to_call
             
         except json.JSONDecodeError as e:
+            logger.error(f"MCP tool selection failed with {self.provider_name} - JSON parsing error: {str(e)}")
             raise Exception(f"Failed to parse LLM response as JSON: {str(e)}")
         except Exception as e:
+            logger.error(f"MCP tool selection failed with {self.provider_name}: {str(e)}")
             raise Exception(f"{self.provider_name} tool selection error: {str(e)}")
 
 
@@ -212,16 +278,16 @@ class LLMManager:
                 config = self.settings.get_llm_config(provider_name)
                 
                 if not config.get("api_key"):
-                    print(f"Skipping {provider_name}: No API key provided")
+                    logger.warning(f"Skipping {provider_name}: No API key provided")
                     continue
                 
                 # Use unified client for all providers
                 client = LLMClient(provider_name, config)
                 self.clients[provider_name] = client
-                print(f"Initialized LLM client: {provider_name}")
+                logger.info(f"Initialized LLM client: {provider_name}")
                 
             except Exception as e:
-                print(f"Failed to initialize LLM client {provider_name}: {str(e)}")
+                logger.error(f"Failed to initialize LLM client {provider_name}: {str(e)}")
     
     def get_client(self, provider: str = None) -> Optional[LLMClient]:
         """Get an LLM client by provider name."""

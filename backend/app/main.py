@@ -16,6 +16,10 @@ from app.config.settings import get_settings
 from app.models.alert import Alert, AlertResponse, ProcessingStatus
 from app.services.alert_service import AlertService
 from app.services.websocket_manager import WebSocketManager
+from app.utils.logger import setup_logging, get_module_logger
+
+# Setup logger for this module
+logger = get_module_logger(__name__)
 
 # Global state for processing status tracking
 processing_status: Dict[str, ProcessingStatus] = {}
@@ -30,17 +34,21 @@ async def lifespan(app: FastAPI):
     
     # Initialize services
     settings = get_settings()
+    
+    # Setup logging
+    setup_logging(settings.log_level)
+    
     alert_service = AlertService(settings)
     websocket_manager = WebSocketManager()
     
     # Startup
     await alert_service.initialize()
-    print("SRE AI Agent started successfully!")
+    logger.info("SRE AI Agent started successfully!")
     
     yield
     
     # Shutdown
-    print("SRE AI Agent shutting down...")
+    logger.info("SRE AI Agent shutting down...")
 
 
 # Create FastAPI application

@@ -12,6 +12,10 @@ from app.services.runbook_service import RunbookService
 from app.integrations.mcp.mcp_client import MCPClient
 from app.integrations.llm.client import LLMManager
 from app.utils.prompt_builder import PromptBuilder
+from app.utils.logger import get_module_logger
+
+# Setup logger for this module
+logger = get_module_logger(__name__)
 
 
 class AlertService:
@@ -29,7 +33,7 @@ class AlertService:
         # Initialize MCP servers
         await self.mcp_client.initialize()
         
-        print("Alert service initialized successfully")
+        logger.info("Alert service initialized successfully")
     
     async def process_alert(self, 
                           alert: Alert, 
@@ -84,7 +88,7 @@ class AlertService:
         # Get the default LLM client
         llm_client = self.llm_manager.get_client()
         if not llm_client:
-            print("ERROR: No LLM client available")
+            logger.error("No LLM client available")
             # Fallback to basic tool selection if no LLM is available
             return self._get_fallback_tools(alert)
         
@@ -110,7 +114,7 @@ class AlertService:
             return tools_to_call
             
         except Exception as e:
-            print(f"ERROR: LLM tool selection failed: {str(e)}")
+            logger.error(f"LLM tool selection failed: {str(e)}")
             # Fallback to basic tool selection
             return self._get_fallback_tools(alert)
     
@@ -160,6 +164,8 @@ class AlertService:
     
     async def _gather_mcp_data(self, alert: Alert, tools_to_call: list) -> Dict:
         """Gather data from MCP servers based on the determined tools."""
+        logger.info(f"Starting MCP data gathering for alert: {alert.alert} - {len(tools_to_call)} tools to call")
+        
         mcp_data = {}
         
         # Group tools by server for efficient processing
@@ -170,27 +176,38 @@ class AlertService:
                 tools_by_server[server] = []
             tools_by_server[server].append(tool_call)
         
+        logger.info(f"MCP tools grouped by server: {', '.join([f'{server}({len(tools)})' for server, tools in tools_by_server.items()])}")
+        
         # Execute tool calls for each server
         for server_name, server_tools in tools_by_server.items():
+            logger.info(f"Executing {len(server_tools)} tools on {server_name} server")
             server_data = {}
             
             for tool_call in server_tools:
                 try:
                     tool_name = tool_call["tool"]
                     parameters = tool_call["parameters"]
+                    reason = tool_call.get("reason", "No reason provided")
+                    
+                    logger.info(f"Calling {server_name}.{tool_name} - Reason: {reason}")
                     
                     result = await self.mcp_client.call_tool(
                         server_name, tool_name, parameters
                     )
                     
                     server_data[f"{tool_name}_result"] = result
+                    logger.info(f"Successfully executed {server_name}.{tool_name}")
                     
                 except Exception as e:
                     server_data[f"{tool_call['tool']}_error"] = str(e)
-                    print(f"Error calling {server_name}.{tool_call['tool']}: {str(e)}")
+                    logger.error(f"Error calling {server_name}.{tool_call['tool']}: {str(e)}")
             
             if server_data:
                 mcp_data[server_name] = server_data
+                logger.info(f"Collected {len(server_data)} results from {server_name}")
+        
+        total_results = sum(len(data) for data in mcp_data.values())
+        logger.info(f"MCP data gathering completed - {total_results} total results collected")
         
         return mcp_data
     
