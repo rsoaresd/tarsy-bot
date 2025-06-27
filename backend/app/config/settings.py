@@ -86,6 +86,12 @@ class Settings(BaseSettings):
         }
     })
     
+    # Alert Processing Configuration
+    max_llm_mcp_iterations: int = Field(
+        default=5,
+        description="Maximum number of LLM->MCP iterative loops for multi-step runbook processing"
+    )
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

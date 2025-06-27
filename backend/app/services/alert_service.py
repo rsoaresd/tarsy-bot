@@ -4,7 +4,7 @@ Main alert processing service that orchestrates the entire workflow.
 
 import json
 import asyncio
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from app.config.settings import Settings
 from app.models.alert import Alert
@@ -38,85 +38,206 @@ class AlertService:
     async def process_alert(self, 
                           alert: Alert, 
                           progress_callback: Optional[Callable] = None) -> str:
-        """Process an alert through the complete workflow."""
+        """Process an alert through the complete iterative workflow."""
         
         try:
             # Step 1: Download and parse runbook
             if progress_callback:
-                await progress_callback(20, "Downloading runbook")
+                await progress_callback(10, "Downloading runbook")
             
             runbook_content = await self.runbook_service.download_runbook(alert.runbook)
             runbook_data = self.runbook_service.parse_runbook(runbook_content)
             
-            # Step 2: Get available MCP tools and let LLM determine which ones to call
+            # Step 2: Get available MCP tools
             if progress_callback:
-                await progress_callback(30, "Analyzing runbook and determining data requirements")
+                await progress_callback(15, "Getting available MCP tools")
             
-            # Get available tools from MCP servers
             available_tools = await self.mcp_client.list_tools()
             
-            # Use LLM to determine which tools to call
-            mcp_tools_to_call = await self._determine_mcp_tools_with_llm(alert, runbook_data, available_tools)
+            # Step 3: Iterative LLM->MCP loop processing
+            iteration_history = []
+            all_mcp_data = {}
+            max_iterations = self.settings.max_llm_mcp_iterations
             
-            # Step 3: Gather data from MCP servers
+            logger.info(f"Starting iterative processing - max iterations: {max_iterations}")
+            
+            for iteration in range(1, max_iterations + 1):
+                logger.info(f"=== Starting Iteration {iteration}/{max_iterations} ===")
+                
+                # Calculate progress for this iteration (20% to 85% of total progress)
+                iteration_progress_start = 20 + ((iteration - 1) * 65 // max_iterations)
+                iteration_progress_end = 20 + (iteration * 65 // max_iterations)
+                
+                if progress_callback:
+                    await progress_callback(
+                        iteration_progress_start, 
+                        f"Iteration {iteration}/{max_iterations}: Determining next steps"
+                    )
+                
+                # Determine what tools to call next (or if we should stop)
+                next_action = await self._determine_next_mcp_tools_with_llm(
+                    alert, runbook_data, available_tools, iteration_history, iteration
+                )
+                
+                # Apply safeguards to prevent infinite loops
+                total_tools_called = sum(len(it.get('tools_called', [])) for it in iteration_history)
+                total_data_points = sum(sum(len(data) if isinstance(data, list) else 1 for data in it.get('mcp_data', {}).values()) for it in iteration_history)
+                
+                # Hard stop conditions
+                should_force_stop = False
+                force_stop_reason = ""
+                
+                if iteration >= max_iterations:
+                    should_force_stop = True
+                    force_stop_reason = f"Reached maximum iterations ({max_iterations})"
+                elif total_tools_called >= 15:
+                    should_force_stop = True
+                    force_stop_reason = f"Called too many tools ({total_tools_called}) - likely sufficient data collected"
+                elif total_data_points >= 10 and iteration >= 3:
+                    should_force_stop = True
+                    force_stop_reason = f"Collected substantial data ({total_data_points} data points) over {iteration} iterations"
+                
+                if should_force_stop:
+                    logger.warning(f"Force stopping iteration loop: {force_stop_reason}")
+                    break
+                
+                if not next_action.get("continue", False):
+                    logger.info(f"LLM decided to stop after {iteration} iterations: {next_action.get('reasoning', 'No reason provided')}")
+                    break
+                
+                tools_to_call = next_action.get("tools", [])
+                if not tools_to_call:
+                    logger.info(f"No tools to call in iteration {iteration}, stopping")
+                    break
+                
+                # Update progress
+                if progress_callback:
+                    await progress_callback(
+                        iteration_progress_start + (iteration_progress_end - iteration_progress_start) // 3,
+                        f"Iteration {iteration}/{max_iterations}: Gathering data ({len(tools_to_call)} tools)"
+                    )
+                
+                # Execute the determined tools
+                iteration_mcp_data = await self._gather_mcp_data(alert, tools_to_call)
+                
+                # Update accumulated data
+                for server_name, server_data in iteration_mcp_data.items():
+                    if server_name not in all_mcp_data:
+                        all_mcp_data[server_name] = []
+                    # server_data is a list of results, so extend the list instead of update
+                    if isinstance(server_data, list):
+                        all_mcp_data[server_name].extend(server_data)
+                    else:
+                        # Handle legacy dict format if needed
+                        all_mcp_data[server_name].append(server_data)
+                
+                # Update progress
+                if progress_callback:
+                    await progress_callback(
+                        iteration_progress_start + 2 * (iteration_progress_end - iteration_progress_start) // 3,
+                        f"Iteration {iteration}/{max_iterations}: Analyzing results"
+                    )
+                
+                # Record this iteration in history (WITHOUT partial analysis first)
+                iteration_record = {
+                    "iteration": iteration,
+                    "reasoning": next_action.get("reasoning", ""),
+                    "tools_called": tools_to_call,
+                    "mcp_data": iteration_mcp_data,
+                    "partial_analysis": ""  # Will be filled after analysis
+                }
+                
+                # Add current iteration to history so partial analysis can see it
+                iteration_history.append(iteration_record)
+                
+                # Perform partial analysis of this iteration's results (with current data)
+                partial_analysis = await self._perform_partial_analysis(
+                    alert, runbook_data, iteration_history, iteration
+                )
+                
+                # Update the iteration record with the analysis
+                iteration_record["partial_analysis"] = partial_analysis
+                
+                logger.info(f"=== Completed Iteration {iteration}/{max_iterations} ===")
+                logger.info(f"Tools called: {len(tools_to_call)}, Data points: {sum(len(data) if isinstance(data, list) else 1 for data in iteration_mcp_data.values())}")
+            
+            # Step 4: Final comprehensive analysis
             if progress_callback:
-                await progress_callback(50, "Gathering system data from MCP servers")
+                await progress_callback(90, "Performing final comprehensive analysis")
             
-            mcp_data = await self._gather_mcp_data(alert, mcp_tools_to_call)
-            
-            # Step 4: Perform LLM analysis
-            if progress_callback:
-                await progress_callback(80, "Performing AI analysis")
-            
-            analysis_result = await self._perform_llm_analysis(alert, runbook_data, mcp_data)
+            final_analysis = await self._perform_final_analysis(alert, runbook_data, all_mcp_data, iteration_history)
             
             # Step 5: Complete
             if progress_callback:
                 await progress_callback(100, "Analysis complete")
             
-            return analysis_result
+            logger.info(f"Alert processing completed after {len(iteration_history)} iterations")
+            
+            return final_analysis
             
         except Exception as e:
             error_msg = f"Alert processing failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
             if progress_callback:
                 await progress_callback(0, error_msg)
             raise Exception(error_msg)
     
-    async def _determine_mcp_tools_with_llm(self, alert: Alert, runbook_data: Dict, available_tools: Dict) -> list:
-        """Use LLM to determine which MCP tools to call based on alert and runbook."""
+    async def _determine_next_mcp_tools_with_llm(self, 
+                                               alert: Alert, 
+                                               runbook_data: Dict, 
+                                               available_tools: Dict,
+                                               iteration_history: List[Dict],
+                                               current_iteration: int) -> Dict:
+        """Use LLM to determine which MCP tools to call based on current context."""
         
         # Get the default LLM client
         llm_client = self.llm_manager.get_client()
         if not llm_client:
             logger.error("No LLM client available")
-            # Fallback to basic tool selection if no LLM is available
-            return self._get_fallback_tools(alert)
+            # Fallback - assume we need to continue on first iteration
+            if current_iteration == 1:
+                tools = self._get_fallback_tools(alert)
+                return {"continue": len(tools) > 0, "tools": tools, "reasoning": "LLM not available, using fallback"}
+            else:
+                return {"continue": False, "reasoning": "LLM not available and past first iteration"}
         
         try:
             # Prepare alert data
             alert_data = alert.model_dump()
             
-            # Let the LLM determine which tools to call
-            tools_to_call = await llm_client.determine_mcp_tools(
-                alert_data, runbook_data, available_tools
-            )
-            
-            # Update cluster information in parameters
-            for tool_call in tools_to_call:
-                if "parameters" in tool_call and "cluster" in tool_call["parameters"]:
-                    # Replace placeholder with actual cluster
-                    tool_call["parameters"]["cluster"] = alert.cluster
-                if "parameters" in tool_call and "namespace" in tool_call["parameters"]:
-                    # Ensure namespace is set correctly
-                    if tool_call["parameters"]["namespace"] in ["namespace_name_here", ""]:
-                        tool_call["parameters"]["namespace"] = alert.namespace
-            
-            return tools_to_call
+            # For first iteration, use the original method
+            if current_iteration == 1:
+                tools_to_call = await llm_client.determine_mcp_tools(
+                    alert_data, runbook_data, available_tools
+                )
+                
+                # Update cluster information in parameters
+                for tool_call in tools_to_call:
+                    if "parameters" in tool_call and "cluster" in tool_call["parameters"]:
+                        tool_call["parameters"]["cluster"] = alert.cluster
+                    if "parameters" in tool_call and "namespace" in tool_call["parameters"]:
+                        if tool_call["parameters"]["namespace"] in ["namespace_name_here", ""]:
+                            tool_call["parameters"]["namespace"] = alert.namespace
+                
+                return {
+                    "continue": len(tools_to_call) > 0,
+                    "tools": tools_to_call,
+                    "reasoning": f"Initial tool selection - {len(tools_to_call)} tools determined"
+                }
+            else:
+                # For subsequent iterations, use the iterative method
+                return await llm_client.determine_next_mcp_tools(
+                    alert_data, runbook_data, available_tools, iteration_history, current_iteration
+                )
             
         except Exception as e:
             logger.error(f"LLM tool selection failed: {str(e)}")
-            # Fallback to basic tool selection
-            return self._get_fallback_tools(alert)
+            # Fallback based on iteration
+            if current_iteration == 1:
+                tools = self._get_fallback_tools(alert)
+                return {"continue": len(tools) > 0, "tools": tools, "reasoning": f"LLM failed, using fallback: {str(e)}"}
+            else:
+                return {"continue": False, "reasoning": f"LLM failed on iteration {current_iteration}: {str(e)}"}
     
     def _get_fallback_tools(self, alert: Alert) -> list:
         """Fallback tool selection when LLM is not available."""
@@ -181,7 +302,7 @@ class AlertService:
         # Execute tool calls for each server
         for server_name, server_tools in tools_by_server.items():
             logger.info(f"Executing {len(server_tools)} tools on {server_name} server")
-            server_data = {}
+            server_results = []  # Use a list to preserve all results with their metadata
             
             for tool_call in server_tools:
                 try:
@@ -195,22 +316,107 @@ class AlertService:
                         server_name, tool_name, parameters
                     )
                     
-                    server_data[f"{tool_name}_result"] = result
+                    # Store result with tool metadata
+                    server_results.append({
+                        'tool': tool_name,
+                        'parameters': parameters,
+                        'reason': reason,
+                        'result': result
+                    })
                     logger.info(f"Successfully executed {server_name}.{tool_name}")
                     
                 except Exception as e:
-                    server_data[f"{tool_call['tool']}_error"] = str(e)
+                    server_results.append({
+                        'tool': tool_call['tool'],
+                        'parameters': tool_call.get('parameters', {}),
+                        'reason': tool_call.get('reason', ''),
+                        'error': str(e)
+                    })
                     logger.error(f"Error calling {server_name}.{tool_call['tool']}: {str(e)}")
             
-            if server_data:
-                mcp_data[server_name] = server_data
-                logger.info(f"Collected {len(server_data)} results from {server_name}")
+            if server_results:
+                mcp_data[server_name] = server_results
+                logger.info(f"Collected {len(server_results)} results from {server_name}")
         
         total_results = sum(len(data) for data in mcp_data.values())
         logger.info(f"MCP data gathering completed - {total_results} total results collected")
         
         return mcp_data
     
+    async def _perform_partial_analysis(self,
+                                       alert: Alert,
+                                       runbook_data: Dict,
+                                       iteration_history: List[Dict],
+                                       current_iteration: int) -> str:
+        """Perform partial analysis of current iteration results."""
+        
+        # Prepare alert data for LLM
+        alert_data = alert.model_dump()
+        
+        try:
+            # Use the LLM manager to analyze partial results
+            analysis = await self.llm_manager.analyze_partial_results(
+                alert_data, runbook_data, iteration_history, current_iteration
+            )
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"Partial analysis failed: {str(e)}")
+            return f"Partial analysis error: {str(e)}"
+    
+    async def _perform_final_analysis(self,
+                                    alert: Alert,
+                                    runbook_data: Dict,
+                                    all_mcp_data: Dict,
+                                    iteration_history: List[Dict]) -> str:
+        """Perform final comprehensive analysis with all gathered data."""
+        
+        # Prepare alert data for LLM
+        alert_data = alert.model_dump()
+        
+        try:
+            # Use the enhanced LLM analysis that includes iteration context
+            analysis = await self._perform_llm_analysis_with_iterations(
+                alert, runbook_data, all_mcp_data, iteration_history
+            )
+            
+            return analysis
+            
+        except Exception as e:
+            # If LLM analysis fails, provide a comprehensive fallback
+            fallback_analysis = self._generate_comprehensive_fallback_analysis(
+                alert, runbook_data, all_mcp_data, iteration_history
+            )
+            return f"LLM Analysis Error: {str(e)}\n\n{fallback_analysis}"
+
+    async def _perform_llm_analysis_with_iterations(self,
+                                                  alert: Alert,
+                                                  runbook_data: Dict,
+                                                  mcp_data: Dict,
+                                                  iteration_history: List[Dict]) -> str:
+        """Perform LLM analysis including iteration context."""
+        
+        # Prepare alert data for LLM
+        alert_data = alert.model_dump()
+        
+        try:
+            # Use the LLM manager to analyze the alert with enhanced context
+            analysis = await self.llm_manager.analyze_alert(
+                alert_data, runbook_data, mcp_data
+            )
+            
+            # Add iteration summary to the analysis
+            if iteration_history:
+                iteration_summary = self._generate_iteration_summary(iteration_history)
+                analysis = f"{analysis}\n\n---\n\n## Iteration Summary\n\n{iteration_summary}"
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"LLM analysis with iterations failed: {str(e)}")
+            raise e
+
     async def _perform_llm_analysis(self, 
                                   alert: Alert, 
                                   runbook_data: Dict, 
@@ -258,7 +464,8 @@ class AlertService:
         ]
         
         for server_name, server_data in mcp_data.items():
-            analysis_parts.append(f"- {server_name}: {len(server_data)} data points collected")
+            data_count = len(server_data) if isinstance(server_data, list) else 1
+            analysis_parts.append(f"- {server_name}: {data_count} data points collected")
         
         analysis_parts.extend([
             "",
@@ -269,7 +476,155 @@ class AlertService:
         
         return "\n".join(analysis_parts)
     
+    def _generate_comprehensive_fallback_analysis(self, 
+                                                alert: Alert, 
+                                                runbook_data: Dict, 
+                                                all_mcp_data: Dict,
+                                                iteration_history: List[Dict]) -> str:
+        """Generate a comprehensive analysis when LLM is not available."""
+        
+        analysis_parts = [
+            "# Alert Analysis (Fallback Mode - LLM Not Available)",
+            "",
+            f"**Alert:** {alert.alert}",
+            f"**Severity:** {alert.severity}",
+            f"**Environment:** {alert.environment}",
+            f"**Cluster:** {alert.cluster}",
+            f"**Namespace:** {alert.namespace}",
+            f"**Message:** {alert.message}",
+            "",
+            "## Runbook Information",
+            f"- Raw content: {runbook_data.get('raw_content', 'No runbook available')}",
+            "",
+            "## Iterative Processing Summary",
+            f"- **Total Iterations:** {len(iteration_history)}",
+        ]
+        
+        # Add iteration details
+        for i, iteration in enumerate(iteration_history, 1):
+            analysis_parts.append(f"- **Iteration {i}:** {len(iteration.get('tools_called', []))} tools called")
+            if iteration.get('partial_analysis'):
+                analysis_parts.append(f"  - Findings: {iteration['partial_analysis'][:200]}...")
+        
+        analysis_parts.extend([
+            "",
+            "## System Data Collected",
+            "The following data was gathered from MCP servers across all iterations:",
+        ])
+        
+        total_data_points = 0
+        for server_name, server_data in all_mcp_data.items():
+            data_count = len(server_data) if isinstance(server_data, list) else 1
+            total_data_points += data_count
+            analysis_parts.append(f"- **{server_name}**: {data_count} data points collected")
+        
+        analysis_parts.extend([
+            f"- **Total**: {total_data_points} data points across all servers",
+            "",
+            "## Recommendation",
+            "Please review the runbook instructions, iteration findings, and system data manually.",
+            "LLM analysis was not available for automated insights.",
+            "",
+            "### Next Steps:",
+            "1. Review the partial analysis from each iteration above",
+            "2. Cross-reference findings with the runbook steps",
+            "3. Examine the collected system data for anomalies",
+            "4. Execute any remediation steps identified in the runbook",
+        ])
+        
+        return "\n".join(analysis_parts)
+    
+    def _generate_iteration_summary(self, iteration_history: List[Dict]) -> str:
+        """Generate a summary of all iterations for the final analysis."""
+        
+        if not iteration_history:
+            return "No iterations were performed."
+        
+        summary_parts = [
+            f"This analysis was completed through {len(iteration_history)} iterative steps:",
+            ""
+        ]
+        
+        for i, iteration in enumerate(iteration_history, 1):
+            tools_called = iteration.get('tools_called', [])
+            reasoning = iteration.get('reasoning', 'No reasoning provided')
+            
+            summary_parts.append(f"**Iteration {i}:**")
+            summary_parts.append(f"- **Reasoning:** {reasoning}")
+            summary_parts.append(f"- **Tools Called:** {len(tools_called)} tools")
+            
+            # List the tools
+            for tool in tools_called:
+                server = tool.get('server', 'unknown')
+                tool_name = tool.get('tool', 'unknown')
+                reason = tool.get('reason', 'No reason provided')
+                summary_parts.append(f"  - {server}.{tool_name}: {reason}")
+            
+            # Add partial analysis summary if available
+            if iteration.get('partial_analysis'):
+                # Take first 2 lines of partial analysis as summary  
+                partial_lines = iteration['partial_analysis'].split('\n')[:2]
+                partial_summary = ' '.join(partial_lines).strip()
+                if partial_summary:
+                    summary_parts.append(f"- **Key Findings:** {partial_summary}")
+            
+            summary_parts.append("")
+        
+        summary_parts.extend([
+            f"**Total MCP Tool Calls:** {sum(len(it.get('tools_called', [])) for it in iteration_history)}",
+            f"**Total Data Points Collected:** {sum(sum(len(data) if isinstance(data, list) else 1 for data in it.get('mcp_data', {}).values()) for it in iteration_history)}"
+        ])
+        
+        return "\n".join(summary_parts)
+    
     async def close(self):
         """Clean up resources."""
         await self.runbook_service.close()
-        await self.mcp_client.close() 
+        await self.mcp_client.close()
+
+    def _format_mcp_results(self, mcp_results: Dict[str, Any]) -> str:
+        """Format MCP results for LLM consumption"""
+        if not mcp_results:
+            return "No MCP data collected."
+        
+        formatted_parts = []
+        for server, data in mcp_results.items():
+            # Data should now always be a list
+            if isinstance(data, list):
+                data_count = len(data)
+                formatted_parts.append(f"**{server}**: {data_count} data points collected")
+                
+                # Format each result in the list
+                for item in data:
+                    tool_name = item.get('tool', 'unknown_tool')
+                    params = item.get('parameters', {})
+                    
+                    # Create a unique result key based on tool and parameters
+                    if tool_name == 'resources_list' and 'kind' in params:
+                        result_key = f"{tool_name}_{params['kind']}_result"
+                    elif tool_name == 'resources_get' and 'kind' in params:
+                        result_key = f"{tool_name}_{params['kind']}_result"
+                    else:
+                        # For other tools, use the tool name directly
+                        result_key = f"{tool_name}_result"
+                    
+                    result_key = result_key.replace('.', '_')
+                    
+                    # Handle both successful results and errors
+                    if 'result' in item:
+                        result = item['result']
+                        formatted_parts.append(f"  - **{result_key}**:")
+                        formatted_parts.append("```")
+                        formatted_parts.append(json.dumps({"result": result}, indent=2))
+                        formatted_parts.append("```")
+                    elif 'error' in item:
+                        formatted_parts.append(f"  - **{result_key}_error**: {item['error']}")
+            else:
+                # Handle unexpected non-list data (should not happen with new structure)
+                formatted_parts.append(f"**{server}**: 1 data point collected")
+                formatted_parts.append(f"  - **result**:")
+                formatted_parts.append("```")
+                formatted_parts.append(json.dumps(data, indent=2))
+                formatted_parts.append("```")
+        
+        return "\n".join(formatted_parts) 

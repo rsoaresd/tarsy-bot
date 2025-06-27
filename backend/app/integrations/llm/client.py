@@ -261,6 +261,124 @@ class LLMClient:
             logger.error(f"MCP tool selection failed with {self.provider_name}: {str(e)}")
             raise Exception(f"{self.provider_name} tool selection error: {str(e)}")
 
+    async def determine_next_mcp_tools(self,
+                                     alert_data: Dict,
+                                     runbook_data: Dict,
+                                     available_tools: Dict,
+                                     iteration_history: List[Dict],
+                                     current_iteration: int,
+                                     **kwargs) -> Dict:
+        """Determine next MCP tools to call based on current context and previous iterations."""
+        if not self.available:
+            raise Exception(f"{self.provider_name} client not available")
+        
+        logger.info(f"Starting iterative MCP tool selection with {self.provider_name} - Iteration {current_iteration}")
+        
+        # Build prompt for iterative tool selection
+        prompt = self.prompt_builder.build_iterative_mcp_tool_selection_prompt(
+            alert_data, runbook_data, available_tools, iteration_history, current_iteration
+        )
+        
+        # Create messages
+        messages = [
+            LLMMessage(
+                role="system",
+                content="You are an expert SRE analyzing alerts through multi-step runbooks. Based on the alert, runbook, available MCP tools, and previous iteration results, determine what tools should be called next or if the analysis is complete. Return only a valid JSON object with no additional text."
+            ),
+            LLMMessage(
+                role="user",
+                content=prompt
+            )
+        ]
+        
+        try:
+            response = await self.generate_response(messages, **kwargs)
+            
+            # Parse the JSON response
+            response = response.strip()
+            
+            # Find JSON object in the response (handle markdown code blocks)
+            if "```json" in response:
+                start = response.find("```json") + 7
+                end = response.find("```", start)
+                response = response[start:end].strip()
+            elif "```" in response:
+                start = response.find("```") + 3
+                end = response.find("```", start)
+                response = response[start:end].strip()
+            
+            # Parse the JSON
+            next_action = json.loads(response)
+            
+            # Validate the response format
+            if not isinstance(next_action, dict):
+                raise ValueError("Response must be a JSON object")
+            
+            # Check if the required fields are present
+            if "continue" not in next_action:
+                raise ValueError("Missing required field: continue")
+            
+            if next_action.get("continue", False):
+                if "tools" not in next_action or not isinstance(next_action["tools"], list):
+                    raise ValueError("When continue=true, 'tools' field must be a list")
+                
+                # Validate each tool call
+                for tool_call in next_action["tools"]:
+                    if not isinstance(tool_call, dict):
+                        raise ValueError("Each tool call must be a JSON object")
+                    
+                    required_fields = ["server", "tool", "parameters", "reason"]
+                    for field in required_fields:
+                        if field not in tool_call:
+                            raise ValueError(f"Missing required field: {field}")
+            
+            logger.info(f"Iterative MCP tool selection completed with {self.provider_name} - Continue: {next_action.get('continue', False)}")
+            return next_action
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Iterative MCP tool selection failed with {self.provider_name} - JSON parsing error: {str(e)}")
+            raise Exception(f"Failed to parse LLM response as JSON: {str(e)}")
+        except Exception as e:
+            logger.error(f"Iterative MCP tool selection failed with {self.provider_name}: {str(e)}")
+            raise Exception(f"{self.provider_name} iterative tool selection error: {str(e)}")
+
+    async def analyze_partial_results(self,
+                                    alert_data: Dict,
+                                    runbook_data: Dict,
+                                    iteration_history: List[Dict],
+                                    current_iteration: int,
+                                    **kwargs) -> str:
+        """Analyze partial results from current iteration to guide next steps."""
+        if not self.available:
+            raise Exception(f"{self.provider_name} client not available")
+        
+        logger.info(f"Starting partial analysis with {self.provider_name} - Iteration {current_iteration}")
+        
+        # Build prompt for partial analysis
+        prompt = self.prompt_builder.build_partial_analysis_prompt(
+            alert_data, runbook_data, iteration_history, current_iteration
+        )
+        
+        # Create messages
+        messages = [
+            LLMMessage(
+                role="system",
+                content="You are an expert SRE analyzing alerts through multi-step runbooks. Analyze the current findings and provide insights about what has been discovered so far and what might be needed next."
+            ),
+            LLMMessage(
+                role="user",
+                content=prompt
+            )
+        ]
+        
+        try:
+            result = await self.generate_response(messages, **kwargs)
+            logger.info(f"Partial analysis completed with {self.provider_name}")
+            return result
+        except Exception as e:
+            logger.error(f"Partial analysis failed with {self.provider_name}: {str(e)}")
+            raise Exception(f"{self.provider_name} partial analysis error: {str(e)}")
+
 
 class LLMManager:
     """Manages multiple LLM providers using LangChain."""
@@ -322,6 +440,39 @@ class LLMManager:
         
         return await client.determine_mcp_tools(alert_data, runbook_data, available_tools)
     
+    async def determine_next_mcp_tools(self,
+                                     alert_data: Dict,
+                                     runbook_data: Dict,
+                                     available_tools: Dict,
+                                     iteration_history: List[Dict],
+                                     current_iteration: int,
+                                     provider: str = None) -> Dict:
+        """Determine next MCP tools to call using the specified or default LLM provider."""
+        client = self.get_client(provider)
+        if not client:
+            available = list(self.clients.keys())
+            raise Exception(f"LLM provider not available. Available: {available}")
+        
+        return await client.determine_next_mcp_tools(
+            alert_data, runbook_data, available_tools, iteration_history, current_iteration
+        )
+
+    async def analyze_partial_results(self,
+                                    alert_data: Dict,
+                                    runbook_data: Dict,
+                                    iteration_history: List[Dict],
+                                    current_iteration: int,
+                                    provider: str = None) -> str:
+        """Analyze partial results using the specified or default LLM provider."""
+        client = self.get_client(provider)
+        if not client:
+            available = list(self.clients.keys())
+            raise Exception(f"LLM provider not available. Available: {available}")
+        
+        return await client.analyze_partial_results(
+            alert_data, runbook_data, iteration_history, current_iteration
+        )
+
     def list_available_providers(self) -> List[str]:
         """List available LLM providers."""
         return list(self.clients.keys()) 
