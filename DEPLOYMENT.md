@@ -1,75 +1,58 @@
 # SRE AI Agent - Deployment Guide
 
-This guide will help you deploy and run the SRE AI Agent in your environment.
+This guide covers advanced deployment scenarios, production setup, and troubleshooting.
 
-## Prerequisites
+## Documentation Overview
 
-### Required Software
-- **Python 3.11+** with uv package manager
-- **Node.js 18+** with npm
-- **Docker & Docker Compose** (for containerized deployment)
-- **Kubernetes MCP Server** (see MCP Setup section)
+- **[README.md](README.md)**: Project overview, features, and quick start
+- **[setup.sh](setup.sh)**: Automated setup script (recommended for first-time users)
+- **[DEPLOYMENT.md](DEPLOYMENT.md)**: This file - advanced deployment and development
+- **[backend/MCP_LLM_INTEGRATION.md](backend/MCP_LLM_INTEGRATION.md)**: Technical architecture details
 
-### Required API Keys
-- **LLM Provider API Key** (at least one):
-  - Gemini API key from Google AI Studio
-  - OpenAI API key 
-  - Grok API key from X.AI
-- **GitHub Token** (for private runbooks)
+> **Quick Start**: If you're new to the project, run `./setup.sh` for automated setup.
 
-## Quick Start (Development)
+## Overview
 
-### 1. Clone and Setup Environment
+The SRE AI Agent consists of three main components:
+- **Backend**: FastAPI service (Python)
+- **Frontend**: React application (Node.js)
+- **MCP Server**: Kubernetes integration via npx
 
-```bash
-# Copy environment template
-cp .env.example backend/.env
+## Environment Variables
 
-# Edit the environment file with your API keys
-vim backend/.env
-```
+All environment variables are documented in `backend/env.template`. Key variables:
 
-### 2. Configure Environment Variables
+### Required
+- **LLM API Keys**: `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `GROK_API_KEY`
+- **GitHub Token**: `GITHUB_TOKEN` (for runbook access)
 
-Edit `backend/.env`:
+### Optional
+- **MCP Configuration**: Automatically handled via npx
+- **CORS Origins**: `CORS_ORIGINS` (default: localhost:3001)
+- **Default LLM**: `DEFAULT_LLM_PROVIDER` (default: gemini)
 
-```env
-# LLM API Keys (at least one required)
-GEMINI_API_KEY=your_gemini_api_key_here
-OPENAI_API_KEY=your_openai_api_key_here
-GROK_API_KEY=your_grok_api_key_here
+## Manual Development Setup
 
-# GitHub Configuration
-GITHUB_TOKEN=your_github_token_here
+> **Note**: For automated setup, use `./setup.sh` instead of these manual steps.
 
-# MCP Server Configuration
-KUBERNETES_MCP_URL=http://localhost:8080
-
-# Application Settings
-DEFAULT_LLM_PROVIDER=gemini
-LOG_LEVEL=INFO
-HOST=0.0.0.0
-PORT=8000
-CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
-```
-
-### 3. Start Backend
+### 1. Backend Setup
 
 ```bash
 cd backend
 
-# Create virtual environment
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# Install dependencies using uv
+uv sync
 
-# Install dependencies
-uv pip install -r requirements.txt
+# Create environment file
+cp env.template .env
+# Edit .env with your API keys
 
-# Run the FastAPI server
+# Start the server
+source .venv/bin/activate
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 4. Start Frontend
+### 2. Frontend Setup
 
 ```bash
 cd frontend
@@ -77,70 +60,120 @@ cd frontend
 # Install dependencies
 npm install
 
-# Start development server
-npm start
+# Start development server (with custom port)
+PORT=3001 npm start
 ```
 
-### 5. Access the Application
+### 3. Service URLs
 
 - **Frontend**: http://localhost:3001
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
+- **MCP Server**: Automatically started via npx
 
-## MCP Server Setup
+## MCP Server Configuration
 
-### Kubernetes MCP Server
+The application uses the official MCP SDK to automatically start the Kubernetes MCP server via npx. No manual MCP server setup is required.
 
-The application requires a Kubernetes MCP Server to gather system information. 
+### How It Works
 
-#### Option 1: Use the Reference Implementation
+1. **Automatic Startup**: The backend automatically starts the MCP server using:
+   ```bash
+   npx -y kubernetes-mcp-server@latest
+   ```
+
+2. **Configuration**: Configured in `backend/app/config/settings.py`:
+   ```python
+   mcp_servers = {
+       "kubernetes": {
+           "type": "kubernetes",
+           "enabled": True,
+           "command": "npx",
+           "args": ["-y", "kubernetes-mcp-server@latest"]
+       }
+   }
+   ```
+
+3. **Communication**: Uses stdio-based communication via the MCP SDK
+
+### For Testing Without Kubernetes
+
+If you need to test without a real Kubernetes cluster, you can create a mock MCP server:
 
 ```bash
-# Clone the Kubernetes MCP server
-git clone https://github.com/manusa/kubernetes-mcp-server
-cd kubernetes-mcp-server
+# Create a simple mock server script
+cat > mock_mcp_server.py << 'EOF'
+#!/usr/bin/env python3
+"""Mock MCP Server for testing the SRE AI Agent"""
 
-# Follow the setup instructions in that repository
-# Ensure it's running on localhost:8080
-```
-
-#### Option 2: Mock MCP Server (Testing)
-
-For testing without a real Kubernetes cluster:
-
-```bash
-# Run a simple mock server
-python -c "
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import asyncio
 import json
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent
 
-class MockMCPHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/health':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({'status': 'healthy'}).encode())
-        elif self.path == '/tools':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            tools = {'tools': [{'name': 'get_namespace', 'description': 'Get namespace info'}]}
-            self.wfile.write(json.dumps(tools).encode())
-    
-    def do_POST(self):
-        if self.path == '/tools/call':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            result = {'status': 'success', 'data': 'Mock MCP response'}
-            self.wfile.write(json.dumps(result).encode())
+# Create server instance
+server = Server("mock-kubernetes-mcp")
 
-server = HTTPServer(('localhost', 8080), MockMCPHandler)
-print('Mock MCP Server running on http://localhost:8080')
-server.serve_forever()
-"
+@server.list_tools()
+async def list_tools():
+    """List available tools"""
+    return [
+        Tool(
+            name="get_namespace",
+            description="Get namespace information",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "namespace": {"type": "string", "description": "Namespace name"}
+                },
+                "required": ["namespace"]
+            }
+        ),
+        Tool(
+            name="describe_pods",
+            description="Describe pods in a namespace",
+            inputSchema={
+                "type": "object", 
+                "properties": {
+                    "namespace": {"type": "string", "description": "Namespace name"}
+                },
+                "required": ["namespace"]
+            }
+        )
+    ]
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict):
+    """Handle tool calls"""
+    if name == "get_namespace":
+        namespace = arguments.get("namespace", "default")
+        return [TextContent(
+            type="text",
+            text=f"Mock namespace info for '{namespace}': Status=Active, CreationTime=2023-01-01T00:00:00Z"
+        )]
+    elif name == "describe_pods":
+        namespace = arguments.get("namespace", "default")
+        return [TextContent(
+            type="text",
+            text=f"Mock pods in namespace '{namespace}': pod-1 (Running), pod-2 (Pending)"
+        )]
+    else:
+        raise ValueError(f"Unknown tool: {name}")
+
+async def main():
+    """Run the mock MCP server"""
+    async with stdio_server() as streams:
+        await server.run(streams[0], streams[1])
+
+if __name__ == "__main__":
+    asyncio.run(main())
+EOF
+
+chmod +x mock_mcp_server.py
 ```
+
+Then update your MCP server configuration to use the mock server instead of the real one.
 
 ## Docker Deployment
 
@@ -173,9 +206,11 @@ WORKDIR /app
 # Install uv
 RUN pip install uv
 
-# Copy requirements
-COPY requirements.txt .
-RUN uv pip install --system -r requirements.txt
+# Copy project files
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies
+RUN uv sync --frozen --no-dev
 
 # Copy application
 COPY . .
@@ -184,7 +219,7 @@ COPY . .
 EXPOSE 8000
 
 # Run application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 EOF
 
 # Build and run
@@ -235,7 +270,7 @@ EOF
 
 # Build and run
 docker build -t sre-ai-agent-frontend .
-docker run -p 3000:80 sre-ai-agent-frontend
+docker run -p 3001:80 sre-ai-agent-frontend
 ```
 
 ## Production Deployment
@@ -244,10 +279,10 @@ docker run -p 3000:80 sre-ai-agent-frontend
 
 ```bash
 # Create production environment file
-cp .env.example .env.prod
+cp backend/env.template backend/.env.prod
 
 # Set production values
-vim .env.prod
+vim backend/.env.prod
 ```
 
 ### 2. Security Considerations
@@ -403,6 +438,86 @@ Consider implementing:
 - LLM token usage
 - WebSocket connection counts
 
+## Development
+
+### Adding New LLM Providers
+
+To add a new LLM provider:
+
+1. **Update Settings**: Add the provider configuration to `llm_providers` in `backend/app/config/settings.py`:
+   ```python
+   llm_providers: Dict = Field(default={
+       # ... existing providers ...
+       "new_provider": {
+           "model": "new-model-name",
+           "api_key_env": "NEW_PROVIDER_API_KEY",
+           "type": "new_provider"
+       }
+   })
+   ```
+
+2. **Add LangChain Integration**: Update `LLM_PROVIDERS` mapping in `backend/app/integrations/llm/client.py`:
+   ```python
+   LLM_PROVIDERS = {
+       # ... existing providers ...
+       "new_provider": lambda temp, api_key, model: NewProviderChat(
+           model=model or "default-model",
+           api_key=api_key,
+           temperature=temp
+       ),
+   }
+   ```
+
+3. **Update Environment Template**: Add the new API key field to `backend/env.template`:
+   ```env
+   # New Provider API Key
+   NEW_PROVIDER_API_KEY=your_new_provider_api_key_here
+   ```
+
+4. **Update Settings Class**: Add the new API key field to the `Settings` class:
+   ```python
+   new_provider_api_key: str = Field(default="")
+   ```
+
+5. **Update get_llm_config Method**: Add the new provider to the method:
+   ```python
+   def get_llm_config(self, provider: str) -> Dict:
+       # ... existing code ...
+       elif provider == "new_provider":
+           config["api_key"] = self.new_provider_api_key
+   ```
+
+The system uses LangChain for unified LLM access, so any LangChain-compatible provider can be easily integrated.
+
+### Adding New MCP Servers
+
+To add a new MCP server:
+
+1. **Update MCP Configuration**: Add to `mcp_servers` in `backend/app/config/settings.py`:
+   ```python
+   mcp_servers: Dict[str, Any] = Field(default={
+       # ... existing servers ...
+       "new_server": {
+           "type": "new_server",
+           "enabled": True,
+           "command": "npx",
+           "args": ["-y", "new-mcp-server@latest"]
+       }
+   })
+   ```
+
+2. **Update Alert Mapping**: Add the server to relevant alert types:
+   ```python
+   alert_runbook_mapping: Dict = Field(default={
+       "Alert Type": {
+           "default_runbook": "runbook_url",
+           "mcp_servers": ["kubernetes", "new_server"]
+       }
+   })
+   ```
+
+The MCP client will automatically initialize and use the new server.
+
 ## Support
 
 For issues and questions:
@@ -410,5 +525,7 @@ For issues and questions:
 2. Verify all prerequisites are met
 3. Test with a simple alert submission
 4. Check MCP server connectivity
+5. See [README.md](README.md) for basic usage
+6. Run `./setup.sh` for automated setup
 
 The SRE AI Agent is now ready for deployment and use! 

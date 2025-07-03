@@ -2,6 +2,15 @@
 
 An intelligent Site Reliability Engineering agent that automatically processes alerts, retrieves runbooks, and uses MCP (Model Context Protocol) servers to gather system information for comprehensive incident analysis.
 
+## Documentation
+
+- **[README.md](README.md)**: This file - project overview and quick start
+- **[setup.sh](setup.sh)**: Automated setup script (run this first!)
+- **[DEPLOYMENT.md](DEPLOYMENT.md)**: Advanced deployment, production setup, and development
+- **[backend/MCP_LLM_INTEGRATION.md](backend/MCP_LLM_INTEGRATION.md)**: Technical architecture details
+
+> **New Users**: Run `./setup.sh` to get started quickly!
+
 ## Key Features
 
 ### 🧠 LLM-Driven MCP Tool Selection
@@ -18,8 +27,8 @@ The SRE AI Agent consists of:
 
 - **Backend**: FastAPI-based service that processes alerts and orchestrates LLM analysis
 - **Frontend**: React TypeScript application for alert simulation and result viewing  
-- **MCP Integration**: Uses `mcp-use` library for seamless MCP server integration
-- **LLM Support**: Multiple LLM providers (OpenAI, Gemini, Anthropic, Grok)
+- **MCP Integration**: Uses official `mcp` library for seamless MCP server integration
+- **LLM Support**: Multiple LLM providers (OpenAI, Google, xAI)
 
 ## Features
 
@@ -50,13 +59,12 @@ sre/
 │   │   ├── services/       # Business logic services
 │   │   ├── integrations/   # MCP and LLM integrations
 │   │   │   ├── mcp/        # MCP server integrations
-│   │   │   │   └── mcp_use_client.py  # New mcp-use based client
+│   │   │   │   └── mcp_client.py  # Official MCP SDK client
 │   │   │   └── llm/        # LLM provider integrations
 │   │   ├── config/         # Configuration management
 │   │   └── utils/          # Utility functions
 │   ├── MCP_LLM_INTEGRATION.md  # Documentation for MCP/LLM integration
-│   ├── pyproject.toml      # uv project configuration
-│   └── requirements.txt    # Python dependencies
+│   └── pyproject.toml      # uv project configuration and dependencies
 ├── frontend/               # React TypeScript frontend
 │   ├── src/
 │   │   ├── components/     # React components
@@ -65,58 +73,39 @@ sre/
 │   │   └── utils/          # Utility functions
 │   ├── package.json        # Node.js dependencies
 │   └── tsconfig.json       # TypeScript configuration
-├── .env.example           # Environment variables template
+├── backend/env.template   # Environment variables template
 └── docker-compose.yml     # Docker setup for development
 ```
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- uv (Python package manager)
-- npx (for running Kubernetes MCP server)
-
-### Backend Setup
+### Automated Setup (Recommended)
 
 ```bash
-cd backend
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
-cp env.template .env
-# Edit .env with your API keys
-uvicorn app.main:app --reload --port 8000
+./setup.sh
 ```
 
-### Frontend Setup
+This will automatically:
+- Check prerequisites
+- Set up both backend and frontend
+- Create the environment file
+- Install all dependencies
+- Provide next steps for starting the services
 
-```bash
-cd frontend
-npm install
-npm start
-```
+### Manual Setup
+
+For advanced users or troubleshooting, see [DEPLOYMENT.md](DEPLOYMENT.md) for detailed manual setup instructions.
 
 ### Environment Configuration
 
-Copy `backend/env.template` to `backend/.env` and configure:
+The setup script will create `backend/.env` from the template. You'll need to add your API keys:
 
-```env
-# GitHub Configuration (for downloading runbooks)
-GITHUB_TOKEN=your_github_token_here
+- **Google (Gemini)**: Get from [Google AI Studio](https://aistudio.google.com/app/apikey)
+- **OpenAI**: Get from [OpenAI Platform](https://platform.openai.com/api-keys)
+- **xAI (Grok)**: Get from [xAI Console](https://console.x.ai/)
+- **GitHub Token**: Get from [GitHub Settings](https://github.com/settings/tokens)
 
-# LLM API Keys (add the ones you want to use)
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GOOGLE_API_KEY=AI...
-X_AI_API_KEY=xai-...
-
-# Default LLM Provider
-DEFAULT_LLM_PROVIDER=openai
-```
-
-Note: The Kubernetes MCP server is now automatically configured to use `npx` command.
+> **Note**: You need at least one LLM API key and the GitHub token for the agent to work.
 
 ## Usage
 
@@ -137,6 +126,8 @@ The LLM-driven approach means new alert types can be handled without code change
 
 ## API Endpoints
 
+- `GET /` - Health check endpoint
+- `GET /health` - Health check endpoint
 - `POST /alerts` - Submit a new alert for processing
 - `GET /alert-types` - Get supported alert types
 - `GET /processing-status/{alert_id}` - Get processing status
@@ -144,17 +135,26 @@ The LLM-driven approach means new alert types can be handled without code change
 
 ## Development
 
-### Adding New Alert Types
+### Adding New Components
 
-1. Add the alert type to `supported_alerts` in `config/settings.py`
-2. Create a runbook in your GitHub repository
-3. The LLM will automatically determine relevant MCP tools
+- **Alert Types**: Add to `supported_alerts` in `config/settings.py` and create corresponding runbooks
+- **MCP Servers**: Update `mcp_servers` configuration in `settings.py` 
+- **LLM Providers**: See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions
 
-### Adding New MCP Servers
+### Running Tests
 
-1. Update the MCP server configuration in `settings.py`
-2. The new server's tools will be automatically available to the LLM
+```bash
+# Backend tests
+cd backend
+source .venv/bin/activate
+python test_mcp_integration.py
 
-### Adding New LLM Providers
+# Or use the setup script option
+./setup.sh
+# Choose 'y' when prompted for MCP integration test
+```
 
-Follow the existing pattern in `integrations/llm/` - the system uses LangChain for unified LLM access.
+### Architecture Documents
+
+- [MCP_LLM_INTEGRATION.md](backend/MCP_LLM_INTEGRATION.md) - Technical details on MCP and LLM integration
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Production deployment and advanced configuration

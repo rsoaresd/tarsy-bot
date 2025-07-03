@@ -8,6 +8,13 @@ set -e
 echo "🚀 SRE AI Agent - Quick Setup"
 echo "================================"
 
+# Check if we're in the correct directory
+if [ ! -f "README.md" ] || [ ! -d "backend" ] || [ ! -d "frontend" ]; then
+    echo "❌ Error: Please run this script from the root of the SRE AI Agent project"
+    echo "   The script expects to find backend/, frontend/, and README.md"
+    exit 1
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -56,8 +63,10 @@ else
 fi
 
 # Check Python version
-python_version=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1,2)
-if [ $(echo "$python_version >= 3.11" | bc -l) -eq 0 ]; then
+python_version=$(python3 --version | cut -d' ' -f2)
+python_major=$(echo $python_version | cut -d'.' -f1)
+python_minor=$(echo $python_version | cut -d'.' -f2)
+if [ $python_major -lt 3 ] || [ $python_major -eq 3 -a $python_minor -lt 11 ]; then
     echo "❌ Error: Python 3.11+ is required. Found: $python_version"
     exit 1
 fi
@@ -79,17 +88,32 @@ cd backend
 # Check if uv is installed, if not try to install it
 if ! command -v uv &> /dev/null; then
     echo "📦 Installing uv package manager..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    source $HOME/.cargo/env
+    if curl -LsSf https://astral.sh/uv/install.sh | sh; then
+        source $HOME/.cargo/env
+        if ! command -v uv &> /dev/null; then
+            print_status "error" "uv installation failed. Please install uv manually from https://docs.astral.sh/uv/"
+            exit 1
+        fi
+        print_status "success" "uv installed successfully"
+    else
+        print_status "error" "Failed to install uv. Please install manually from https://docs.astral.sh/uv/"
+        exit 1
+    fi
+else
+    print_status "success" "uv package manager found"
 fi
 
 # Create virtual environment and install dependencies
-echo "📦 Creating Python virtual environment..."
-uv venv
+echo "📦 Setting up Python environment and dependencies..."
+uv sync
 
-echo "📦 Installing Python dependencies..."
-source .venv/bin/activate
-uv pip install -r requirements.txt
+# Verify virtual environment was created
+if [ ! -d ".venv" ]; then
+    print_status "error" "Virtual environment was not created. Please check uv installation."
+    exit 1
+else
+    print_status "success" "Virtual environment and dependencies installed"
+fi
 
 # Setup environment file
 if [ ! -f ".env" ]; then
@@ -97,7 +121,7 @@ if [ ! -f ".env" ]; then
     cp env.template .env
     echo ""
     echo "⚠️  IMPORTANT: Edit backend/.env with your API keys!"
-    echo "   You need at least one LLM API key and a GitHub token."
+    echo "   You need at least one LLM API key (Google/OpenAI/xAI) and a GitHub token."
     echo ""
 else
     print_status "success" ".env file already exists"
@@ -113,6 +137,14 @@ cd frontend
 echo "📦 Installing Node.js dependencies..."
 npm install
 
+# Verify node_modules was created
+if [ ! -d "node_modules" ]; then
+    print_status "error" "Node.js dependencies installation failed."
+    exit 1
+else
+    print_status "success" "Node.js dependencies installed"
+fi
+
 cd ..
 
 echo ""
@@ -120,41 +152,15 @@ echo "🎉 Setup completed successfully!"
 echo ""
 echo "📋 Next steps:"
 echo "1. Edit backend/.env with your API keys:"
-echo "   - Get Gemini API key: https://aistudio.google.com/app/apikey"
+echo "   - Get Google (Gemini) API key: https://aistudio.google.com/app/apikey"
 echo "   - Get OpenAI API key: https://platform.openai.com/api-keys"
+echo "   - Get xAI (Grok) API key: https://console.x.ai/"
 echo "   - Get GitHub token: https://github.com/settings/tokens"
 echo ""
-echo "2. Start the Kubernetes MCP Server (or use mock server):"
-echo "   python3 -c \"
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import json
-
-class MockMCPHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/health':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({'status': 'healthy'}).encode())
-        elif self.path == '/tools':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            tools = {'tools': [{'name': 'get_namespace', 'description': 'Get namespace info'}]}
-            self.wfile.write(json.dumps(tools).encode())
-    
-    def do_POST(self):
-        if self.path == '/tools/call':
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            result = {'status': 'success', 'data': 'Mock MCP response'}
-            self.wfile.write(json.dumps(result).encode())
-
-server = HTTPServer(('localhost', 8080), MockMCPHandler)
-print('Mock MCP Server running on http://localhost:8080')
-server.serve_forever()
-\""
+echo "2. Start the Kubernetes MCP Server:"
+echo "   For testing: The MCP server is automatically started using npx"
+echo "   For production: Set up your own Kubernetes MCP server"
+echo "   Alternative: Use the mock server script in DEPLOYMENT.md"
 echo ""
 echo "3. Start the backend (in a new terminal):"
 echo "   cd backend"
@@ -163,7 +169,7 @@ echo "   uvicorn app.main:app --reload --port 8000"
 echo ""
 echo "4. Start the frontend (in another terminal):"
 echo "   cd frontend"
-echo "   npm start"
+echo "   PORT=3001 npm start"
 echo ""
 echo "5. Open your browser to: http://localhost:3001"
 echo ""
@@ -175,11 +181,15 @@ echo ""
 echo "📚 For more information, see README.md and DEPLOYMENT.md"
 
 # Test MCP integration (optional)
-echo -e "\nWould you like to test the MCP integration? (y/n)"
+echo -e "\n❓ Would you like to test the MCP integration? (y/n)"
 read -r response
 if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
     cd backend
     source .venv/bin/activate || . .venv/Scripts/activate
-    echo "Running MCP integration test..."
-    python test_mcp_integration.py
+    echo "🧪 Running MCP integration test..."
+    if python test_mcp_integration.py; then
+        print_status "success" "MCP integration test passed"
+    else
+        print_status "warning" "MCP integration test failed - check your environment configuration"
+    fi
 fi 
