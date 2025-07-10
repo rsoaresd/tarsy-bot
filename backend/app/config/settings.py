@@ -49,7 +49,7 @@ class Settings(BaseSettings):
             "type": "gemini"
         },
         "openai": {
-            "model": "gpt-4",
+            "model": "gpt-4-1106-preview",
             "api_key_env": "OPENAI_API_KEY", 
             "type": "openai"
         },

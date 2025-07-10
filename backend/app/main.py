@@ -126,9 +126,9 @@ async def get_processing_status(alert_id: str):
 @app.websocket("/ws/{alert_id}")
 async def websocket_endpoint(websocket: WebSocket, alert_id: str):
     """WebSocket endpoint for real-time progress updates."""
-    await websocket_manager.connect(websocket, alert_id)
-    
     try:
+        await websocket_manager.connect(websocket, alert_id)
+        
         # Send initial status if available
         if alert_id in processing_status:
             await websocket_manager.send_status_update(
@@ -138,12 +138,17 @@ async def websocket_endpoint(websocket: WebSocket, alert_id: str):
         # Keep connection alive and handle messages
         while True:
             try:
-                await websocket.receive_text()
+                # Wait for any message from client (ping/pong or actual data)
+                message = await websocket.receive_text()
+                # Echo back or handle client messages if needed
+                # For now, we just receive and continue
             except WebSocketDisconnect:
                 break
                 
     except WebSocketDisconnect:
         pass
+    except Exception as e:
+        logger.error(f"WebSocket error for alert {alert_id}: {str(e)}")
     finally:
         websocket_manager.disconnect(websocket, alert_id)
 
