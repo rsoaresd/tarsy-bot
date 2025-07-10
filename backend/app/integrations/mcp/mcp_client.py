@@ -10,8 +10,6 @@ from contextlib import AsyncExitStack
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from langchain.tools import Tool
-from langchain_core.utils.function_calling import convert_to_openai_function
 
 from app.config.settings import Settings
 from app.utils.logger import get_module_logger
@@ -130,57 +128,6 @@ class MCPClient:
                     all_tools[name] = []
         
         return all_tools
-    
-    async def create_langchain_tools(self, server_name: Optional[str] = None) -> List[Tool]:
-        """Create LangChain tools from MCP servers."""
-        if not self._initialized:
-            await self.initialize()
-        
-        langchain_tools = []
-        
-        if server_name:
-            # Create tools from specific server
-            if server_name in self.sessions:
-                tools = await self._create_tools_for_server(server_name)
-                langchain_tools.extend(tools)
-        else:
-            # Create tools from all servers
-            for name in self.sessions.keys():
-                tools = await self._create_tools_for_server(name)
-                langchain_tools.extend(tools)
-        
-        return langchain_tools
-    
-    async def _create_tools_for_server(self, server_name: str) -> List[Tool]:
-        """Create LangChain tools for a specific server."""
-        tools = []
-        session = self.sessions.get(server_name)
-        
-        if not session:
-            return tools
-        
-        try:
-            tools_result = await session.list_tools()
-            
-            for tool in tools_result.tools:
-                # Create a function that calls the MCP tool
-                async def call_tool(server=server_name, tool_name=tool.name, **kwargs):
-                    return await self.call_tool(server, tool_name, kwargs)
-                
-                # Create LangChain tool
-                langchain_tool = Tool(
-                    name=f"{server_name}_{tool.name}",
-                    description=tool.description or f"Tool {tool.name} from {server_name}",
-                    func=lambda **kwargs: asyncio.run(call_tool(**kwargs)),
-                    coroutine=call_tool
-                )
-                
-                tools.append(langchain_tool)
-                
-        except Exception as e:
-            logger.error(f"Error creating tools for {server_name}: {str(e)}")
-        
-        return tools
     
     async def call_tool(self, server_name: str, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Call a specific tool on an MCP server."""
