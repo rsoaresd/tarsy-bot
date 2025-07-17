@@ -7,7 +7,8 @@ This guide covers advanced deployment scenarios, production setup, and troublesh
 - **[README.md](README.md)**: Project overview, features, and quick start
 - **[setup.sh](setup.sh)**: Automated setup script (recommended for first-time users)
 - **[DEPLOYMENT.md](DEPLOYMENT.md)**: This file - advanced deployment and development
-- **[backend/MCP_LLM_INTEGRATION.md](backend/MCP_LLM_INTEGRATION.md)**: Technical architecture details
+- **[doc/requirements.md](doc/requirements.md)**: Application requirements and specifications
+- **[doc/design.md](doc/design.md)**: System design and architecture documentation
 
 > **Quick Start**: If you're new to the project, run `./setup.sh` for automated setup.
 
@@ -506,14 +507,12 @@ To add a new MCP server:
    })
    ```
 
-2. **Update Alert Mapping**: Add the server to relevant alert types:
+2. **Configure Alert Type Support**: Add the alert type to the supported alerts list:
    ```python
-   alert_runbook_mapping: Dict = Field(default={
-       "Alert Type": {
-           "default_runbook": "runbook_url",
-           "mcp_servers": ["kubernetes", "new_server"]
-       }
-   })
+   supported_alerts: List[str] = Field(default=[
+       "Namespace is stuck in Terminating",
+       "New Alert Type"
+   ])
    ```
 
 The MCP client will automatically initialize and use the new server.

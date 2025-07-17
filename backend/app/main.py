@@ -10,7 +10,6 @@ from typing import Dict, List
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from app.config.settings import get_settings
 from app.models.alert import Alert, AlertResponse, ProcessingStatus
@@ -84,7 +83,13 @@ async def health_check():
 
 @app.get("/alert-types", response_model=List[str])
 async def get_alert_types():
-    """Get supported alert types."""
+    """Get supported alert types for the development/testing web interface.
+    
+    This endpoint returns a list of alert types used only for dropdown selection
+    in the development/testing web interface. In production, external clients
+    (like Alert Manager) can submit any alert type. The system analyzes all
+    alert types using the provided runbook and all available MCP tools.
+    """
     return get_settings().supported_alerts
 
 

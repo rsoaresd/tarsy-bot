@@ -68,7 +68,12 @@ export class ApiService {
   }
 
   /**
-   * Get supported alert types
+   * Get supported alert types for the development/testing web interface dropdown.
+   * 
+   * NOTE: These alert types are used only for dropdown selection in this
+   * development/testing interface. In production, external clients (like Alert Manager)
+   * can submit any alert type. The system analyzes all alert types using the provided
+   * runbook and all available MCP tools.
    */
   static async getAlertTypes(): Promise<string[]> {
     try {

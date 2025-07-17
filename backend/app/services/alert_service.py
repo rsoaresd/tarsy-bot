@@ -3,7 +3,6 @@ Main alert processing service that orchestrates the entire workflow.
 """
 
 import json
-import asyncio
 from typing import Any, Callable, Dict, List, Optional
 
 from app.config.settings import Settings
@@ -33,6 +32,12 @@ class AlertService:
         # Initialize MCP servers
         await self.mcp_client.initialize()
         
+        # Validate LLM availability
+        if not self.llm_manager.is_available():
+            available_providers = self.llm_manager.list_available_providers()
+            status = self.llm_manager.get_availability_status()
+            raise Exception(f"No LLM providers are available. Configured providers: {available_providers}, Status: {status}")
+        
         logger.info("Alert service initialized successfully")
     
     async def process_alert(self, 
@@ -40,13 +45,18 @@ class AlertService:
                           progress_callback: Optional[Callable] = None) -> str:
         """Process an alert through the complete iterative workflow."""
         
+        # Validate LLM availability before processing
+        if not self.llm_manager.is_available():
+            available_providers = self.llm_manager.list_available_providers()
+            status = self.llm_manager.get_availability_status()
+            raise Exception(f"Cannot process alert: No LLM providers are available. Configured providers: {available_providers}, Status: {status}")
+        
         try:
-            # Step 1: Download and parse runbook
+            # Step 1: Download runbook
             if progress_callback:
                 await progress_callback(10, "Downloading runbook")
             
             runbook_content = await self.runbook_service.download_runbook(alert.runbook)
-            runbook_data = self.runbook_service.parse_runbook(runbook_content)
             
             # Step 2: Get available MCP tools
             if progress_callback:
@@ -76,7 +86,7 @@ class AlertService:
                 
                 # Determine what tools to call next (or if we should stop)
                 next_action = await self._determine_next_mcp_tools_with_llm(
-                    alert, runbook_data, available_tools, iteration_history, iteration
+                    alert, runbook_content, available_tools, iteration_history, iteration
                 )
                 
                 # Apply safeguards to prevent infinite loops
@@ -90,10 +100,10 @@ class AlertService:
                 if iteration >= max_iterations:
                     should_force_stop = True
                     force_stop_reason = f"Reached maximum iterations ({max_iterations})"
-                elif total_tools_called >= 15:
+                elif total_tools_called >= self.settings.max_total_tool_calls:
                     should_force_stop = True
                     force_stop_reason = f"Called too many tools ({total_tools_called}) - likely sufficient data collected"
-                elif total_data_points >= 10 and iteration >= 3:
+                elif total_data_points >= self.settings.max_data_points and iteration >= 3:
                     should_force_stop = True
                     force_stop_reason = f"Collected substantial data ({total_data_points} data points) over {iteration} iterations"
                 
@@ -152,7 +162,7 @@ class AlertService:
                 
                 # Perform partial analysis of this iteration's results (with current data)
                 partial_analysis = await self._perform_partial_analysis(
-                    alert, runbook_data, iteration_history, iteration
+                    alert, runbook_content, iteration_history, iteration
                 )
                 
                 # Update the iteration record with the analysis
@@ -165,7 +175,7 @@ class AlertService:
             if progress_callback:
                 await progress_callback(90, "Performing final comprehensive analysis")
             
-            final_analysis = await self._perform_final_analysis(alert, runbook_data, all_mcp_data, iteration_history)
+            final_analysis = await self._perform_final_analysis(alert, runbook_content, all_mcp_data, iteration_history)
             
             # Step 5: Complete
             if progress_callback:
@@ -184,7 +194,7 @@ class AlertService:
     
     async def _determine_next_mcp_tools_with_llm(self, 
                                                alert: Alert, 
-                                               runbook_data: Dict, 
+                                               runbook_content: str, 
                                                available_tools: Dict,
                                                iteration_history: List[Dict],
                                                current_iteration: int) -> Dict:
@@ -194,94 +204,35 @@ class AlertService:
         llm_client = self.llm_manager.get_client()
         if not llm_client:
             logger.error("No LLM client available")
-            # Fallback - assume we need to continue on first iteration
-            if current_iteration == 1:
-                tools = self._get_fallback_tools(alert)
-                return {"continue": len(tools) > 0, "tools": tools, "reasoning": "LLM not available, using fallback"}
-            else:
-                return {"continue": False, "reasoning": "LLM not available and past first iteration"}
+            raise Exception("LLM client not available - cannot process alert without LLM")
         
-        try:
-            # Prepare alert data
-            alert_data = alert.model_dump()
-            
-            # For first iteration, use the original method
-            if current_iteration == 1:
-                tools_to_call = await llm_client.determine_mcp_tools(
-                    alert_data, runbook_data, available_tools
-                )
-                
-                # Update cluster information in parameters
-                for tool_call in tools_to_call:
-                    if "parameters" in tool_call and "cluster" in tool_call["parameters"]:
-                        tool_call["parameters"]["cluster"] = alert.cluster
-                    if "parameters" in tool_call and "namespace" in tool_call["parameters"]:
-                        if tool_call["parameters"]["namespace"] in ["namespace_name_here", ""]:
-                            tool_call["parameters"]["namespace"] = alert.namespace
-                
-                return {
-                    "continue": len(tools_to_call) > 0,
-                    "tools": tools_to_call,
-                    "reasoning": f"Initial tool selection - {len(tools_to_call)} tools determined"
-                }
-            else:
-                # For subsequent iterations, use the iterative method
-                return await llm_client.determine_next_mcp_tools(
-                    alert_data, runbook_data, available_tools, iteration_history, current_iteration
-                )
-            
-        except Exception as e:
-            logger.error(f"LLM tool selection failed: {str(e)}")
-            # Fallback based on iteration
-            if current_iteration == 1:
-                tools = self._get_fallback_tools(alert)
-                return {"continue": len(tools) > 0, "tools": tools, "reasoning": f"LLM failed, using fallback: {str(e)}"}
-            else:
-                return {"continue": False, "reasoning": f"LLM failed on iteration {current_iteration}: {str(e)}"}
-    
-    def _get_fallback_tools(self, alert: Alert) -> list:
-        """Fallback tool selection when LLM is not available."""
-        # Basic rule-based fallback for common alerts
-        # if alert.alert == "Namespace is stuck in Terminating":
-        #     return [
-        #         {
-        #             "server": "kubernetes",
-        #             "tool": "namespaces_list",
-        #             "parameters": {},
-        #             "reason": "List all namespaces to verify the stuck namespace"
-        #         },
-        #         {
-        #             "server": "kubernetes",
-        #             "tool": "resources_get",
-        #             "parameters": {
-        #                 "apiVersion": "v1",
-        #                 "kind": "Namespace",
-        #                 "name": alert.namespace
-        #             },
-        #             "reason": "Get namespace details including finalizers"
-        #         },
-        #         {
-        #             "server": "kubernetes",
-        #             "tool": "resources_list",
-        #             "parameters": {
-        #                 "apiVersion": "v1",
-        #                 "kind": "Pod",
-        #                 "namespace": alert.namespace
-        #             },
-        #             "reason": "List pods that might be preventing deletion"
-        #         },
-        #         {
-        #             "server": "kubernetes",
-        #             "tool": "events_list",
-        #             "parameters": {
-        #                 "namespace": alert.namespace
-        #             },
-        #             "reason": "Check for events that might explain the stuck state"
-        #         }
-        #     ]
+        # Prepare alert data
+        alert_data = alert.model_dump()
         
-        # Default fallback for other alerts
-        return []
+        # For first iteration, use the original method
+        if current_iteration == 1:
+            tools_to_call = await llm_client.determine_mcp_tools(
+                alert_data, runbook_content, available_tools
+            )
+            
+            # Update cluster information in parameters
+            for tool_call in tools_to_call:
+                if "parameters" in tool_call and "cluster" in tool_call["parameters"]:
+                    tool_call["parameters"]["cluster"] = alert.cluster
+                if "parameters" in tool_call and "namespace" in tool_call["parameters"]:
+                    if tool_call["parameters"]["namespace"] in ["namespace_name_here", ""]:
+                        tool_call["parameters"]["namespace"] = alert.namespace
+            
+            return {
+                "continue": len(tools_to_call) > 0,
+                "tools": tools_to_call,
+                "reasoning": f"Initial tool selection - {len(tools_to_call)} tools determined"
+            }
+        else:
+            # For subsequent iterations, use the iterative method
+            return await llm_client.determine_next_mcp_tools(
+                alert_data, runbook_content, available_tools, iteration_history, current_iteration
+            )
     
     async def _gather_mcp_data(self, alert: Alert, tools_to_call: list) -> Dict:
         """Gather data from MCP servers based on the determined tools."""
@@ -345,7 +296,7 @@ class AlertService:
     
     async def _perform_partial_analysis(self,
                                        alert: Alert,
-                                       runbook_data: Dict,
+                                       runbook_content: str,
                                        iteration_history: List[Dict],
                                        current_iteration: int) -> str:
         """Perform partial analysis of current iteration results."""
@@ -356,7 +307,7 @@ class AlertService:
         try:
             # Use the LLM manager to analyze partial results
             analysis = await self.llm_manager.analyze_partial_results(
-                alert_data, runbook_data, iteration_history, current_iteration
+                alert_data, runbook_content, iteration_history, current_iteration
             )
             
             return analysis
@@ -367,32 +318,21 @@ class AlertService:
     
     async def _perform_final_analysis(self,
                                     alert: Alert,
-                                    runbook_data: Dict,
+                                    runbook_content: str,
                                     all_mcp_data: Dict,
                                     iteration_history: List[Dict]) -> str:
         """Perform final comprehensive analysis with all gathered data."""
         
-        # Prepare alert data for LLM
-        alert_data = alert.model_dump()
+        # Use the enhanced LLM analysis that includes iteration context
+        analysis = await self._perform_llm_analysis_with_iterations(
+            alert, runbook_content, all_mcp_data, iteration_history
+        )
         
-        try:
-            # Use the enhanced LLM analysis that includes iteration context
-            analysis = await self._perform_llm_analysis_with_iterations(
-                alert, runbook_data, all_mcp_data, iteration_history
-            )
-            
-            return analysis
-            
-        except Exception as e:
-            # If LLM analysis fails, provide a comprehensive fallback
-            fallback_analysis = self._generate_comprehensive_fallback_analysis(
-                alert, runbook_data, all_mcp_data, iteration_history
-            )
-            return f"LLM Analysis Error: {str(e)}\n\n{fallback_analysis}"
+        return analysis
 
     async def _perform_llm_analysis_with_iterations(self,
                                                   alert: Alert,
-                                                  runbook_data: Dict,
+                                                  runbook_content: str,
                                                   mcp_data: Dict,
                                                   iteration_history: List[Dict]) -> str:
         """Perform LLM analysis including iteration context."""
@@ -403,7 +343,7 @@ class AlertService:
         try:
             # Use the LLM manager to analyze the alert with enhanced context
             analysis = await self.llm_manager.analyze_alert(
-                alert_data, runbook_data, mcp_data
+                alert_data, runbook_content, mcp_data
             )
             
             # Add iteration summary to the analysis
@@ -419,120 +359,19 @@ class AlertService:
 
     async def _perform_llm_analysis(self, 
                                   alert: Alert, 
-                                  runbook_data: Dict, 
+                                  runbook_content: str, 
                                   mcp_data: Dict) -> str:
         """Perform LLM analysis of the alert, runbook, and MCP data."""
         
         # Prepare alert data for LLM
         alert_data = alert.model_dump()
         
-        try:
-            # Use the LLM manager to analyze the alert
-            analysis = await self.llm_manager.analyze_alert(
-                alert_data, runbook_data, mcp_data
-            )
-            
-            return analysis
-            
-        except Exception as e:
-            # If LLM analysis fails, provide a basic summary
-            fallback_analysis = self._generate_fallback_analysis(alert, runbook_data, mcp_data)
-            return f"LLM Analysis Error: {str(e)}\n\n{fallback_analysis}"
-    
-    def _generate_fallback_analysis(self, 
-                                  alert: Alert, 
-                                  runbook_data: Dict, 
-                                  mcp_data: Dict) -> str:
-        """Generate a basic analysis when LLM is not available."""
+        # Use the LLM manager to analyze the alert
+        analysis = await self.llm_manager.analyze_alert(
+            alert_data, runbook_content, mcp_data
+        )
         
-        analysis_parts = [
-            "# LLM not available!!! Alert Analysis (Fallback Mode)",
-            "",
-            f"**Alert:** {alert.alert}",
-            f"**Severity:** {alert.severity}",
-            f"**Environment:** {alert.environment}",
-            f"**Cluster:** {alert.cluster}",
-            f"**Namespace:** {alert.namespace}",
-            f"**Message:** {alert.message}",
-            "",
-            "## Runbook Information",
-            "The following runbook was retrieved:",
-            f"- Raw content: {runbook_data.get('raw_content', 'No runbook available')}",
-            "",
-            "## System Data",
-            "The following data was gathered from MCP servers:",
-        ]
-        
-        for server_name, server_data in mcp_data.items():
-            data_count = len(server_data) if isinstance(server_data, list) else 1
-            analysis_parts.append(f"- {server_name}: {data_count} data points collected")
-        
-        analysis_parts.extend([
-            "",
-            "## Recommendation",
-            "Please review the runbook instructions and system data manually.",
-            "LLM analysis was not available for automated insights.",
-        ])
-        
-        return "\n".join(analysis_parts)
-    
-    def _generate_comprehensive_fallback_analysis(self, 
-                                                alert: Alert, 
-                                                runbook_data: Dict, 
-                                                all_mcp_data: Dict,
-                                                iteration_history: List[Dict]) -> str:
-        """Generate a comprehensive analysis when LLM is not available."""
-        
-        analysis_parts = [
-            "# Alert Analysis (Fallback Mode - LLM Not Available)",
-            "",
-            f"**Alert:** {alert.alert}",
-            f"**Severity:** {alert.severity}",
-            f"**Environment:** {alert.environment}",
-            f"**Cluster:** {alert.cluster}",
-            f"**Namespace:** {alert.namespace}",
-            f"**Message:** {alert.message}",
-            "",
-            "## Runbook Information",
-            f"- Raw content: {runbook_data.get('raw_content', 'No runbook available')}",
-            "",
-            "## Iterative Processing Summary",
-            f"- **Total Iterations:** {len(iteration_history)}",
-        ]
-        
-        # Add iteration details
-        for i, iteration in enumerate(iteration_history, 1):
-            analysis_parts.append(f"- **Iteration {i}:** {len(iteration.get('tools_called', []))} tools called")
-            if iteration.get('partial_analysis'):
-                analysis_parts.append(f"  - Findings: {iteration['partial_analysis'][:200]}...")
-        
-        analysis_parts.extend([
-            "",
-            "## System Data Collected",
-            "The following data was gathered from MCP servers across all iterations:",
-        ])
-        
-        total_data_points = 0
-        for server_name, server_data in all_mcp_data.items():
-            data_count = len(server_data) if isinstance(server_data, list) else 1
-            total_data_points += data_count
-            analysis_parts.append(f"- **{server_name}**: {data_count} data points collected")
-        
-        analysis_parts.extend([
-            f"- **Total**: {total_data_points} data points across all servers",
-            "",
-            "## Recommendation",
-            "Please review the runbook instructions, iteration findings, and system data manually.",
-            "LLM analysis was not available for automated insights.",
-            "",
-            "### Next Steps:",
-            "1. Review the partial analysis from each iteration above",
-            "2. Cross-reference findings with the runbook steps",
-            "3. Examine the collected system data for anomalies",
-            "4. Execute any remediation steps identified in the runbook",
-        ])
-        
-        return "\n".join(analysis_parts)
+        return analysis
     
     def _generate_iteration_summary(self, iteration_history: List[Dict]) -> str:
         """Generate a summary of all iterations for the final analysis."""

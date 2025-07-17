@@ -14,14 +14,14 @@ class PromptBuilder:
     
     def build_analysis_prompt(self, 
                             alert_data: Dict, 
-                            runbook_data: Dict, 
+                            runbook_content: str, 
                             mcp_data: Dict) -> str:
         """Build a comprehensive analysis prompt."""
         
         prompt_parts = [
             self._build_context_section(),
             self._build_alert_section(alert_data),
-            self._build_runbook_section(runbook_data),
+            self._build_runbook_section(runbook_content),
             self._build_mcp_data_section(mcp_data),
             self._build_analysis_instructions()
         ]
@@ -52,7 +52,7 @@ Please provide detailed, actionable insights about what's happening and potentia
 **Message:** {alert_data.get('message', 'No message provided')}
 **Timestamp:** {alert_data.get('timestamp', 'Unknown')}"""
     
-    def _build_runbook_section(self, runbook_data: Dict) -> str:
+    def _build_runbook_section(self, runbook_content: str) -> str:
         """Build the runbook section of the prompt."""
         
         runbook_text = f"""## Associated Runbook
@@ -60,7 +60,7 @@ Please provide detailed, actionable insights about what's happening and potentia
 **Raw Content:**
 ```markdown
 <!-- RUNBOOK START -->
-{runbook_data.get('raw_content', 'No runbook content available')}
+{runbook_content if runbook_content else 'No runbook content available'}
 <!-- RUNBOOK END -->
 ```
 """
@@ -177,7 +177,7 @@ Please be specific and reference the actual data provided. Use exact resource na
     
     def build_mcp_tool_selection_prompt(self, 
                                    alert_data: Dict, 
-                                   runbook_data: Dict, 
+                                   runbook_content: str, 
                                    available_tools: Dict) -> str:
         """Build a prompt to determine which MCP tools to call."""
         
@@ -191,7 +191,7 @@ Based on the following alert and runbook, determine which MCP tools should be ca
 ## Runbook Content
 ```markdown
 <!-- RUNBOOK START -->
-{runbook_data.get('raw_content', 'No runbook available')}
+{runbook_content if runbook_content else 'No runbook available'}
 <!-- RUNBOOK END -->
 ```
 
@@ -220,7 +220,7 @@ Focus on gathering the most relevant information to diagnose the issue described
 
     def build_iterative_mcp_tool_selection_prompt(self,
                                                 alert_data: Dict,
-                                                runbook_data: Dict,
+                                                runbook_content: str,
                                                 available_tools: Dict,
                                                 iteration_history: List[Dict],
                                                 current_iteration: int) -> str:
@@ -236,7 +236,7 @@ You are analyzing a multi-step runbook. Based on the alert, runbook, and previou
 ## Runbook Content
 ```markdown
 <!-- RUNBOOK START -->
-{runbook_data.get('raw_content', 'No runbook available')}
+{runbook_content if runbook_content else 'No runbook available'}
 <!-- RUNBOOK END -->
 ```
 
@@ -298,7 +298,7 @@ If analysis can be completed:
 
     def build_partial_analysis_prompt(self,
                                     alert_data: Dict,
-                                    runbook_data: Dict,
+                                    runbook_content: str,
                                     iteration_history: List[Dict],
                                     current_iteration: int) -> str:
         """Build a prompt for partial analysis during iterations."""
@@ -313,7 +313,7 @@ Analyze the current findings from this iteration and provide insights about what
 ## Runbook Content
 ```markdown
 <!-- RUNBOOK START -->
-{runbook_data.get('raw_content', 'No runbook available')}
+{runbook_content if runbook_content else 'No runbook available'}
 <!-- RUNBOOK END -->
 ```
 

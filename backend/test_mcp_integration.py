@@ -70,9 +70,8 @@ async def test_llm_tool_selection():
             runbook="https://github.com/example/runbooks/namespace-stuck.md"
         )
         
-        # Test runbook data
-        runbook_data = {
-            "raw_content": """
+        # Test runbook content
+        runbook_content = """
 # Namespace Stuck in Terminating
 
 ## Problem
@@ -89,7 +88,6 @@ A namespace is stuck in the Terminating state.
 2. Force delete stuck resources
 3. Patch the namespace to remove finalizers
 """
-}
         
         # Get LLM to determine tools
         llm_client = llm_manager.get_client()
@@ -99,7 +97,7 @@ A namespace is stuck in the Terminating state.
             
         alert_data = test_alert.model_dump()
         tools_to_call = await llm_client.determine_mcp_tools(
-            alert_data, runbook_data, available_tools
+            alert_data, runbook_content, available_tools
         )
         
         print(f"✓ LLM selected {len(tools_to_call)} tools to call")

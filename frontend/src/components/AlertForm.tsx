@@ -1,5 +1,5 @@
 /**
- * Alert submission form component
+ * Alert submission form component (Development/Testing Interface)
  */
 
 import React, { useState, useEffect } from 'react';
@@ -29,7 +29,7 @@ const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
     alert: 'Namespace is stuck in Terminating',
     severity: 'warning',
     environment: 'production',
-    cluster: 'https://api.okomk-7rbqf-kq6.9pbs.p3.openshiftapps.com:443',
+    cluster: 'https://api.eoxgp-kduq5-osu.y3pp.p3.openshiftapps.com:443',
     namespace: 'superman-dev',
     pod: '',
     message: 'namespace is stuck in \'Terminating\' phase',
@@ -42,6 +42,9 @@ const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
   const [success, setSuccess] = useState<string | null>(null);
 
   // Load available alert types on component mount
+  // NOTE: Alert types are used only for dropdown selection in this development/testing interface.
+  // In production, external clients (like Alert Manager) can submit any alert type.
+  // The system analyzes all alert types using the provided runbook and all available MCP tools.
   useEffect(() => {
     const loadAlertTypes = async () => {
       try {

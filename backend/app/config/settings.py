@@ -73,23 +73,26 @@ class Settings(BaseSettings):
         description="MCP server configurations"
     )
     
-    # Supported Alert Types
+    # Supported Alert Types (Development/Testing Web Interface Only)
+    # These alert types are used only for the dropdown selection in the development/testing web interface.
+    # In production, external clients (like Alert Manager) can submit any alert type.
+    # The system provides all available MCP tools to the LLM regardless of alert type.
     supported_alerts: List[str] = Field(default=[
         "Namespace is stuck in Terminating"
     ])
     
-    # Alert Type to Runbook Mapping
-    alert_runbook_mapping: Dict = Field(default={
-        "Namespace is stuck in Terminating": {
-            "default_runbook": "https://github.com/codeready-toolchain/sandbox-sre/blob/master/runbooks/namespace-terminating.md",
-            "mcp_servers": ["kubernetes"]
-        }
-    })
-    
     # Alert Processing Configuration
     max_llm_mcp_iterations: int = Field(
-        default=5,
+        default=10,
         description="Maximum number of LLM->MCP iterative loops for multi-step runbook processing"
+    )
+    max_total_tool_calls: int = Field(
+        default=20,
+        description="Maximum total tool calls per alert across all iterations"
+    )
+    max_data_points: int = Field(
+        default=20,
+        description="Maximum data points before stopping processing (when combined with min iterations)"
     )
     
     class Config:

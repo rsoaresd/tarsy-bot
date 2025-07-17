@@ -7,7 +7,8 @@ An intelligent Site Reliability Engineering agent that automatically processes a
 - **[README.md](README.md)**: This file - project overview and quick start
 - **[setup.sh](setup.sh)**: Automated setup script (run this first!)
 - **[DEPLOYMENT.md](DEPLOYMENT.md)**: Advanced deployment, production setup, and development
-- **[backend/MCP_LLM_INTEGRATION.md](backend/MCP_LLM_INTEGRATION.md)**: Technical architecture details
+- **[doc/requirements.md](doc/requirements.md)**: Application requirements and specifications
+- **[doc/design.md](doc/design.md)**: System design and architecture documentation
 
 > **New Users**: Run `./setup.sh` to get started quickly!
 
@@ -63,7 +64,6 @@ sre/
 │   │   │   └── llm/        # LLM provider integrations
 │   │   ├── config/         # Configuration management
 │   │   └── utils/          # Utility functions
-│   ├── MCP_LLM_INTEGRATION.md  # Documentation for MCP/LLM integration
 │   └── pyproject.toml      # uv project configuration and dependencies
 ├── frontend/               # React TypeScript frontend
 │   ├── src/
@@ -156,5 +156,6 @@ python test_mcp_integration.py
 
 ### Architecture Documents
 
-- [MCP_LLM_INTEGRATION.md](backend/MCP_LLM_INTEGRATION.md) - Technical details on MCP and LLM integration
+- [doc/requirements.md](doc/requirements.md): Application requirements and specifications
+- [doc/design.md](doc/design.md): System design and architecture documentation
 - [DEPLOYMENT.md](DEPLOYMENT.md) - Production deployment and advanced configuration

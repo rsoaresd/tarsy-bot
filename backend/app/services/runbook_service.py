@@ -1,12 +1,9 @@
 """
-Runbook service for downloading and processing runbooks from GitHub.
+Runbook service for downloading runbooks from GitHub.
 """
 
-import re
 from typing import Optional
 import httpx
-import markdown
-from urllib.parse import urlparse
 
 from app.config.settings import Settings
 
@@ -64,15 +61,6 @@ class RunbookService:
         # If we can't convert, return as-is and let the request fail
         return github_url
     
-    def parse_runbook(self, content: str) -> dict:
-        """Parse runbook. For now, just return the raw content."""
-        
-        result = {
-            "raw_content": content,
-        }
-        
-        return result
-
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose() 

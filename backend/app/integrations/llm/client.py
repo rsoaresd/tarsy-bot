@@ -153,7 +153,7 @@ class LLMClient:
     
     async def analyze_alert(self, 
                           alert_data: Dict, 
-                          runbook_data: Dict, 
+                          runbook_content: str, 
                           mcp_data: Dict,
                           **kwargs) -> str:
         """Analyze an alert using any LLM provider via LangChain."""
@@ -165,7 +165,7 @@ class LLMClient:
         
         # Build comprehensive prompt
         prompt = self.prompt_builder.build_analysis_prompt(
-            alert_data, runbook_data, mcp_data
+            alert_data, runbook_content, mcp_data
         )
         
         # Create structured messages for LangChain
@@ -190,7 +190,7 @@ class LLMClient:
     
     async def determine_mcp_tools(self,
                                 alert_data: Dict,
-                                runbook_data: Dict,
+                                runbook_content: str,
                                 available_tools: Dict,
                                 **kwargs) -> List[Dict]:
         """Determine which MCP tools to call based on alert and runbook."""
@@ -202,7 +202,7 @@ class LLMClient:
         
         # Build prompt for tool selection
         prompt = self.prompt_builder.build_mcp_tool_selection_prompt(
-            alert_data, runbook_data, available_tools
+            alert_data, runbook_content, available_tools
         )
         
         # Create messages
@@ -263,7 +263,7 @@ class LLMClient:
 
     async def determine_next_mcp_tools(self,
                                      alert_data: Dict,
-                                     runbook_data: Dict,
+                                     runbook_content: str,
                                      available_tools: Dict,
                                      iteration_history: List[Dict],
                                      current_iteration: int,
@@ -276,7 +276,7 @@ class LLMClient:
         
         # Build prompt for iterative tool selection
         prompt = self.prompt_builder.build_iterative_mcp_tool_selection_prompt(
-            alert_data, runbook_data, available_tools, iteration_history, current_iteration
+            alert_data, runbook_content, available_tools, iteration_history, current_iteration
         )
         
         # Create messages
@@ -344,7 +344,7 @@ class LLMClient:
 
     async def analyze_partial_results(self,
                                     alert_data: Dict,
-                                    runbook_data: Dict,
+                                    runbook_content: str,
                                     iteration_history: List[Dict],
                                     current_iteration: int,
                                     **kwargs) -> str:
@@ -356,7 +356,7 @@ class LLMClient:
         
         # Build prompt for partial analysis
         prompt = self.prompt_builder.build_partial_analysis_prompt(
-            alert_data, runbook_data, iteration_history, current_iteration
+            alert_data, runbook_content, iteration_history, current_iteration
         )
         
         # Create messages
@@ -416,7 +416,7 @@ class LLMManager:
     
     async def analyze_alert(self, 
                           alert_data: Dict, 
-                          runbook_data: Dict, 
+                          runbook_content: str, 
                           mcp_data: Dict,
                           provider: str = None) -> str:
         """Analyze an alert using the specified or default LLM provider."""
@@ -425,11 +425,11 @@ class LLMManager:
             available = list(self.clients.keys())
             raise Exception(f"LLM provider not available. Available: {available}")
         
-        return await client.analyze_alert(alert_data, runbook_data, mcp_data)
+        return await client.analyze_alert(alert_data, runbook_content, mcp_data)
     
     async def determine_mcp_tools(self,
                                 alert_data: Dict,
-                                runbook_data: Dict,
+                                runbook_content: str,
                                 available_tools: Dict,
                                 provider: str = None) -> List[Dict]:
         """Determine which MCP tools to call using the specified or default LLM provider."""
@@ -438,11 +438,11 @@ class LLMManager:
             available = list(self.clients.keys())
             raise Exception(f"LLM provider not available. Available: {available}")
         
-        return await client.determine_mcp_tools(alert_data, runbook_data, available_tools)
+        return await client.determine_mcp_tools(alert_data, runbook_content, available_tools)
     
     async def determine_next_mcp_tools(self,
                                      alert_data: Dict,
-                                     runbook_data: Dict,
+                                     runbook_content: str,
                                      available_tools: Dict,
                                      iteration_history: List[Dict],
                                      current_iteration: int,
@@ -454,12 +454,12 @@ class LLMManager:
             raise Exception(f"LLM provider not available. Available: {available}")
         
         return await client.determine_next_mcp_tools(
-            alert_data, runbook_data, available_tools, iteration_history, current_iteration
+            alert_data, runbook_content, available_tools, iteration_history, current_iteration
         )
 
     async def analyze_partial_results(self,
                                     alert_data: Dict,
-                                    runbook_data: Dict,
+                                    runbook_content: str,
                                     iteration_history: List[Dict],
                                     current_iteration: int,
                                     provider: str = None) -> str:
@@ -470,9 +470,20 @@ class LLMManager:
             raise Exception(f"LLM provider not available. Available: {available}")
         
         return await client.analyze_partial_results(
-            alert_data, runbook_data, iteration_history, current_iteration
+            alert_data, runbook_content, iteration_history, current_iteration
         )
 
     def list_available_providers(self) -> List[str]:
         """List available LLM providers."""
-        return list(self.clients.keys()) 
+        return list(self.clients.keys())
+    
+    def is_available(self) -> bool:
+        """Check if any LLM provider is available."""
+        return len(self.clients) > 0 and any(client.available for client in self.clients.values())
+    
+    def get_availability_status(self) -> Dict:
+        """Get detailed availability status for all providers."""
+        return {
+            provider: client.available 
+            for provider, client in self.clients.items()
+        } 
