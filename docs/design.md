@@ -15,6 +15,18 @@
 
 ---
 
+## Document Evolution
+
+This design document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant architectural changes are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
+
+### Recent Changes
+- This document was established as the baseline technical design
+- Future changes will be tracked through Enhancement Proposals in `docs/enhancements/`
+
+For proposed architectural changes or new design patterns, see the [Enhancement Proposals directory](enhancements/README.md).
+
+---
+
 ## System Overview
 
 The SRE AI Agent is a **distributed, event-driven system** designed to automate incident response through intelligent alert processing. The system implements an **iterative, multi-step analysis architecture** where Large Language Models (LLMs) dynamically select and orchestrate Model Context Protocol (MCP) servers to gather system data and perform comprehensive incident analysis.

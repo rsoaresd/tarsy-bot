@@ -4,6 +4,16 @@
 
 The SRE AI Agent is an intelligent Site Reliability Engineering system that automates incident response by processing alerts, analyzing runbooks, and performing iterative system diagnostics using AI-powered decision making and Model Context Protocol (MCP) servers.
 
+## Document Evolution
+
+This requirements document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant changes to system requirements are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
+
+### Recent Changes
+- This document was established as the baseline requirements specification
+- Future changes will be tracked through Enhancement Proposals in `docs/enhancements/`
+
+For proposed changes or new requirements, see the [Enhancement Proposals directory](enhancements/README.md).
+
 ## 1. Core Functional Requirements
 
 ### 1.1 Alert Processing and Management
