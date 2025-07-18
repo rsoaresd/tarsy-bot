@@ -38,15 +38,23 @@ docs/
 ├── requirements.md                    # Living requirements document
 ├── design.md                         # Living architecture document
 ├── templates/
-│   └── enhancement-proposal-template.md  # AI-friendly template
+│   ├── ep-requirements-template.md    # Requirements phase template
+│   ├── ep-design-template.md          # Design phase template
+│   └── ep-implementation-template.md  # Implementation phase template
 ├── enhancements/
 │   ├── README.md                     # Process documentation
 │   ├── pending/                      # New proposals
-│   │   └── EP-0001-[title].md       # Draft proposals
+│   │   ├── EP-0001-requirements.md   # Requirements document
+│   │   ├── EP-0001-design.md         # Design document
+│   │   └── EP-0001-implementation.md # Implementation plan
 │   ├── approved/                     # Approved proposals
-│   │   └── EP-0002-[title].md       # Ready for implementation
+│   │   ├── EP-0002-requirements.md   # Approved requirements
+│   │   ├── EP-0002-design.md         # Approved design
+│   │   └── EP-0002-implementation.md # Approved implementation plan
 │   └── implemented/                  # Completed proposals
-│       └── EP-0003-[title].md       # Historical record
+│       ├── EP-0003-requirements.md   # Historical record
+│       ├── EP-0003-design.md         # Historical record
+│       └── EP-0003-implementation.md # Historical record
 └── AI_WORKFLOW_GUIDE.md              # Practical AI collaboration guide
 ```
 
@@ -78,22 +86,44 @@ docs/
 
 ## 🚀 Implementation Workflow
 
-### Phase 1: Proposal Creation
+### Phase 1: Requirements Definition
 ```
 Human: "I want to [describe enhancement]"
    ↓
-AI: Generate EP using template
+AI: Generate requirements using template
    ↓
 Human: Review and provide feedback
    ↓
-AI: Refine EP based on feedback
+AI: Refine requirements based on feedback
    ↓
 Status: Draft → Review → Approved
 ```
 
-### Phase 2: Step-by-Step Implementation
+### Phase 2: Technical Design
 ```
-For each step in the EP:
+AI: Generate design based on approved requirements
+   ↓
+Human: Review and provide feedback
+   ↓
+AI: Refine design based on feedback
+   ↓
+Status: Draft → Review → Approved
+```
+
+### Phase 3: Implementation Planning
+```
+AI: Generate implementation plan based on approved requirements and design
+   ↓
+Human: Review and provide feedback
+   ↓
+AI: Refine implementation plan based on feedback
+   ↓
+Status: Draft → Review → Approved
+```
+
+### Phase 4: Step-by-Step Implementation
+```
+For each step in the implementation plan:
    ↓
 AI: "Implement Step X.Y of EP-XXXX: [description]"
    ↓
@@ -107,13 +137,13 @@ If valid: Proceed to next step
 If invalid: Fix issues and retry
 ```
 
-### Phase 3: Documentation and Completion
+### Phase 5: Documentation and Completion
 ```
 AI: Update main documentation per EP requirements
    ↓
 Human: Review documentation updates
    ↓
-AI: Move EP to implemented directory
+AI: Move all EP documents to implemented directory
    ↓
 Update: Registry and cross-references
    ↓
@@ -158,9 +188,19 @@ python -c "from app.services.connection_pool import ConnectionPool; print('Succe
 
 ## 🤖 AI Collaboration Patterns
 
-### Creating New EP
+### Creating Requirements
 ```
-AI Prompt: "Generate an Enhancement Proposal using the template at docs/templates/enhancement-proposal-template.md for [specific enhancement request]. Use the next available EP number."
+AI Prompt: "Generate requirements using the template at docs/templates/ep-requirements-template.md for [specific enhancement request]. Use the next available EP number."
+```
+
+### Creating Design
+```
+AI Prompt: "Create a design document using the template at docs/templates/ep-design-template.md for EP-XXXX based on the approved requirements."
+```
+
+### Creating Implementation Plan
+```
+AI Prompt: "Create an implementation plan using the template at docs/templates/ep-implementation-template.md for EP-XXXX based on the approved requirements and design documents."
 ```
 
 ### Implementing Steps
@@ -221,10 +261,11 @@ See `docs/enhancements/pending/EP-0001-example-websocket-improvements.md` for a 
 ## 🛠️ Tools and Resources
 
 ### Essential Files:
-- `docs/templates/enhancement-proposal-template.md` - Main template
+- `docs/templates/ep-requirements-template.md` - Requirements template
+- `docs/templates/ep-design-template.md` - Design template
+- `docs/templates/ep-implementation-template.md` - Implementation template
 - `docs/enhancements/README.md` - Process documentation
 - `docs/AI_WORKFLOW_GUIDE.md` - Practical examples
-- `docs/enhancements/pending/EP-0001-example-websocket-improvements.md` - Complete example
 
 ### AI Prompts:
 - Creation, refinement, implementation, validation, and completion prompts
@@ -234,8 +275,8 @@ See `docs/enhancements/pending/EP-0001-example-websocket-improvements.md` for a 
 ## 🎉 Getting Started
 
 1. **Read the guides**: Start with `docs/AI_WORKFLOW_GUIDE.md`
-2. **Study the example**: Review `EP-0001-example-websocket-improvements.md`
-3. **Use the template**: Copy `docs/templates/enhancement-proposal-template.md`
+2. **Study the templates**: Review all three phase templates
+3. **Use the 3-phase approach**: Start with requirements, then design, then implementation
 4. **Start small**: Begin with focused, well-defined enhancements
 5. **Follow the process**: Use the step-by-step approach
 

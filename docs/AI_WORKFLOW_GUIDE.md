@@ -4,7 +4,7 @@ This guide demonstrates how to use the Enhancement Proposal (EP) system with AI 
 
 ## Quick Start
 
-### 1. Create a New Enhancement Proposal
+### 1. Create Requirements Document
 
 **Human Input:**
 ```
@@ -13,23 +13,63 @@ I want to improve the WebSocket connection handling to be more resilient and sup
 
 **AI Prompt:**
 ```
-Generate an Enhancement Proposal using the template at docs/templates/enhancement-proposal-template.md for improving WebSocket connection handling with resilience and connection pooling. Use EP-0001 as the number and save it as docs/enhancements/pending/EP-0001-websocket-connection-improvements.md
+Generate requirements using the template at docs/templates/ep-requirements-template.md for improving WebSocket connection handling with resilience and connection pooling. Use EP-0001 as the number and save it as docs/enhancements/pending/EP-0001-requirements.md
 ```
 
-### 2. Review and Refine
+### 2. Review and Refine Requirements
 
 **Human Review:**
-- Check technical accuracy
-- Validate requirements impact
-- Adjust implementation phases
-- Add missing considerations
+- Check requirements completeness
+- Validate business needs
+- Adjust success criteria
+- Add missing stakeholder considerations
 
 **AI Refinement Prompt:**
 ```
-Update EP-0001 based on this feedback: [your feedback here]
+Update EP-0001 requirements based on this feedback: [your feedback here]
 ```
 
-### 3. Implement Step by Step
+### 3. Create Design Document
+
+**AI Prompt:**
+```
+Create a design document using the template at docs/templates/ep-design-template.md for EP-0001 based on the approved requirements in EP-0001-requirements.md
+```
+
+### 4. Review and Refine Design
+
+**Human Review:**
+- Check technical feasibility
+- Validate architecture decisions
+- Adjust component design
+- Add missing technical considerations
+
+**AI Refinement Prompt:**
+```
+Update EP-0001 design based on this feedback: [your feedback here]
+```
+
+### 5. Create Implementation Plan
+
+**AI Prompt:**
+```
+Create an implementation plan using the template at docs/templates/ep-implementation-template.md for EP-0001 based on the approved requirements and design documents
+```
+
+### 6. Review and Refine Implementation Plan
+
+**Human Review:**
+- Check implementation feasibility
+- Validate step-by-step approach
+- Adjust timeline and dependencies
+- Add missing implementation considerations
+
+**AI Refinement Prompt:**
+```
+Update EP-0001 implementation plan based on this feedback: [your feedback here]
+```
+
+### 7. Execute Implementation Step by Step
 
 **Step-by-Step Implementation:**
 ```
@@ -53,7 +93,7 @@ Implement Step 1.2 of EP-0001: Core Implementation
 - Validate step
 - Proceed to next step only if current step is complete
 
-### 4. Update Documentation
+### 8. Update Documentation
 
 **Final Documentation Update:**
 ```
@@ -69,52 +109,78 @@ Update the main documentation files (requirements.md and design.md) according to
 Human: I want to add database integration to persist alert processing history and system metrics.
 ```
 
-**Step 2: Generate EP**
+**Step 2: Generate Requirements**
 ```
-AI Prompt: Generate an Enhancement Proposal using the template at docs/templates/enhancement-proposal-template.md for adding database integration to persist alert processing history and system metrics. Use the next available EP number and save it as docs/enhancements/pending/EP-XXXX-database-integration.md
+AI Prompt: Generate requirements using the template at docs/templates/ep-requirements-template.md for adding database integration to persist alert processing history and system metrics. Use the next available EP number and save it as docs/enhancements/pending/EP-XXXX-requirements.md
 ```
 
-**Step 3: Review Generated EP**
+**Step 3: Review Generated Requirements**
 ```
-Human: Reviews the generated EP and provides feedback:
+Human: Reviews the generated requirements and provides feedback:
 - Use PostgreSQL instead of SQLite
 - Add data retention policies
 - Include database migration strategy
 ```
 
-**Step 4: Refine EP**
+**Step 4: Refine Requirements**
 ```
-AI Prompt: Update the database integration EP based on this feedback:
+AI Prompt: Update the database integration requirements based on this feedback:
 - Use PostgreSQL instead of SQLite
 - Add data retention policies  
 - Include database migration strategy
 ```
 
-**Step 5: Implement Step 1.1**
+**Step 5: Generate Design**
+```
+AI Prompt: Create a design document using the template at docs/templates/ep-design-template.md for the database integration EP based on the approved requirements
+```
+
+**Step 6: Review and Refine Design**
+```
+Human: Reviews the design and provides feedback:
+- Simplify the data model
+- Add connection pooling
+- Include monitoring endpoints
+```
+
+**Step 7: Generate Implementation Plan**
+```
+AI Prompt: Create an implementation plan using the template at docs/templates/ep-implementation-template.md for the database integration EP based on the approved requirements and design documents
+```
+
+**Step 8: Review and Refine Implementation Plan**
+```
+Human: Reviews the implementation plan and provides feedback:
+- Break down Step 1.1 into smaller tasks
+- Add additional testing steps
+- Include performance validation
+```
+
+**Step 9: Execute Implementation Step 1.1**
 ```
 AI Prompt: Implement Step 1.1 of EP-XXXX: Initial Setup
 ```
 
-**Step 6: Validate Step 1.1**
+**Step 10: Validate Step 1.1**
 ```
 # Run success check commands from the EP
 # Verify validation criteria are met
 # Confirm step is complete before proceeding
 ```
 
-**Step 7: Implement Step 1.2**
+**Step 11: Execute Implementation Step 1.2**
 ```
 AI Prompt: Implement Step 1.2 of EP-XXXX: Core Implementation
 ```
 
-**Step 8: Validate Step 1.2**
+**Step 12: Validate Step 1.2**
 ```
 # Run success check commands from the EP
 # Verify validation criteria are met
 # Confirm step is complete before proceeding
 ```
 
-**Step 9: Continue with remaining steps**
+**Step 13: Continue with remaining steps**
 ```
 AI Prompt: Implement Step 1.3 of EP-XXXX: Basic Testing
 # Validate before proceeding to Phase 2
@@ -125,26 +191,36 @@ AI Prompt: Implement Step 2.1 of EP-XXXX: System Integration
 # Continue this pattern for all steps...
 ```
 
-**Step 8: Update Documentation**
+**Step 14: Update Documentation**
 ```
 AI Prompt: Update the main documentation files according to the database integration EP documentation requirements. Show me the specific changes needed for requirements.md and design.md.
 ```
 
-**Step 9: Complete EP**
+**Step 15: Complete EP**
 ```
-AI Prompt: Review the database integration EP implementation and mark it as completed. Move it to the implemented directory and update the registry in docs/enhancements/README.md.
+AI Prompt: Review the database integration EP implementation and mark it as completed. Move all three documents (requirements, design, implementation) to the implemented directory and update the registry in docs/enhancements/README.md.
 ```
 
 ## AI Prompts Cheat Sheet
 
-### Creating EPs
+### Creating Requirements
 ```
-Generate an Enhancement Proposal using the template at docs/templates/enhancement-proposal-template.md for [specific request]. Use EP-XXXX as the number.
+Generate requirements using the template at docs/templates/ep-requirements-template.md for [specific request]. Use EP-XXXX as the number.
 ```
 
-### Refining EPs
+### Creating Design
 ```
-Update EP-XXXX based on this feedback: [feedback]
+Create a design document using the template at docs/templates/ep-design-template.md for EP-XXXX based on the approved requirements.
+```
+
+### Creating Implementation Plan
+```
+Create an implementation plan using the template at docs/templates/ep-implementation-template.md for EP-XXXX based on the approved requirements and design documents.
+```
+
+### Refining Documents
+```
+Update EP-XXXX [requirements/design/implementation] based on this feedback: [feedback]
 ```
 
 ### Implementation (Step-by-Step)
@@ -171,7 +247,7 @@ Update the main documentation files according to EP-XXXX documentation requireme
 
 ### Completion
 ```
-Review EP-XXXX implementation and mark it as completed. Move it to the implemented directory.
+Review EP-XXXX implementation and mark it as completed. Move all three documents (requirements, design, implementation) to the implemented directory.
 ```
 
 ## Benefits of Granular Step-by-Step Implementation
