@@ -1,11 +1,11 @@
 # EP-0002: Multi-Layer Agent Architecture - Implementation Plan
 
-**Status:** Draft  
+**Status:** Approved  
 **Created:** 2024-12-19  
 **Updated:** 2024-12-19  
-**Phase:** Implementation Planning & Execution
-**Requirements Document:** `docs/enhancements/pending/EP-0002-multi-layer-agent-requirements.md`
-**Design Document:** `docs/enhancements/pending/EP-0002-multi-layer-agent-design.md`
+**Phase:** Implementation Ready
+**Requirements Document:** `docs/enhancements/approved/EP-0002-multi-layer-agent-requirements.md`
+**Design Document:** `docs/enhancements/approved/EP-0002-multi-layer-agent-design.md`
 
 ---
 
@@ -240,7 +240,7 @@ pytest tests/unit/test_kubernetes_agent.py -v
 - [ ] Update env.template with example agent and MCP server configurations
 - [ ] Add configuration validation for agent registry entries
 - [ ] Include default configuration for Kubernetes agent and MCP server
-- [ ] Add configuration documentation and examples
+- [ ] Add comprehensive code comments with configuration examples and usage patterns
 - [ ] Ensure backward compatibility with existing configuration
 
 **Dependencies:**
@@ -572,20 +572,56 @@ python -c "from app.services.alert_orchestrator import AlertOrchestrator; from a
 ## Testing Strategy
 
 ### Test Plans
-The testing strategy follows a comprehensive approach with unit tests for individual components, integration tests for component interactions, and end-to-end tests for complete workflows.
+The testing strategy follows the design document's approach of using **mock services only** for all tests, ensuring fast execution, predictable results, and comprehensive coverage without external dependencies.
+
+### Mock Service Strategy
+All tests use mocked external services as defined in the design document:
+
+```python
+# Mock Dependencies for Unit Tests
+class MockLLMClient:
+    def process_with_tools(self, instructions, tools): 
+        return "Mock analysis result"
+
+class MockMCPClient:
+    def list_tools(self): 
+        return ["kubectl", "helm"]
+    def call_tool(self, tool, args): 
+        return "Mock tool output"
+
+class MockGitHubClient:
+    def download_runbook(self, alert_type): 
+        return "# Mock runbook content"
+
+class MockProgressCallback:
+    def __call__(self, status): 
+        self.last_status = status
+
+# Integration Test Fixture
+@pytest.fixture
+def integration_test_services():
+    """Provides fully mocked external services for integration tests"""
+    return {
+        'github_client': MockGitHubClient(),
+        'llm_client': MockLLMClient(), 
+        'mcp_client': MockMCPClient(),
+        'progress_callback': MockProgressCallback(),
+        'websocket_manager': MockWebSocketManager()
+    }
+```
 
 ### Test Execution
-Tests are executed at each phase to ensure incremental validation and early detection of integration issues.
+Tests are executed at each phase using mocks only to ensure incremental validation and early detection of integration issues.
 
-#### Unit Tests
+#### Unit Tests (Mock Services Only)
 - [ ] BaseAgent abstract class functionality and abstract method enforcement
-- [ ] KubernetesAgent inheritance and method implementations
+- [ ] KubernetesAgent inheritance and method implementations  
 - [ ] AgentRegistry alert type to agent class mapping logic
 - [ ] AgentFactory class resolution and dependency injection
 - [ ] AlertOrchestrator delegation and error handling logic
 - [ ] MCPServerRegistry configuration loading and server subset retrieval
 
-#### Integration Tests
+#### Integration Tests (Mock Services Only)
 - [ ] Agent lifecycle from registry lookup to factory instantiation
 - [ ] MCP server registry integration with agent MCP server subsets
 - [ ] Configuration system integration with all registries
@@ -593,52 +629,29 @@ Tests are executed at each phase to ensure incremental validation and early dete
 - [ ] WebSocket manager integration with agent-specific progress updates
 - [ ] Error propagation across component boundaries
 
-#### End-to-End Tests
+Example integration test approach:
+```python
+@pytest.mark.integration 
+async def test_kubernetes_alert_full_flow(integration_test_services):
+    """Test complete flow: Alert → KubernetesAgent → Result"""
+    services = integration_test_services
+    services['llm_client'].set_response("Namespace finalizers removed")
+    
+    orchestrator = AlertOrchestrator(services)
+    alert = Alert(type="Namespace is stuck in Terminating")
+    result = await orchestrator.process_alert(alert)
+    
+    assert result.status == "completed"
+    assert result.agent_used == "KubernetesAgent"
+    assert services['progress_callback'].was_called()
+```
+
+#### End-to-End Tests (Mock Services Only)
 - [ ] Complete alert processing flow from API endpoint to agent result
 - [ ] WebSocket progress updates throughout entire processing lifecycle
 - [ ] Error scenarios with appropriate error message propagation
 - [ ] Agent-specific MCP server usage validation in processing
 - [ ] Unknown alert type error handling with clear user feedback
-
-### Performance Testing
-- [ ] Agent selection and instantiation performance (must be < 1ms overhead)
-- [ ] Orchestration delegation performance (must be < 5ms overhead)
-- [ ] Overall processing time impact (must be within 5% of current performance)
-
-## Risk Management
-
-### Implementation Risks
-
-#### High Priority Risks
-- **Risk**: Refactoring AlertService introduces regressions in existing functionality
-  - **Likelihood**: Medium
-  - **Impact**: High
-  - **Mitigation**: Comprehensive testing at each phase, maintain AlertService as fallback during transition
-  - **Monitoring**: Continuous integration tests and performance monitoring
-
-- **Risk**: Agent instantiation or delegation failures cause processing failures
-  - **Likelihood**: Medium
-  - **Impact**: High
-  - **Mitigation**: Robust error handling with clear error messages, graceful degradation patterns
-  - **Monitoring**: Application logs and error metrics tracking
-
-#### Medium Priority Risks
-- **Risk**: Configuration complexity leads to misconfiguration and operational issues
-  - **Likelihood**: Medium
-  - **Impact**: Medium
-  - **Mitigation**: Simple configuration design, comprehensive documentation, validation
-  - **Monitoring**: Configuration validation during startup
-
-- **Risk**: Performance overhead from orchestration affects user experience
-  - **Likelihood**: Low
-  - **Impact**: Medium
-  - **Mitigation**: Performance benchmarking during development, optimization if needed
-  - **Monitoring**: Response time metrics and performance profiling
-
-### Contingency Plans
-- If agent delegation fails, fall back to existing AlertService temporarily
-- If configuration system issues occur, use hardcoded agent mappings as fallback
-- If performance impact is significant, implement caching and optimization strategies
 
 ## Resource Requirements
 
@@ -687,38 +700,12 @@ BaseAgent Implementation → KubernetesAgent Creation → AlertOrchestrator Deve
 #### Other Documentation
 - [ ] **README.md**: Update with multi-layer architecture overview and examples
 - [ ] **API Documentation**: Add agent-specific fields to processing status responses
-- [ ] **Configuration Guide**: Add comprehensive agent and MCP server configuration examples
 
-## Monitoring & Success Metrics
+## Success Metrics
 
 ### Success Metrics
 - **Processing Quality**: Kubernetes agent achieves same analysis quality as current system
-- **Performance**: Agent delegation adds < 5ms to total processing time
-- **Reliability**: 99.9% availability maintained during agent processing
 - **Usability**: Clear error messages for all failure scenarios
-
-### Monitoring Plan
-- Application performance monitoring for processing time impact
-- Error rate monitoring for agent delegation failures
-- Log analysis for agent-specific error patterns
-- User feedback on error message clarity and processing quality
-
-## Communication Plan
-
-### Stakeholder Communication
-- Daily updates on implementation progress during development
-- Demo sessions after each phase completion
-- Documentation review sessions with operations team
-
-### Progress Reporting
-- Phase completion reports with validation results
-- Issue escalation for any blocking problems
-- Success criteria verification at each milestone
-
-### Issue Escalation
-- Technical issues escalated immediately to senior development team
-- Configuration or operational concerns escalated to DevOps team
-- Performance issues escalated with benchmark data and analysis
 
 ---
 
@@ -755,15 +742,6 @@ BaseAgent Implementation → KubernetesAgent Creation → AlertOrchestrator Deve
 3. **Run tests continuously** to catch integration issues early
 4. **Update progress** by checking off completed tasks and validation criteria
 5. **Escalate issues** if validation fails or rollback plans need to be executed
-
-### Implementation Pattern
-```
-AI Prompt: "Implement Step X.Y of EP-0002: [step description]"
-Developer: Run success check commands
-Developer: Verify validation criteria are met
-Developer: Check off completed tasks
-Developer: Proceed to next step only if all validation passes
-```
 
 ### Troubleshooting
 - If a step fails validation, execute the rollback plan immediately

@@ -264,7 +264,7 @@ ExistingModel:
 - [Integration point 2]
 - [Integration point 3]
 
-### End-to-End Testing
+### End-to-End Testing (Mock Services Only)
 <!-- AI: Describe e2e testing approach -->
 
 #### Test Scenarios

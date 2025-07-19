@@ -1,11 +1,11 @@
 # EP-0002: Multi-Layer Agent Architecture - Design Document
 
-**Status:** Draft  
+**Status:** Approved  
 **Created:** 2024-12-19  
 **Updated:** 2024-12-19  
-**Phase:** Technical Design
-**Requirements Document:** `docs/enhancements/pending/EP-0002-multi-layer-agent-requirements.md`
-**Next Phase:** Implementation Plan
+**Phase:** Design Complete
+**Requirements Document:** `docs/enhancements/approved/EP-0002-multi-layer-agent-requirements.md`
+**Next Phase:** Implementation
 
 ---
 
@@ -641,6 +641,7 @@ tests/
 │   ├── test_error_handling.py          # Error propagation scenarios
 │   ├── test_mcp_server_integration.py  # Agent MCP server selection
 │   └── test_multi_agent_scenarios.py   # Multiple agents processing
+├── e2e/
 └── fixtures/
     ├── mock_services.py            # Mock external services
     ├── test_configs.py             # Test configurations
