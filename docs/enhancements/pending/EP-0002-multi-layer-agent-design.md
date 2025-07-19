@@ -11,32 +11,33 @@
 
 ## Design Overview
 
-The multi-layer agent architecture transforms the current monolithic AlertService into a distributed, extensible system with clear separation of concerns. The design introduces an orchestrator layer that delegates alert processing to specialized agents based on configurable alert type mappings, with each agent having access to its own subset of MCP servers.
+The multi-layer agent architecture transforms the current monolithic AlertService into a distributed, extensible system with clear separation of concerns. The design introduces an orchestrator layer that delegates alert processing to specialized agent classes that inherit from a common BaseAgent, with each agent defining its own MCP server requirements and custom instructions.
 
 ### Architecture Summary
 
 The new architecture consists of four main layers:
-1. **Orchestrator Layer**: Receives alerts, downloads runbooks, and delegates to appropriate agents
-2. **Agent Registry Layer**: Maintains configurable mappings between alert types and specialized agents
-3. **Specialized Agent Layer**: Domain-specific agents that handle particular categories of alerts
-4. **MCP Server Organization Layer**: Global registry with agent-specific server subsets
+1. **Orchestrator Layer**: Receives alerts, downloads runbooks, and delegates to appropriate agent classes
+2. **Agent Registry Layer**: Maintains configurable mappings between alert types and specialized agent classes
+3. **Specialized Agent Layer**: Inheritance-based agent classes that extend BaseAgent with specific configurations
+4. **MCP Server Registry Layer**: Global registry of MCP servers with embedded instructions, reused across agents
 
 ### Key Design Principles
 
-- **Separation of Concerns**: Each layer has a single, well-defined responsibility
-- **Domain Specialization**: Agents focus on specific infrastructure domains with relevant tools
-- **Extensibility**: Easy addition of new agents and alert types through configuration
+- **Inheritance-Based Design**: Common logic in BaseAgent, specialization through inheritance
+- **Configuration Through Code**: Agents define MCP servers and instructions via abstract methods
+- **Reusable MCP Registry**: Global MCP server registry with embedded instructions for reuse
+- **Extensibility**: Easy addition of new agents through simple class creation
 - **Backward Compatibility**: Existing API contracts remain unchanged
 - **Performance**: Minimal overhead with focused tool sets for better LLM decision-making
 
 ### Design Goals
 
-- Enable specialized expertise for different alert categories (Kubernetes, ArgoCD, etc.)
-- Prevent LLM tool selection confusion by providing focused, domain-specific tool subsets
-- Simplify addition of new alert types and MCP servers without modifying core orchestration logic
-- Maintain consistent processing patterns across all agents
+- Enable specialized expertise through inheritance-based agent classes
+- Prevent LLM tool selection confusion by providing focused, agent-specific tool subsets
+- Simplify addition of new agents to simple class creation with method overrides
+- Maintain consistent processing patterns through shared BaseAgent implementation
 - Provide clear error handling when no specialized agent is available
-- Enable agent-specific MCP server assignments for optimal performance
+- Enable flexible agent customization through method overriding capabilities
 
 ## System Architecture
 
@@ -44,48 +45,56 @@ The new architecture consists of four main layers:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    SRE AI Agent - Multi-Layer              │
+│                    SRE AI Agent - Multi-Layer               │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │                 API Layer                           │    │
-│  │  ┌─────────────────┐    ┌─────────────────┐          │    │
-│  │  │   FastAPI       │    │   WebSocket     │          │    │
-│  │  │   Application   │    │   Manager       │          │    │
-│  │  └─────────────────┘    └─────────────────┘          │    │
+│  │  ┌─────────────────┐    ┌─────────────────┐         │    │
+│  │  │   FastAPI       │    │   WebSocket     │         │    │
+│  │  │   Application   │    │   Manager       │         │    │
+│  │  └─────────────────┘    └─────────────────┘         │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │              Orchestrator Layer                     │    │
-│  │  ┌─────────────────┐    ┌─────────────────┐          │    │
-│  │  │   Alert         │    │   Agent         │          │    │
-│  │  │   Orchestrator  │    │   Registry      │          │    │
-│  │  └─────────────────┘    └─────────────────┘          │    │
+│  │  ┌─────────────────┐    ┌─────────────────┐         │    │
+│  │  │   Alert         │    │   Agent         │         │    │
+│  │  │   Orchestrator  │    │   Registry      │         │    │
+│  │  └─────────────────┘    └─────────────────┘         │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                             │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              Specialized Agent Layer                │    │
-│  │  ┌─────────────────┐    ┌─────────────────┐          │    │
-│  │  │   Kubernetes    │    │   ArgoCD        │          │    │
-│  │  │   Agent         │    │   Agent         │          │    │
-│  │  │   (Phase 1)     │    │   (Future)      │          │    │
-│  │  └─────────────────┘    └─────────────────┘          │    │
-│  └─────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │              Specialized Agent Layer                   │ │
+│  │  ┌─────────────────┐                                   │ │
+│  │  │   BaseAgent     │                                   │ │
+│  │  │   (Common       │                                   │ │
+│  │  │   Logic)        │                                   │ │
+│  │  └─────────────────┘                                   │ │
+│  │           │                                            │ │
+│  │           |──────────────────────────────────┐         │ │
+│  │           |                │                 |         | │
+│  │┌─────────────────┐ ┌───────────────┐ ┌────────────────┐| │
+│  ││   Kubernetes    │ │   ArgoCD      │ │   K8s+AWS      │| │
+│  ││ Agent (Phase 1) │ │ Agent (Future)│ │ Agent (Future) || |
+│  ││   (Inherits)    │ │  (Inherits)   │ │   (Inherits)   │| │
+│  │└─────────────────┘ └───────────────┘ └────────────────┘| │
+│  └────────────────────────────────────────────────────────┘ │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │           MCP Server Organization Layer             │    │
-│  │  ┌─────────────────┐    ┌─────────────────┐          │    │
-│  │  │   Global MCP    │    │   Agent-Specific│          │    │
-│  │  │   Server        │    │   MCP Server    │          │    │
-│  │  │   Registry      │    │   Subsets       │          │    │
-│  │  └─────────────────┘    └─────────────────┘          │    │
+│  │           MCP Server Registry Layer                 │    │
+│  │  ┌─────────────────┐    ┌─────────────────┐         │    │
+│  │  │   Global MCP    │    │   Server Config │         │    │
+│  │  │   Server        │    │   with Embedded │         │    │
+│  │  │   Registry      │    │   Instructions  │         │    │
+│  │  └─────────────────┘    └─────────────────┘         │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │              Integration Layer                      │    │
-│  │  ┌─────────────────┐    ┌─────────────────┐          │    │
-│  │  │   LLM           │    │   MCP Server    │          │    │
-│  │  │   Providers     │    │   Ecosystem     │          │    │
-│  │  └─────────────────┘    └─────────────────┘          │    │
+│  │  ┌─────────────────┐    ┌─────────────────┐         │    │
+│  │  │   LLM           │    │   MCP Server    │         │    │
+│  │  │   Providers     │    │   Ecosystem     │         │    │
+│  │  └─────────────────┘    └─────────────────┘         │    │
 │  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -94,32 +103,42 @@ The new architecture consists of four main layers:
 
 #### New Components
 
-- **AlertOrchestrator**: Main orchestration service that receives alerts, downloads runbooks, and delegates to appropriate agents (REQ-2.1)
-- **AgentRegistry**: Registry service that maintains configurable mappings between alert types and specialized agents (REQ-2.2)
-- **BaseAgent**: Abstract base class defining the common interface for all specialized agents
-- **KubernetesAgent**: Specialized agent for Kubernetes-related alerts (initial implementation) (REQ-2.3)
-- **AgentFactory**: Factory pattern implementation for creating agent instances
-- **MCPServerRegistry**: Global registry of all available MCP servers that can be easily extended (REQ-2.6)
-- **AgentMCPAssignment**: Component managing agent-specific MCP server subsets (REQ-2.7, REQ-2.8)
+- **AlertOrchestrator**: Main orchestration service that receives alerts, downloads runbooks, and delegates to appropriate agent classes (REQ-2.1)
+- **AgentRegistry**: Registry service that maintains configurable mappings between alert types and specialized agent classes (REQ-2.2)
+- **BaseAgent**: Abstract base class containing common processing logic for all agents, with abstract methods for customization
+- **KubernetesAgent**: Specialized agent class inheriting from BaseAgent for Kubernetes-related alerts (initial implementation) (REQ-2.3)
+- **MCPServerRegistry**: Global registry of all available MCP servers with embedded instructions that can be easily extended (REQ-2.6)
+- **AgentFactory**: Factory for resolving agent class names to instantiated classes with dependency injection
 
 #### Modified Components
 
 - **AlertService**: Refactored to become the AlertOrchestrator, removing direct LLM analysis logic
-- **FastAPI Application**: Updated to use the new AlertOrchestrator instead of AlertService
-- **Configuration System**: Extended to support agent registry configuration and agent-specific MCP server assignments (REQ-2.15)
+- **FastAPI Application**: Updated to use the new AlertOrchestrator with agent class instantiation
+- **Configuration System**: Extended to support agent registry configuration mapping alert types to agent classes (REQ-2.15)
 - **ProcessingStatus**: Enhanced to include current processing agent information (REQ-2.9)
-- **MCPClient**: Updated to work with agent-specific MCP server subsets instead of global access (REQ-2.13)
+- **MCPClient**: Updated to work with agent-specific MCP server selections provided by agent classes (REQ-2.13)
 
 #### Component Interactions
 
-The new architecture follows a clear delegation pattern with error handling:
+The new architecture follows a clear delegation pattern with inheritance-based specialization:
 1. API Layer receives alerts and delegates to AlertOrchestrator
 2. AlertOrchestrator downloads runbooks and consults AgentRegistry
-3. AgentRegistry returns appropriate agent for the alert type or returns error if none available (REQ-2.24)
-4. AlertOrchestrator delegates processing to the selected agent with agent-specific MCP server subset
-5. Specialized agents perform LLM analysis using only their assigned MCP servers (REQ-2.8, REQ-2.13)
-6. Agents report progress through AlertOrchestrator to WebSocket Manager (REQ-2.14)
-7. Results flow back through the orchestration chain with agent-specific details (REQ-2.10)
+3. AgentRegistry returns first available agent class for the alert type or returns error if none available (REQ-2.24)
+4. AgentFactory resolves agent class name to actual class and instantiates with dependency injection:
+   - LLM client for processing
+   - MCP client for tool interactions  
+   - Progress callback for status updates
+   - MCP server registry for configuration lookup
+5. AlertOrchestrator delegates processing to agent via process_alert(alert, runbook)
+6. Agent internally configures itself:
+   - Calls its mcp_servers() method to get required MCP server IDs
+   - Retrieves server configs from injected MCP registry
+   - Configures MCP client with its specific servers
+   - Calls custom_instructions() for agent-specific guidance
+   - Combines general + MCP server + custom instructions
+7. BaseAgent performs iterative LLM analysis using only the agent's specified MCP servers (REQ-2.8, REQ-2.13)
+8. Agents report progress through AlertOrchestrator to WebSocket Manager (REQ-2.14)
+9. Results flow back through the orchestration chain with agent-specific details (REQ-2.10)
 
 ### Data Flow Design
 
@@ -131,6 +150,7 @@ sequenceDiagram
     participant API as FastAPI Application
     participant AO as Alert Orchestrator
     participant AR as Agent Registry
+    participant AF as Agent Factory
     participant MSR as MCP Server Registry
     participant KA as Kubernetes Agent
     participant WS as WebSocket Manager
@@ -149,11 +169,12 @@ sequenceDiagram
     
     AO->>AR: get_agent_for_alert_type()
     alt Agent Available
-        AR-->>AO: Kubernetes Agent
-        AO->>MSR: get_mcp_servers_for_agent(kubernetes)
-        MSR-->>AO: K8s MCP Server Subset
+        AR-->>AO: Agent Class Name ("KubernetesAgent")
+        AO->>AF: create_agent("KubernetesAgent")
+        AF-->>AO: Instantiated KubernetesAgent
         
-        AO->>KA: process_alert(alert, runbook, mcp_subset)
+        AO->>KA: process_alert(alert, runbook)
+        Note over KA: Agent internally calls mcp_servers(),<br/>gets configs from registry,<br/>configures MCP client
         KA->>WS: Update status (processing - Kubernetes Agent)
         WS->>Client: Status update
         
@@ -200,37 +221,36 @@ sequenceDiagram
 #### New Data Models
 
 ```python
-AgentConfig:
-  - agent_type: str (e.g., "kubernetes", "argocd")
-  - agent_class: str (fully qualified class name)
-  - enabled: bool
-  - alert_types: List[str] (supported alert types)
-  - mcp_servers: List[str] (assigned MCP server subset)
-  - configuration: Dict[str, Any] (agent-specific config)
-
 AgentRegistryEntry:
   - alert_type: str
-  - agent_type: str
-  - priority: int (for handling conflicts)
+  - agent_class: str (fully qualified class name, e.g., "KubernetesAgent")
   - enabled: bool
-
-AgentProcessingContext:
-  - alert: Alert
-  - runbook_content: str
-  - agent_config: AgentConfig
-  - assigned_mcp_servers: List[str]
-  - progress_callback: Optional[Callable]
 
 MCPServerConfig:
   - server_id: str
   - server_type: str (e.g., "kubernetes", "argocd", "database")
   - enabled: bool
   - connection_params: Dict[str, Any]
-  - domains: List[str] (infrastructure domains this server supports)
+  - instructions: str (embedded instructions specific to this MCP server)
 
-MCPServerRegistry:
-  - servers: Dict[str, MCPServerConfig]
-  - agent_assignments: Dict[str, List[str]]
+BaseAgent (Abstract Class):
+  - Abstract method: mcp_servers() -> List[str]  # Returns MCP server IDs from global registry
+  - Abstract method: custom_instructions() -> str  # Returns agent-specific instructions
+  - Common method: process_alert(alert, runbook, callback) -> str  # Standard processing logic
+
+AgentFactory:
+  - Maintains registry of agent class name -> class mappings
+  - Resolves agent class names from configuration to actual Python classes
+  - Injects common dependencies (LLM client, MCP client, progress callback, MCP registry)
+  - Returns fully configured agent instances ready for processing
+
+AgentProcessingContext:
+  - alert: Alert
+  - runbook_content: str
+  - agent_instance: BaseAgent
+  - selected_mcp_servers: List[MCPServerConfig]  # Retrieved from global registry
+  - combined_instructions: str  # General + MCP + Custom instructions
+  - progress_callback: Optional[Callable]
 ```
 
 #### Modified Data Models
@@ -381,12 +401,6 @@ The multi-layer architecture enhances error handling by:
   - **Detection**: MCP connection failures for agent-specific servers
   - **Recovery**: Only affects the specific agent, other agents continue working (REQ-2.25, REQ-2.22)
 
-### Resilience Patterns
-
-- **Circuit Breaker**: Disable failing agents after repeated failures
-- **Retry Logic**: Orchestrator retries with different agents if configured
-- **Graceful Degradation**: Fall back to basic processing if specialized agents fail
-
 ## Configuration & Deployment
 
 ### Configuration Changes
@@ -404,21 +418,116 @@ The multi-layer architecture enhances error handling by:
 - **max_llm_mcp_iterations**: Can be overridden per agent type
 - **mcp_servers**: Extended to support global registry with agent-specific assignments (REQ-2.15)
 
-### Deployment Considerations
+#### Example Configuration
 
-#### Deployment Strategy
+```yaml
+# Agent Registry - Maps alert types to agent classes
+agent_registry:
+  - alert_type: "Namespace is stuck in Terminating"
+    agent_class: "KubernetesAgent"
+    enabled: true
+  - alert_type: "ArgoCD Sync Failed"
+    agent_class: "ArgoCDAgent"
+    enabled: true
+  - alert_type: "EKS Node Group Issues"
+    agent_class: "KubernetesAWSAgent"
+    enabled: true
 
-The multi-layer architecture can be deployed as a backward-compatible update:
-1. Deploy new code with existing configuration
-2. Gradually migrate alert type mappings to new agent registry
-3. Enable specialized agents as they become available
+# Global MCP Server Registry - Reusable across all agents
+mcp_server_registry:
+  kubernetes-server:
+    server_id: "kubernetes-server"
+    server_type: "kubernetes"
+    enabled: true
+    connection_params:
+      command: "npx"
+      args: ["-y", "kubernetes-mcp-server@latest"]
+    instructions: |
+      For Kubernetes operations:
+      - Be careful with cluster-scoped resource listings in large clusters
+      - Focus on namespace-specific resources first (kubectl get pods -n <namespace>)
+      - Use kubectl describe before kubectl get for detailed information
+      - Check pod logs only when necessary (they can be large)
+      - Consider resource quotas and limits when analyzing issues
+      
+  argocd-server:
+    server_id: "argocd-server"
+    server_type: "argocd"
+    enabled: true
+    connection_params:
+      command: "npx"
+      args: ["-y", "argocd-mcp-server@latest"]
+    instructions: |
+      For ArgoCD operations:
+      - Check application sync status and health first
+      - Look at sync operations and their results
+      - Consider GitOps workflow and source repository state
+      - Pay attention to resource hooks and sync waves
+      - Check for drift between desired and actual state
+      
+  aws-server:
+    server_id: "aws-server"
+    server_type: "aws"
+    enabled: true
+    connection_params:
+      command: "npx"
+      args: ["-y", "aws-mcp-server@latest"]
+    instructions: |
+      For AWS operations:
+      - Check IAM permissions when resources are inaccessible
+      - Consider regional and availability zone issues
+      - Look at CloudWatch metrics for resource utilization
+      - Check security groups and NACLs for network issues
 
-#### Rollback Strategy
+# Agent classes define their MCP server requirements in code:
+# - KubernetesAgent.mcp_servers() returns ["kubernetes-server"]
+# - ArgoCDAgent.mcp_servers() returns ["argocd-server"]  
+# - KubernetesAWSAgent.mcp_servers() returns ["kubernetes-server", "aws-server"]
+```
 
-Rollback is simplified by maintaining API compatibility:
-1. Revert to previous AlertService implementation
-2. Disable agent registry configuration
-3. Existing alert processing continues without interruption
+#### Implementation Example
+
+```python
+# AgentFactory implementation
+class AgentFactory:
+    def __init__(self, llm_client: LLMClient, mcp_client: MCPClient, 
+                 progress_callback: Callable, mcp_registry: MCPServerRegistry):
+        self.llm_client = llm_client
+        self.mcp_client = mcp_client
+        self.progress_callback = progress_callback
+        self.mcp_registry = mcp_registry
+        
+        # Registry of available agent classes
+        self.agent_classes = {
+            "KubernetesAgent": KubernetesAgent,
+            "ArgoCDAgent": ArgoCDAgent,
+            "KubernetesAWSAgent": KubernetesAWSAgent,
+        }
+    
+    def create_agent(self, agent_class_name: str) -> BaseAgent:
+        """Convert class name string to instantiated agent with dependencies"""
+        if agent_class_name not in self.agent_classes:
+            raise ValueError(f"Unknown agent class: {agent_class_name}")
+        
+        agent_class = self.agent_classes[agent_class_name]
+        
+        # Instantiate with common dependencies
+        return agent_class(
+            llm_client=self.llm_client,
+            mcp_client=self.mcp_client,
+            progress_callback=self.progress_callback,
+            mcp_registry=self.mcp_registry
+        )
+
+# Usage in AlertOrchestrator
+agent_class_name = agent_registry.get_agent_for_alert_type("Namespace is stuck in Terminating")
+# Returns: "KubernetesAgent"
+
+agent = agent_factory.create_agent(agent_class_name)
+# Returns: KubernetesAgent instance with all dependencies injected
+
+result = agent.process_alert(alert, runbook_content)
+```
 
 ## Testing Strategy
 
@@ -426,54 +535,125 @@ Rollback is simplified by maintaining API compatibility:
 
 #### Test Coverage Areas
 
-- Agent registry lookup logic and edge cases
-- Agent factory creation and initialization
-- Orchestrator delegation and error handling
-- Individual agent processing logic
-- Configuration validation and loading
-- MCP server registry and agent-specific assignments (REQ-2.6, REQ-2.7, REQ-2.8)
-- Error handling when no agent is available (REQ-2.24)
-- Agent isolation and failure modes (REQ-2.22, REQ-2.25, REQ-2.28)
+- **AgentRegistry**: Lookup logic, edge cases, agent class name resolution
+- **AgentFactory**: Class resolution, dependency injection, error handling for unknown classes
+- **BaseAgent**: Abstract method enforcement, common processing logic, instruction combination
+- **Individual Agent Classes**: mcp_servers() and custom_instructions() method implementations
+- **AlertOrchestrator**: Delegation logic, error handling, progress callback integration
+- **MCPServerRegistry**: Configuration lookup, server config validation
+- **Error Handling**: Unknown alert types, missing agent classes, agent processing failures
+- **Configuration**: Agent registry validation, MCP server registry validation
+
+#### Mock Dependencies
+
+```python
+# Unit test mocks
+class MockLLMClient:
+    def process_with_tools(self, instructions, tools): 
+        return "Mock analysis result"
+
+class MockMCPClient:
+    def list_tools(self): 
+        return ["kubectl", "helm"]
+    def call_tool(self, tool, args): 
+        return "Mock tool output"
+
+class MockGitHubClient:
+    def download_runbook(self, alert_type): 
+        return "# Mock runbook content"
+
+class MockProgressCallback:
+    def __call__(self, status): 
+        self.last_status = status
+```
 
 ### Integration Testing
 
-#### Integration Points to Test
+#### Integration Test Scenarios
 
-- End-to-end alert processing through new architecture
-- Agent delegation with real LLM and MCP interactions
-- WebSocket progress updates during agent processing with agent information (REQ-2.9, REQ-2.14)
-- Error propagation through orchestration layers
-- Agent-specific MCP server subset connectivity (REQ-2.13)
-- MCP server failure isolation between agents (REQ-2.25)
+- **Complete Alert Processing Flow**: Alert → Orchestrator → AgentFactory → Agent → Result
+- **Agent Class Inheritance**: BaseAgent common logic + specialized agent customization
+- **MCP Server Integration**: Agent requests specific servers, processes with correct tools
+- **Error Propagation**: Failures at different layers bubble up with appropriate error messages
+- **Progress Updates**: WebSocket callbacks triggered at correct processing stages
+- **Multi-Agent Scenarios**: Different alert types routed to different agent classes
+- **Agent Isolation**: One agent failure doesn't affect other agent processing
 
-### End-to-End Testing
+#### Mock Service Strategy
 
-#### Test Scenarios
+```python
+@pytest.fixture
+def integration_test_services():
+    """Provides fully mocked external services for integration tests"""
+    return {
+        'github_client': MockGitHubClient(),
+        'llm_client': MockLLMClient(), 
+        'mcp_client': MockMCPClient(),
+        'progress_callback': MockProgressCallback(),
+        'websocket_manager': MockWebSocketManager()
+    }
 
-- Process "Namespace is stuck in Terminating" alert using Kubernetes agent with K8s MCP server subset (REQ-2.3, REQ-2.8)
-- Handle unknown alert types with clear error messages (REQ-2.24)
-- Verify agent failure handling and error reporting with agent-specific details (REQ-2.28)
-- Test configuration changes and agent registry updates
-- Test MCP server assignment changes and agent isolation (REQ-2.27)
-- Verify concurrent processing with different agents using different MCP server subsets (REQ-2.16)
+@pytest.mark.integration 
+async def test_kubernetes_alert_full_flow(integration_test_services):
+    """Test complete flow: Alert → KubernetesAgent → Result"""
+    # Configure mocks for success scenario
+    services = integration_test_services
+    services['llm_client'].set_response("Namespace finalizers removed")
+    
+    # Setup real components under test
+    orchestrator = AlertOrchestrator(services)
+    
+    # Process alert
+    alert = Alert(type="Namespace is stuck in Terminating")
+    result = await orchestrator.process_alert(alert)
+    
+    # Verify flow
+    assert result.status == "completed"
+    assert result.agent_used == "KubernetesAgent"
+    assert services['progress_callback'].was_called()
 
-## Monitoring & Observability
+@pytest.mark.integration
+async def test_unknown_alert_error_handling(integration_test_services):
+    """Test error handling for unknown alert types"""
+    orchestrator = AlertOrchestrator(integration_test_services)
+    
+    alert = Alert(type="Unknown Alert Type")
+    result = await orchestrator.process_alert(alert)
+    
+    assert result.status == "error"
+    assert "No specialized agent available" in result.error_message
+```
 
-### Monitoring Requirements
+### Test Structure
 
-Enhanced monitoring for the multi-layer architecture:
-- Agent selection and delegation metrics
-- Per-agent processing time and success rates
-- Agent availability and health status
+```
+tests/
+├── unit/
+│   ├── test_agent_registry.py       # AgentRegistry logic
+│   ├── test_agent_factory.py        # AgentFactory class resolution
+│   ├── test_base_agent.py          # BaseAgent common logic
+│   ├── test_kubernetes_agent.py    # KubernetesAgent specifics
+│   ├── test_alert_orchestrator.py  # Orchestrator delegation
+│   └── test_mcp_server_registry.py # MCP server configuration
+├── integration/
+│   ├── test_alert_processing_flow.py    # Complete alert flows
+│   ├── test_agent_inheritance.py        # BaseAgent + specialized agents
+│   ├── test_error_handling.py          # Error propagation scenarios
+│   ├── test_mcp_server_integration.py  # Agent MCP server selection
+│   └── test_multi_agent_scenarios.py   # Multiple agents processing
+└── fixtures/
+    ├── mock_services.py            # Mock external services
+    ├── test_configs.py             # Test configurations
+    └── sample_data.py              # Test alerts and runbooks
+```
 
-### Metrics to Track
+### Testing Benefits
 
-- **Agent Selection Time**: Time to select appropriate agent (< 1ms target) (REQ-2.17)
-- **Agent Processing Success Rate**: Success rate per agent type (> 95% target) (REQ-2.21)
-- **Orchestration Overhead**: Additional time introduced by orchestration (< 5ms target) (REQ-2.18)
-- **MCP Server Subset Initialization Time**: Time to initialize agent-specific MCP server subsets (REQ-2.17)
-- **Agent Isolation Effectiveness**: Percentage of agent failures that don't affect other agents (> 99% target) (REQ-2.22)
-- **Error Handling Coverage**: Percentage of errors that return clear, agent-specific messages (> 95% target) (REQ-2.24, REQ-2.28)
+- **Fast Execution**: All tests use mocks, no external service delays
+- **Predictable Results**: Same outcomes every run, no flaky tests
+- **Comprehensive Coverage**: Can test all error scenarios and edge cases
+- **Easy CI/CD**: No external dependencies, runs in any environment
+- **Developer Friendly**: Quick feedback loop, runs locally without setup
 
 ### Logging Strategy
 
@@ -484,15 +664,6 @@ Enhanced logging includes:
 - MCP server subset assignments and initialization (REQ-2.7, REQ-2.8)
 - Clear error messages when no agent is available (REQ-2.24)
 - Agent-specific error details and component failures (REQ-2.28)
-
-### Alerting Strategy
-
-New alerting rules for:
-- Agent failures exceeding threshold
-- Agent registry configuration errors
-- Orchestration delegation failures
-- MCP server subset connectivity issues
-- Agent isolation failures (when one agent failure affects others)
 
 ## Migration & Backward Compatibility
 
@@ -541,56 +712,60 @@ Full backward compatibility maintained:
 - **Cons**: Configuration complexity, performance overhead
 - **Decision**: Rejected in favor of simple mapping for initial implementation
 
+### Alternative 4: Configuration-Based Agents
+- **Description**: Define agents purely through configuration files without inheritance
+- **Pros**: No code changes needed to add agents, pure configuration approach
+- **Cons**: Limited customization, complex configuration format, harder to add specialized logic
+- **Decision**: Rejected in favor of inheritance-based approach for flexibility
+
+### Alternative 5: Multi-Agent Processing
+- **Description**: Allow multiple agents to process the same alert type simultaneously and synthesize results
+- **Pros**: Comprehensive analysis from multiple perspectives, better coverage
+- **Cons**: Increased complexity, result synthesis challenges, performance overhead
+- **Decision**: Deferred to future enhancement; current implementation uses first-match selection
+
 ## Implementation Considerations
 
 ### Technical Debt
 
 The refactoring addresses existing technical debt:
 - Removes monolithic AlertService responsibilities
-- Improves testability through separation of concerns
-- Enables future optimizations at agent level
+- Improves testability through separation of concerns and inheritance patterns
+- Enables future optimizations at agent class level
+- Simplifies agent selection using first-match approach for initial implementation
+- Eliminates code duplication through BaseAgent shared implementation
+- Provides clean extensibility through inheritance-based specialization
 
 ### Dependencies
 
-- Python abc module for abstract base classes
-- Enhanced configuration validation
-- Existing LLM and MCP integrations remain unchanged
+- Python abc module for abstract base classes and inheritance patterns
+- Enhanced configuration validation for agent class mappings
+- Existing LLM and MCP integrations remain unchanged (reused by BaseAgent)
+- Agent class registration and instantiation mechanism
 
 ### Constraints
 
-- Must maintain backward compatibility
-- Cannot introduce breaking changes to existing API
 - Must support future extension without architectural changes
 
 ## Documentation Requirements
 
 ### Code Documentation
 
-- Abstract base agent class with clear interface documentation
-- Agent registry configuration format and examples
-- Agent implementation patterns and best practices
-- MCP server registry configuration and agent assignment patterns (REQ-2.6, REQ-2.7, REQ-2.8)
+- BaseAgent abstract class with clear interface documentation and inheritance patterns
+- Agent registry configuration format mapping alert types to agent classes
+- Agent class implementation patterns and best practices
+- MCP server registry configuration with embedded instructions (REQ-2.6)
+- Agent class MCP server selection patterns (REQ-2.7, REQ-2.8)
 
 ### API Documentation
 
-- Updated API documentation to reflect new processing status fields including current agent (REQ-2.9)
-- Agent-specific error codes and messages (REQ-2.24, REQ-2.28)
-- Configuration reference for agent registry and MCP server assignments (REQ-2.15)
-
-### User Documentation
-
-- Migration guide for existing users
-- Agent development guide for future extensions
-- Troubleshooting guide for agent-specific issues
-- MCP server configuration and assignment guide
-- Error handling and recovery procedures
+- Updated API documentation to reflect new processing status fields including current agent class (REQ-2.9)
+- Agent class-specific error codes and messages (REQ-2.24, REQ-2.28)
+- Configuration reference for agent registry and MCP server registry (REQ-2.15)
 
 ### Architecture Documentation
 
-- Updated system architecture diagrams including MCP server organization layer
-- Agent interaction patterns and data flow with MCP server subsets
-- Performance characteristics and optimization guidelines
-- Agent isolation and failure mode documentation
+- Updated /docs/requirements.md and /docs/design documentation
 
 ---
 
