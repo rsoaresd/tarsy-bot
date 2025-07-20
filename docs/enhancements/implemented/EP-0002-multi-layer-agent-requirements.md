@@ -31,7 +31,7 @@ The current SRE AI Agent processes all alerts through a single, monolithic `Aler
 The current system consists of:
 - **AlertService** (`backend/app/services/alert_service.py`): Monolithic service handling all alert processing
 - **LLMManager** (`backend/app/integrations/llm/client.py`): LLM provider management and analysis
-- **MCPClient** (`backend/app/integrations/mcp/mcp_client.py`): MCP server integration and tool execution
+- **MCPClient** (`backend/app/integrations/mcp/client.py`): MCP server integration and tool execution
 - **RunbookService** (`backend/app/services/runbook_service.py`): GitHub runbook download functionality
 - **WebSocketManager** (`backend/app/services/websocket_manager.py`): Real-time progress updates
 

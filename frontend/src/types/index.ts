@@ -3,7 +3,7 @@
  */
 
 export interface Alert {
-  alert: string;
+  alert_type: string;
   severity: string;
   environment: string;
   cluster: string;
@@ -11,6 +11,7 @@ export interface Alert {
   pod?: string;
   message: string;
   runbook: string;
+  context?: string;
   timestamp?: string;
 }
 
@@ -37,7 +38,7 @@ export interface WebSocketMessage {
 }
 
 export interface AlertFormData {
-  alert: string;
+  alert_type: string;
   severity: string;
   environment: string;
   cluster: string;
@@ -45,6 +46,7 @@ export interface AlertFormData {
   pod: string;
   message: string;
   runbook: string;
+  context: string;
 }
 
 export interface AlertTypeOption {

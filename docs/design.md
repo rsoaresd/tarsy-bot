@@ -20,6 +20,7 @@
 This design document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant architectural changes are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
 
 ### Recent Changes
+- **EP-0002 (IMPLEMENTED)**: Multi-Layer Agent Architecture - Transformed monolithic alert processing into orchestrator + specialized agents architecture
 - This document was established as the baseline technical design
 - Future changes will be tracked through Enhancement Proposals in `docs/enhancements/`
 
@@ -29,30 +30,33 @@ For proposed architectural changes or new design patterns, see the [Enhancement 
 
 ## System Overview
 
-The SRE AI Agent is a **distributed, event-driven system** designed to automate incident response through intelligent alert processing. The system implements an **iterative, multi-step analysis architecture** where Large Language Models (LLMs) dynamically select and orchestrate Model Context Protocol (MCP) servers to gather system data and perform comprehensive incident analysis.
+The SRE AI Agent is a **distributed, event-driven system** designed to automate incident response through intelligent alert processing using a **multi-layer agent architecture**. The system implements an **iterative, multi-step analysis architecture** where an orchestrator layer delegates alerts to specialized agents that use Large Language Models (LLMs) to dynamically select and orchestrate Model Context Protocol (MCP) servers for comprehensive incident analysis.
 
 ### Core Design Principles
 
-1. **Iterative Intelligence**: Multi-step LLM-driven analysis that mimics human troubleshooting methodology
-2. **Dynamic Tool Selection**: LLMs intelligently choose appropriate MCP tools based on context
-3. **Extensible Architecture**: Plugin-based design for easy integration of new LLM providers and MCP servers
-4. **Real-time Communication**: WebSocket-based progress updates and status tracking
-5. **Resilient Design**: Graceful degradation and comprehensive error handling
+1. **Multi-Layer Agent Architecture**: Orchestrator layer delegates processing to specialized agents based on alert type mappings
+2. **Agent Specialization**: Domain-specific agents with focused MCP server subsets and specialized instructions
+3. **Iterative Intelligence**: Multi-step LLM-driven analysis that mimics human troubleshooting methodology
+4. **Dynamic Tool Selection**: Agents intelligently choose appropriate MCP tools from their assigned server subsets
+5. **Extensible Architecture**: Inheritance-based agent design for easy addition of new specialized agents
+6. **Real-time Communication**: WebSocket-based progress updates and status tracking with agent identification
+7. **Resilient Design**: Graceful degradation and comprehensive error handling across agent layers
 
 ### Technology Stack
 
 **Backend:**
 - **Framework**: FastAPI (Python 3.11+) with asyncio for asynchronous processing
+- **Agent Architecture**: Abstract base class with inheritance-based specialization
 - **LLM Integration**: LangChain framework supporting multiple providers (OpenAI, Google Gemini, xAI Grok)
-- **MCP Integration**: Official MCP SDK with stdio transport
-- **Communication**: WebSocket for real-time updates, REST API for external integration
-- **Configuration**: Environment-based configuration with validation
-- **Logging**: Structured logging with separate channels for different components
+- **MCP Integration**: Official MCP SDK with stdio transport, agent-specific server subsets
+- **Communication**: WebSocket for real-time updates with agent context, REST API for external integration
+- **Configuration**: Environment-based configuration with agent registry and MCP server registry
+- **Logging**: Structured logging with separate channels for orchestrator and agent components
 
 **Frontend (Development/Testing Only):**
 - **Framework**: React with TypeScript
 - **UI Library**: Material-UI (MUI) for modern, responsive interface
-- **Communication**: Axios for HTTP requests, native WebSocket for real-time updates
+- **Communication**: Axios for HTTP requests, native WebSocket for real-time updates including agent status
 
 ---
 
@@ -62,7 +66,7 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                                   SRE AI Agent                                      │
+│                            SRE AI Agent - Multi-Layer Architecture                  │
 │                                                                                     │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐    │
 │  │                              Frontend Layer                                 │    │
@@ -70,27 +74,45 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 │  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
 │  │  │   Alert Form    │    │ Processing      │    │ Result Display  │          │    │
 │  │  │   Component     │    │ Status          │    │ Component       │          │    │
+│  │  │                 │    │ (Agent-Aware)   │    │ (Agent Details) │          │    │
 │  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
 │  └─────────────────────────────────────────────────────────────────────────────┘    │
 │                                      │                                              │
 │                                   HTTP/WebSocket                                    │
 │                                      │                                              │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐    │
-│  │                              Backend Layer                                  │    │
+│  │                        API Gateway & Orchestrator Layer                     │    │
 │  │                                                                             │    │
 │  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
-│  │  │   FastAPI       │    │   WebSocket     │    │   Background    │          │    │
-│  │  │   Application   │    │   Manager       │    │   Task Queue    │          │    │
+│  │  │   FastAPI       │    │   Alert         │    │   WebSocket     │          │    │
+│  │  │   Application   │    │   Orchestrator  │    │   Manager       │          │    │
 │  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
 │  │                                                                             │    │
 │  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
-│  │  │   Alert         │    │   LLM           │    │   MCP Client    │          │    │
-│  │  │   Service       │    │   Manager       │    │   Manager       │          │    │
+│  │  │   Agent         │    │   Agent         │    │   MCP Server    │          │    │
+│  │  │   Registry      │    │   Factory       │    │   Registry      │          │    │
+│  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
+│  └─────────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                     │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐    │
+│  │                        Specialized Agent Layer                              │    │
+│  │                                                                             │    │
+│  │  ┌─────────────────────────────────────────────────────────────────────┐    │    │
+│  │  │                         BaseAgent                                   │    │    │
+│  │  │              (Common Processing Logic)                              │    │    │
+│  │  └─────────────────────────────────────────────────────────────────────┘    │    │
+│  │                                  │                                          │    │
+│  │          ┌──────────────────────────────────────────────────┐               │    │
+│  │          │                      │                           │               │    │
+│  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
+│  │  │   Kubernetes    │    │   ArgoCD        │    │   AWS           │          │    │
+│  │  │   Agent         │    │   Agent         │    │   Agent         │          │    │
+│  │  │   (IMPLEMENTED) │    │   (Future)      │    │   (Future)      │          │    │
 │  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
 │  │                                                                             │    │
 │  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
-│  │  │   Runbook       │    │   Prompt        │    │   Logger        │          │    │
-│  │  │   Service       │    │   Builder       │    │   System        │          │    │
+│  │  │   LLM           │    │   MCP Client    │    │   Runbook       │          │    │
+│  │  │   Manager       │    │   Manager       │    │   Service       │          │    │
 │  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
 │  └─────────────────────────────────────────────────────────────────────────────┘    │
 │                                                                                     │
@@ -100,10 +122,12 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 │  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
 │  │  │   LLM           │    │   MCP Server    │    │   GitHub        │          │    │
 │  │  │   Providers     │    │   Ecosystem     │    │   Integration   │          │    │
-│  │  │                 │    │                 │    │                 │          │    │
-│  │  │ • OpenAI        │    │ • Kubernetes    │    │ • Runbook       │          │    │
-│  │  │ • Google Gemini │    │ • Database      │    │   Download      │          │    │
-│  │  │ • xAI Grok      │    │ • Monitoring    │    │ • Authentication│          │    │
+│  │  │                 │    │   (Agent-       │    │                 │          │    │
+│  │  │ • OpenAI        │    │    Specific)    │    │ • Runbook       │          │    │
+│  │  │ • Google Gemini │    │ • Kubernetes    │    │   Download      │          │    │
+│  │  │ • xAI Grok      │    │ • ArgoCD        │    │ • Authentication│          │    │
+│  │  │                 │    │ • Database      │    │                 │          │    │
+│  │  │                 │    │ • Monitoring    │    │                 │          │    │
 │  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
 │  └─────────────────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────────────┘
@@ -114,32 +138,45 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 ```mermaid
 graph TD
     A[External Alert] --> B[API Gateway]
-    B --> C[Alert Service]
-    C --> D[WebSocket Manager]
-    D --> E[Client Interface]
+    B --> C[AlertService]
+    C --> D[Agent Registry]
+    D --> E[Agent Factory]
+    E --> F[Specialized Agent]
     
-    C --> F[Runbook Service]
-    F --> G[GitHub API]
+    C --> G[Runbook Service]
+    G --> H[GitHub API]
     
-    C --> H[MCP Client]
-    H --> I[MCP Servers]
+    C --> I[WebSocket Manager]
+    I --> J[Client Interface]
     
-    C --> J[LLM Manager]
-    J --> K[LLM Providers]
+    F --> K[LLM Manager]
+    K --> L[LLM Providers]
     
-    C --> L[Processing Engine]
-    L --> M[Progress Updates]
-    M --> D
+    F --> M[MCP Client]
+    M --> N[Agent-Specific MCP Servers]
     
-    subgraph "Iterative Analysis Loop"
-        L --> N[Tool Selection]
-        N --> H
-        H --> O[Data Collection]
-        O --> P[Partial Analysis]
-        P --> Q{Continue?}
-        Q -->|Yes| N
-        Q -->|No| R[Final Analysis]
+    F --> O[MCP Server Registry]
+    O --> P[Server Configurations with Instructions]
+    
+    F --> PB[PromptBuilder]
+    PB --> Q[Instruction Composition]
+    
+    C --> R[Progress Updates]
+    R --> I
+    
+    subgraph "Agent Processing Loop"
+        F --> Q
+        Q --> S[Tool Selection from Agent Subset]
+        S --> M
+        M --> T[Data Collection]
+        T --> U[Partial Analysis via PromptBuilder]
+        U --> V{Continue?}
+        V -->|Yes| S
+        V -->|No| W[Final Analysis via PromptBuilder]
     end
+    
+    W --> C
+    C --> I
 ```
 
 ---
@@ -148,181 +185,354 @@ graph TD
 
 ### 1. API Gateway Layer
 
-The main application layer will provide the HTTP API and WebSocket endpoints:
+The main application layer provides HTTP API and WebSocket endpoints with agent-aware responses:
 
 ```
 Core API Endpoints:
-POST /alerts              # Submit alert for processing
-GET /processing-status/{id}  # Check processing status
-GET /alert-types          # Get supported alert types
+POST /alerts              # Submit alert for processing (delegates to agents)
+GET /processing-status/{id}  # Check processing status (includes agent info)
+GET /alert-types          # Get supported alert types (from agent registry)
 GET /health               # Health check
-WebSocket /ws/{id}        # Real-time progress updates
+WebSocket /ws/{id}        # Real-time progress updates (agent-aware)
 ```
 
 **Core Features:**
-- **Asynchronous Processing**: Background task management for alert processing
+- **Agent-Aware Processing**: Background task management with agent delegation
 - **CORS Support**: Configurable cross-origin resource sharing
-- **Lifecycle Management**: Startup/shutdown hooks for service initialization
-- **State Management**: Processing status tracking and persistence
-- **Real-time Communication**: WebSocket-based progress broadcasting
+- **Lifecycle Management**: Startup/shutdown hooks for service and agent initialization
+- **State Management**: Processing status tracking with agent identification
+- **Real-time Communication**: WebSocket-based progress broadcasting with agent context
 
-### 2. Alert Service
+### 2. AlertService
 
-The core orchestration service that implements the iterative processing engine:
+The core service that implements agent delegation and manages the overall processing pipeline:
 
 ```
 Interface Pattern:
 class AlertService:
-    def __init__(self, dependencies: ServiceDependencies)
-    async def process_alert(self, alert: Alert, callback: ProgressCallback) -> AnalysisResult
-    async def get_processing_status(self, alert_id: str) -> ProcessingStatus
+    def __init__(self, settings: Settings)
+    async def initialize(self)
+    async def process_alert(self, alert: Alert, progress_callback: Optional[Callable] = None) -> str
 ```
 
 **Core Responsibilities:**
-- **Workflow Orchestration**: Manage the complete alert processing pipeline
-- **Iterative Processing**: Implement the multi-step LLM→MCP analysis loop
-- **Progress Tracking**: Real-time status updates via callback mechanism
-- **Error Handling**: Comprehensive error management and recovery
-- **Safety Mechanisms**: Prevent infinite loops and resource exhaustion
+- **Service Initialization**: Initialize all required services (MCP client, LLM manager, agent factory, registries)
+- **Agent Selection**: Use agent registry to determine appropriate specialized agent for alert type
+- **Runbook Management**: Download runbooks using RunbookService
+- **Agent Delegation**: Use agent factory to instantiate and delegate processing to specialized agents
+- **Progress Coordination**: Coordinate progress callbacks and status updates
+- **Error Handling**: Handle agent-level errors and provide formatted error responses
+- **Result Formatting**: Format and return agent analysis results with context
 
 **Processing Algorithm:**
-1. **Initialization**: Validate dependencies and prepare resources
-2. **Context Gathering**: Collect runbook and available tools
-3. **Iterative Analysis Loop** (bounded iterations):
-   - **Tool Selection**: LLM determines required tools and parameters
-   - **Data Collection**: Execute selected tools in parallel where possible
-   - **Incremental Analysis**: LLM processes collected data
-   - **Continuation Decision**: LLM determines if more data is needed
-4. **Final Analysis**: Comprehensive analysis with all collected information
-5. **Result Formatting**: Structure output for consumption
+1. **Prerequisites Validation**: Validate LLM availability and agent factory initialization
+2. **Agent Selection**: Use agent registry to determine appropriate specialized agent class
+3. **Runbook Download**: Retrieve runbook content from GitHub using RunbookService
+4. **Agent Instantiation**: Use agent factory to create specialized agent instance with dependencies
+5. **Agent Delegation**: Delegate processing to specialized agent with runbook content and progress callbacks
+6. **Result Processing**: Format and return agent analysis results with context and metadata
+7. **Error Handling**: Handle and format any errors that occur during processing
 
-### 3. LLM Manager
+### 3. Agent Registry
 
-Unified LLM client implementation using LangChain framework:
+Static registry that maintains mappings between alert types and specialized agent class names:
+
+```
+Interface Pattern:
+class AgentRegistry:
+    def __init__(self, config: Optional[Dict[str, str]] = None)
+    def get_agent_for_alert_type(self, alert_type: str) -> Optional[str]
+    def get_supported_alert_types(self) -> List[str]
+```
+
+**Core Features:**
+- **Static Mappings**: Pre-defined alert type to agent class name mappings with default configurations
+- **Fast Lookup**: O(1) dictionary-based agent resolution
+- **Default Configuration**: Built-in default mappings that can be overridden by configuration
+- **Error Handling**: Clear messages when no agent is available for alert type
+
+**Current Mappings:**
+```
+Alert Type Mappings:
+"Namespace is stuck in Terminating" -> "KubernetesAgent"
+# Future mappings:
+# "ArgoCD Sync Failed" -> "ArgoCDAgent"
+```
+
+### 4. Agent Factory
+
+Factory service for instantiating specialized agent classes with dependency injection:
+
+```
+Interface Pattern:
+class AgentFactory:
+    def __init__(self,
+                 llm_client: LLMClient,
+                 mcp_client: MCPClient,
+                 mcp_registry: MCPServerRegistry,
+                 progress_callback: Optional[Any] = None)
+    def create_agent(self, agent_class_name: str) -> BaseAgent
+    def _register_available_agents(self) -> None
+```
+
+**Core Features:**
+- **Dependency Injection**: Automatic injection of required services into agents
+- **Static Class Registry**: Internal registry of available agent classes loaded at initialization
+- **Error Handling**: Clear messages for unknown or failed agent instantiation (raises ValueError)
+- **Resource Management**: Efficient reuse of shared resources (LLM clients, MCP connections)
+
+### 5. BaseAgent (Abstract Base Class)
+
+Abstract base class providing common processing logic and interface for all specialized agents:
+
+```
+Interface Pattern:
+class BaseAgent(ABC):
+    def __init__(self, llm_client: LLMClient, mcp_client: MCPClient, 
+                 mcp_registry: MCPServerRegistry, progress_callback: Optional[Callable] = None)
+    
+    # Abstract methods that must be implemented by specialized agents
+    @abstractmethod
+    def mcp_servers(self) -> List[str]
+    @abstractmethod  
+    def custom_instructions(self) -> str
+    
+    # Prompt building methods (can be overridden by specialized agents)
+    def build_analysis_prompt(self, alert_data: Dict, runbook_content: str, mcp_data: Dict) -> str
+    def build_mcp_tool_selection_prompt(self, alert_data: Dict, runbook_content: str, available_tools: Dict) -> str
+    def build_partial_analysis_prompt(self, alert_data: Dict, runbook_content: str, 
+                                     iteration_history: List[Dict], current_iteration: int) -> str
+    
+    # Common processing methods
+    async def process_alert(self, alert: Alert, runbook_content: str, callback: Optional[Callable] = None) -> Dict[str, Any]
+    async def analyze_alert(self, alert_data: Dict, runbook_content: str, mcp_data: Dict, **kwargs) -> str
+    async def determine_mcp_tools(self, alert_data: Dict, runbook_content: str, available_tools: Dict, **kwargs) -> List[Dict]
+    async def analyze_partial_results(self, alert_data: Dict, runbook_content: str, 
+                                     iteration_history: List[Dict], current_iteration: int, **kwargs) -> str
+```
+
+**Core Features:**
+- **Inheritance-Based Design**: Common logic shared across all specialized agents
+- **Three-Tier Instruction Composition**: General + MCP server + agent-specific instructions
+- **Agent-Specific MCP Access**: Each agent only accesses its assigned MCP server subset
+- **Iterative Processing**: Bounded multi-step LLM analysis with safety mechanisms
+- **Progress Reporting**: Standardized progress callback integration
+- **Error Handling**: Consistent error handling patterns across all agents
+
+**Instruction Composition Pattern:**
+```
+Final Instructions = General Instructions + MCP Server Instructions + Custom Instructions
+
+Where:
+- General Instructions: Universal SRE guidance (from PromptBuilder)
+- MCP Server Instructions: Server-specific guidance (from MCP Server Registry)
+- Custom Instructions: Agent-specific guidance (from specialized agent)
+```
+
+**PromptBuilder Integration:**
+BaseAgent uses a centralized PromptBuilder for consistent prompt construction across all agents. The PromptBuilder handles:
+- Template standardization for all prompt types
+- Context formatting and data presentation
+- Iteration history formatting
+- System message construction
+
+### 6. PromptBuilder
+
+Centralized prompt construction service used by all agents for consistent LLM interactions:
+
+```
+Interface Pattern:
+class PromptBuilder:
+    def build_analysis_prompt(self, context: PromptContext) -> str
+    def build_mcp_tool_selection_prompt(self, context: PromptContext) -> str
+    def build_iterative_mcp_tool_selection_prompt(self, context: PromptContext) -> str
+    def build_partial_analysis_prompt(self, context: PromptContext) -> str
+    def get_general_instructions(self) -> str
+    def get_mcp_tool_selection_system_message(self) -> str
+    def get_partial_analysis_system_message(self) -> str
+```
+
+**Core Features:**
+- **Template Standardization**: Consistent prompt formats across all agents
+- **Context Management**: Structured context data handling via PromptContext dataclass
+- **Iteration History Formatting**: Comprehensive formatting of multi-step analysis history
+- **System Message Generation**: Specialized system messages for different LLM interaction types
+- **Data Formatting**: Intelligent formatting of MCP data and alert information
+- **Shared Instance**: Stateless design with global shared instance for efficiency
+
+**PromptContext Data Structure:**
+```
+@dataclass
+class PromptContext:
+    agent_name: str
+    alert_data: Dict[str, Any]
+    runbook_content: str
+    mcp_data: Dict[str, Any]
+    mcp_servers: List[str]
+    server_guidance: str = ""
+    agent_specific_guidance: str = ""
+    available_tools: Optional[Dict] = None
+    iteration_history: Optional[List[Dict]] = None
+    current_iteration: Optional[int] = None
+    max_iterations: Optional[int] = None
+```
+
+### 7. KubernetesAgent (Specialized Agent)
+
+First implemented specialized agent for Kubernetes-related alerts:
+
+```
+Interface Pattern:
+class KubernetesAgent(BaseAgent):
+    def mcp_servers(self) -> List[str]:
+        return ["kubernetes-server"]
+    
+    def custom_instructions(self) -> str:
+        return ""  # No additional instructions for initial implementation
+```
+
+**Core Features:**
+- **Domain Specialization**: Focused on Kubernetes namespace and pod issues
+- **Focused Tool Access**: Only accesses kubernetes-server MCP tools
+- **Kubernetes Expertise**: Inherits all common processing logic from BaseAgent
+- **Future Extensibility**: Can be extended with custom Kubernetes-specific instructions
+
+### 8. MCP Server Registry
+
+Global registry of all available MCP server configurations with embedded instructions:
+
+```
+Interface Pattern:
+class MCPServerRegistry:
+    def __init__(self, config: Optional[Dict[str, Dict]] = None)
+    def get_server_configs(self, server_ids: List[str]) -> List[MCPServerConfig]
+    def get_server_config(self, server_id: str) -> Optional[MCPServerConfig]
+    def get_all_server_ids(self) -> List[str]
+```
+
+**Core Features:**
+- **Single Source of Truth**: Centralized MCP server configuration management
+- **Default Configurations**: Built-in default server configurations with override capability
+- **Embedded Instructions**: Server-specific LLM instructions stored with configurations
+- **Agent Assignment**: Agents request specific server subsets from registry
+- **Static Configuration**: Immutable registry with simple dictionary-based lookup
+
+**Server Configuration Pattern:**
+```
+MCPServerConfig:
+- server_id: str (e.g., "kubernetes-server")
+- server_type: str (e.g., "kubernetes")
+- enabled: bool
+- connection_params: Dict[str, Any]
+- instructions: str (embedded LLM instructions)
+```
+
+### 9. LLM Manager
+
+Unified LLM client implementation shared across all specialized agents:
 
 ```
 Interface Pattern:
 class LLMManager:
-    def __init__(self, configuration: LLMConfig)
-    def get_client(self, provider: str) -> LLMClient
-    async def analyze_with_context(self, prompt: str, context: Dict) -> AnalysisResult
+    def __init__(self, settings: Settings)
+    def get_client(self, provider: str = None) -> Optional[LLMClient]
+    async def generate_response(self, messages: List[LLMMessage], provider: str = None, **kwargs) -> str
+    def list_available_providers(self) -> List[str]
+    def is_available(self) -> bool
+    def get_availability_status(self) -> Dict
+
+class LLMClient:
+    def __init__(self, provider_name: str, config: Dict)
+    async def generate_response(self, messages: List[LLMMessage], **kwargs) -> str
 ```
 
 **Core Features:**
-- **Provider Abstraction**: Unified interface for multiple LLM providers
-- **Availability Checking**: Runtime validation of provider accessibility
+- **Multi-Provider Support**: LangChain-based unified interface for OpenAI, Gemini, and xAI Grok
+- **Agent Integration**: Consistent LLM access for all specialized agents
+- **Availability Checking**: Runtime validation of provider accessibility and API key availability
 - **Configuration Management**: Environment-based credential and model management
-- **Failover Support**: Automatic fallback to alternative providers
-- **Comprehensive Logging**: Detailed communication logs for debugging
+- **Comprehensive Logging**: Detailed communication logs with request/response tracking
+- **Error Handling**: Consistent error handling and reporting across all providers
 
-**Core Operations:**
-- `select_initial_tools()`: First iteration tool selection
-- `select_next_tools()`: Subsequent iteration tool selection and continuation logic
-- `analyze_incremental()`: Process partial results during iterations
-- `synthesize_final()`: Comprehensive analysis of all collected data
+### 10. MCP Client
 
-### 4. MCP Client Manager
-
-Official MCP SDK-based client for server integration:
+MCP client implementation using the official MCP SDK with agent-specific server management:
 
 ```
 Interface Pattern:
-class MCPClientManager:
-    def __init__(self, server_configurations: Dict[str, ServerConfig])
-    async def initialize_connections(self)
-    async def execute_tool(self, server: str, tool: str, params: Dict) -> ToolResult
-    async def list_available_tools(self) -> Dict[str, List[ToolSchema]]
+class MCPClient:
+    def __init__(self, settings: Settings, mcp_registry: Optional[MCPServerRegistry] = None)
+    async def initialize(self)
+    async def list_tools(self, server_name: Optional[str] = None) -> Dict[str, List[Dict[str, Any]]]
+    async def call_tool(self, server_name: str, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]
 ```
 
 **Core Features:**
-- **Connection Management**: Persistent connections with automatic reconnection
-- **Tool Discovery**: Dynamic tool inventory and schema validation
-- **Parallel Execution**: Concurrent tool execution where possible
-- **Error Handling**: Graceful degradation on individual server failures
-- **Resource Management**: Connection pooling and cleanup
+- **Official MCP SDK Integration**: Uses the official MCP SDK with stdio transport for server connections
+- **Registry-Driven Initialization**: Automatically initializes all servers defined in MCP Server Registry
+- **Connection Management**: Maintains persistent sessions using AsyncExitStack for proper cleanup
+- **Tool Discovery**: Dynamic tool inventory from connected MCP servers with detailed schema information
+- **Comprehensive Logging**: Detailed request/response logging for debugging and monitoring
+- **Error Handling**: Robust error handling with graceful degradation when servers are unavailable
 
-**Server Configuration Pattern:**
-```
-server_configuration = {
-    "server_name": {
-        "type": "server_type",
-        "enabled": boolean,
-        "connection_params": {...},
-        "environment": {...}
-    }
-}
-```
-
-### 5. Runbook Service (`app/services/runbook_service.py`)
+### 11. Runbook Service
 
 External repository integration for runbook management:
 
 ```
 Interface Pattern:
 class RunbookService:
-    def __init__(self, repository_config: RepositoryConfig)
-    async def fetch_runbook(self, url: str) -> RunbookContent
-    async def validate_runbook(self, content: str) -> ValidationResult
+    def __init__(self, settings: Settings)
+    async def download_runbook(self, url: str) -> str
+    async def close(self)
 ```
 
 **Core Features:**
-- **GitHub API Integration**: Authenticated access to public/private repositories
-- **URL Transformation**: Automatic conversion to raw content URLs
-- **Authentication**: GitHub token-based authentication
-- **Error Handling**: Comprehensive error management for network issues
+- **GitHub Integration**: Downloads runbook content from GitHub repositories
+- **URL Conversion**: Automatically converts GitHub URLs to raw content URLs
+- **Authentication Support**: Optional GitHub token support for private repositories
+- **HTTP Client Management**: Async HTTP client with proper cleanup
 
-### 6. WebSocket Manager (`app/services/websocket_manager.py`)
+### 12. WebSocket Manager
 
-Real-time communication management:
+Real-time communication management for progress updates:
 
 ```
 Interface Pattern:
 class WebSocketManager:
     def __init__(self)
-    async def register_client(self, alert_id: str, connection: WebSocket)
-    async def broadcast_update(self, alert_id: str, status: ProcessingStatus)
-    async def cleanup_connections(self, alert_id: str)
+    async def connect(self, websocket: WebSocket, alert_id: str)
+    def disconnect(self, websocket: WebSocket, alert_id: str)
+    async def send_status_update(self, alert_id: str, status: ProcessingStatus)
+    async def send_message(self, alert_id: str, message: dict)
 ```
 
 **Core Features:**
-- **Connection Management**: Per-alert connection tracking and cleanup
-- **Message Broadcasting**: Efficient multi-client update distribution
+- **Connection Management**: Per-alert WebSocket connection tracking and cleanup
+- **Status Broadcasting**: Send ProcessingStatus updates to all connected clients for an alert
+- **Custom Messaging**: Support for custom message types beyond status updates
 - **Error Handling**: Automatic cleanup of broken connections
-- **Serialization**: Consistent message format and encoding
-
-### 7. Configuration System (`app/config/settings.py`)
-
-Environment-based configuration management:
-
-```
-Configuration Categories:
-- Server Settings: Host, port, CORS policies
-- LLM Providers: API keys, models, provider-specific settings
-- MCP Servers: Connection parameters, enabled services
-- Processing Limits: Safety thresholds and resource controls
-- External Services: Repository access, authentication
-```
-
-**Core Features:**
-- **Environment Variables**: Secure configuration via environment
-- **Validation**: Runtime validation of configuration completeness
-- **Hot Reload**: Configuration updates without restart where possible
-- **Secrets Management**: Secure handling of API keys and tokens
+- **DateTime Serialization**: Built-in support for datetime object serialization in JSON messages
 
 ---
 
 ## Data Flow Architecture
 
-### 1. Alert Processing Pipeline
+### 1. Multi-Layer Alert Processing Pipeline
 
 ```mermaid
 sequenceDiagram
     participant Client as Client/External System
     participant API as FastAPI Application
-    participant AS as Alert Service
+    participant AS as AlertService
+    participant AR as Agent Registry
+    participant AF as Agent Factory
+    participant MSR as MCP Server Registry
+    participant KA as Kubernetes Agent
     participant WS as WebSocket Manager
     participant LLM as LLM Manager
     participant MCP as MCP Client
+    participant RS as Runbook Service
     participant GitHub as GitHub API
     
     Client->>API: POST /alerts
@@ -330,28 +540,52 @@ sequenceDiagram
     AS->>WS: Update status (queued)
     WS->>Client: WebSocket update
     
-    AS->>GitHub: Download runbook
-    GitHub-->>AS: Runbook content
+    AS->>RS: download_runbook()
+    RS->>GitHub: Download runbook
+    GitHub-->>RS: Runbook content
+    RS-->>AS: Runbook content
     AS->>WS: Update status (processing)
     
-    AS->>MCP: List available tools
-    MCP-->>AS: Tool inventory
-    
-    loop Iterative Analysis (bounded)
-        AS->>LLM: Select next tools
-        LLM-->>AS: Tool selection + parameters
-        AS->>MCP: Execute tools
-        MCP-->>AS: Tool results
-        AS->>LLM: Analyze incremental results
-        LLM-->>AS: Continue/stop decision
-        AS->>WS: Progress update
-        WS->>Client: Status update
+    AS->>AR: get_agent_for_alert_type("Namespace is stuck in Terminating")
+    alt Agent Available
+        AR-->>AS: "KubernetesAgent"
+        AS->>AF: create_agent("KubernetesAgent")
+        AF-->>AS: Instantiated KubernetesAgent
+        
+        AS->>KA: process_alert(alert, runbook_content, callback)
+        Note over KA: Agent configures MCP client<br/>with kubernetes-server only
+        KA->>WS: Update status (processing - Kubernetes Agent)
+        WS->>Client: Status update with agent info
+        
+        KA->>MSR: get_server_configs(["kubernetes-server"])
+        MSR-->>KA: Kubernetes server config + instructions
+        
+        Note over KA: Compose instructions:<br/>General + K8s Server + Custom via PromptBuilder
+        
+        KA->>MCP: list_tools(kubernetes-server)
+        MCP-->>KA: Kubernetes-specific tool inventory
+        
+        loop Iterative Analysis (bounded)
+            KA->>LLM: determine_mcp_tools (via PromptBuilder)
+            LLM-->>KA: Tool selection + parameters
+            KA->>MCP: call_tool (kubernetes-server)
+            MCP-->>KA: Tool results
+            KA->>LLM: analyze_partial_results (via PromptBuilder)
+            LLM-->>KA: Continue/stop decision
+            KA->>WS: Progress update
+            WS->>Client: Status update with iteration info
+        end
+        
+        KA->>LLM: analyze_alert (final analysis via PromptBuilder)
+        LLM-->>KA: Complete analysis
+        KA-->>AS: Analysis result with agent metadata
+        AS->>WS: Update status (completed)
+        WS->>Client: Final result with agent details
+    else No Agent Available
+        AR-->>AS: None (no mapping found)
+        AS->>WS: Update status (error - No specialized agent available)
+        WS->>Client: Error message
     end
-    
-    AS->>LLM: Final comprehensive analysis
-    LLM-->>AS: Complete analysis
-    AS->>WS: Update status (completed)
-    WS->>Client: Final result
 ```
 
 ### 2. Data Structure Patterns
@@ -359,36 +593,51 @@ sequenceDiagram
 **Alert Data Model:**
 ```
 Alert Entity:
-- alert_type: string              # Alert type
-- severity: enum                  # warning, critical, info
+- alert_type: string              # Alert type for agent selection
+- severity: string                # Alert severity level
 - environment: string             # Environment identifier
-- cluster: str                    # Kubernetes cluster URL
-- namespace: str                  # Kubernetes namespace
-- pod: str                        # Specific pod (optional)
+- cluster: string                 # Kubernetes cluster URL
+- namespace: string               # Kubernetes namespace
+- pod: Optional[string]           # Specific pod (optional)
 - message: string                 # Alert description
-- runbook_reference: string       # GitHub runbook URL
-- timestamp: datetime             # Alert occurrence time
-
+- runbook: string                 # GitHub runbook URL
+- context: Optional[string]       # Additional context or details
+- timestamp: Optional[datetime]   # Alert occurrence time (auto-generated)
 ```
 
 **Processing Status Model:**
 ```
 ProcessingStatus Entity:
 - alert_id: string
-- status: enum                    # queued, processing, completed, error
-- progress: integer               # 0-100 percentage
+- status: string                  # queued, processing, completed, error
+- progress: integer               # 0-100 percentage (validated 0-100)
 - current_step: string            # Human-readable step description
-- result: optional<string>        # Final analysis result
-- error: optional<string>         # Error message if failed
-- timestamp: datetime
-- iterations: array<IterationRecord>
+- current_agent: Optional[string] # Currently processing agent
+- assigned_mcp_servers: Optional[List[string]] # MCP servers assigned to agent
+- result: Optional[string]        # Final analysis result
+- error: Optional[string]         # Error message if failed
+- timestamp: datetime             # Auto-generated timestamp
 ```
 
-**Iteration History Pattern:**
+**Agent Processing Context:**
+```
+AgentProcessingContext:
+- alert: Alert
+- runbook_content: string
+- agent_class_name: string
+- agent_instance: BaseAgent
+- selected_mcp_servers: array<MCPServerConfig>
+- composed_instructions: string   # General + MCP + Custom instructions
+- progress_callback: Callable
+```
+
+**Iteration History Pattern (Enhanced):**
 ```
 IterationRecord:
 - iteration_number: integer
-- reasoning: string               # LLM reasoning for decisions
+- agent_name: string              # Agent that performed iteration (NEW)
+- reasoning: string               # LLM reasoning for decisions  
+- available_tools: array<string>  # Tools available from agent's MCP servers (NEW)
 - tools_selected: array<ToolCall>
 - data_collected: object          # Structured tool results
 - partial_analysis: string        # Incremental analysis
@@ -400,297 +649,352 @@ IterationRecord:
 
 ## Integration Patterns
 
-### 1. LLM Provider Integration
+### 1. Agent-Based LLM Provider Integration
 
 **Provider Abstraction Pattern:**
 ```
-LLM Provider Interface:
+LLM Provider Interface (Enhanced):
 - initialize(credentials, model_config)
-- analyze_with_context(prompt, context_data)
-- select_tools(available_tools, current_context)
-- synthesize_results(collected_data, runbook_content)
+- analyze_with_context(prompt_with_agent_instructions, context_data)
+- select_tools_from_agent_subset(available_agent_tools, current_context)
+- synthesize_results(collected_data, runbook_content, agent_context)
 - validate_availability()
 ```
 
-**Provider Selection Strategy:**
-- Configurable default provider with fallback chain
-- Runtime availability checking before selection
-- Provider-specific error handling and retry logic
-- Consistent interface across all providers
+**Agent Integration Features:**
+- Agents compose specialized instructions for LLM providers
+- Provider selection consistent across all agents
+- Agent-specific context passed to providers
+- Unified error handling across agent layer
 
-### 2. MCP Server Integration
+### 2. Agent-Specific MCP Server Integration
 
-**Server Management Pattern:**
+**Agent-Server Assignment Pattern:**
 ```
-MCP Server Interface:
-- initialize_connection(server_config)
-- discover_tools() -> tool_schema_list
-- execute_tool(tool_name, parameters) -> tool_result
-- validate_connection() -> connection_status
-- cleanup_resources()
+Agent MCP Server Management:
+- Each agent declares required MCP servers via mcp_servers() method
+- MCP Server Registry provides server configurations and instructions
+- Agents only access their assigned server subset
+- Tool discovery limited to agent's authorized servers
 ```
 
-**Connection Management:**
-- Persistent connection pooling with health checks
-- Automatic reconnection on failure
-- Graceful degradation when servers are unavailable
-- Request/response logging for debugging
+**Server Configuration Pattern:**
+```
+MCPServerConfig:
+- server_id: "kubernetes-server"
+- server_type: "kubernetes"  
+- enabled: true
+- connection_params: {command: "npx", args: ["-y", "kubernetes-mcp-server@latest"]}
+- instructions: "For Kubernetes operations: be careful with cluster-scoped listings..."
+```
 
-### 3. GitHub Integration
+**Agent Server Assignment:**
+- **KubernetesAgent**: Uses ["kubernetes-server"]
+- **Future ArgoCDAgent**: Would use ["argocd-server"]  
+- **Future HybridAgent**: Could use ["kubernetes-server", "aws-server"]
 
-**Repository Access Pattern:**
+### 3. GitHub Integration (Enhanced)
+
+**Agent-Aware Repository Access Pattern:**
 ```python
-headers = {
-    "Accept": "application/vnd.github.v3.raw",
-    "Authorization": f"token {github_token}",
-    "User-Agent": "SRE-AI-Agent/1.0"
-}
-
-raw_url = f"https://raw.githubusercontent.com/{user}/{repo}/{branch}/{file_path}"
-response = await client.get(raw_url, headers=headers)
+# Runbook distribution to agents
+runbook_content = await runbook_service.fetch_runbook(alert.runbook_reference)
+agent_result = await selected_agent.process_alert(alert, runbook_content)
 ```
+
+The GitHub integration remains the same but now serves runbook content to specialized agents rather than a monolithic service.
 
 ---
 
 ## Frontend Development Interface
 
-The frontend is a **React-based development and testing interface** designed for system validation and demonstration purposes only. It is not intended for production use.
+The frontend is enhanced to display agent-specific information while maintaining its role as a **React-based development and testing interface** for system validation and demonstration.
 
 ### Architecture Overview
 
 ```
-Frontend/
+Frontend/ (Enhanced)
 ├── src/
 │   ├── components/
-│   │   ├── AlertForm.tsx       # Alert submission form
-│   │   ├── ProcessingStatus.tsx # Real-time progress display
-│   │   └── ResultDisplay.tsx    # Analysis results presentation
+│   │   ├── AlertForm.tsx       # Alert submission form (unchanged)
+│   │   ├── ProcessingStatus.tsx # Real-time progress with agent info (ENHANCED)
+│   │   └── ResultDisplay.tsx    # Analysis results with agent details (ENHANCED)
 │   ├── services/
-│   │   ├── api.ts              # HTTP API client
-│   │   └── websocket.ts        # WebSocket client
+│   │   ├── api.ts              # HTTP API client (unchanged)
+│   │   └── websocket.ts        # WebSocket client (unchanged)
 │   ├── types/
-│   │   └── index.ts            # TypeScript type definitions
-│   └── App.tsx                 # Main application component
+│   │   └── index.ts            # TypeScript type definitions (ENHANCED)
+│   └── App.tsx                 # Main application component (unchanged)
 ```
 
-### Key Features
+### Enhanced Features
 
-1. **Alert Submission Form**: Pre-filled form with validation for testing alert scenarios
-2. **Real-time Progress Tracking**: WebSocket-based progress updates with visual indicators
-3. **Result Display**: Markdown rendering of analysis results with syntax highlighting
-4. **Error Handling**: User-friendly error messages and connection status indicators
-5. **Responsive Design**: Material-UI components for modern, responsive interface
+1. **Alert Submission Form**: Pre-filled form with validation (no changes required)
+2. **Agent-Aware Progress Tracking**: WebSocket updates now include current processing agent
+3. **Enhanced Result Display**: Shows which agent processed the alert and agent-specific details
+4. **Agent Error Handling**: User-friendly error messages for agent selection failures
+5. **Responsive Design**: Material-UI components (unchanged)
 
-### Production Integration
+### Agent-Specific UI Elements
 
-For production deployment, the frontend is replaced by:
-- **REST API Integration**: External monitoring systems (e.g., AlertManager) submit alerts via HTTP API
-- **Webhook Notifications**: Status updates delivered to external incident management systems
-- **API-based Status Queries**: External systems can query processing status programmatically
+- **Processing Status**: "Processing with Kubernetes Agent - Iteration 3/10"
+- **Result Headers**: "Analysis completed by KubernetesAgent"
+- **Error Messages**: "No specialized agent available for alert type 'Unknown Alert'"
+- **Tool Information**: Shows which MCP servers were used by the agent
 
 ---
 
 ## Security Architecture
 
-### 1. Authentication and Authorization
+### 1. Authentication and Authorization (Enhanced)
 
 **API Key Management:**
 ```python
-# Environment-based configuration
+# Environment-based configuration (unchanged)
 GEMINI_API_KEY=your_gemini_key
-OPENAI_API_KEY=your_openai_key
+OPENAI_API_KEY=your_openai_key  
 GITHUB_TOKEN=your_github_token
+
+# New agent registry configuration
+AGENT_REGISTRY_CONFIG={"Namespace is stuck in Terminating": "KubernetesAgent"}
+MCP_SERVER_REGISTRY_CONFIG={...}
 ```
 
-**Security Features:**
-- No API keys exposed in logs or error messages
-- Secure credential storage via environment variables
-- Token-based GitHub authentication
-- Runtime validation of API key availability
+**Enhanced Security Features:**
+- Agent registry configuration protected through environment variables
+- MCP server assignments secured at agent instantiation
+- No additional authentication required for agent delegation
+- Same security boundaries maintained across agent layers
 
-### 2. Input Validation and Sanitization
+### 2. Agent Security Isolation
 
-**Validation Strategy:**
+**Agent Access Control:**
 ```
-Input Validation Layers:
-- Schema validation at API boundaries
-- Content sanitization for external inputs
-- Parameter validation for tool calls
-- Output sanitization for responses
+Agent Security Measures:
+- Agents can only access their assigned MCP server subset
+- Agent registry prevents unauthorized agent instantiation  
+- Server configurations validated before agent assignment
+- Agent processing isolated from other agent types
 ```
 
-**Security Measures:**
-- Strict input validation using schema validation
-- Prevention of injection attacks
-- Content Security Policy implementation
-- CORS configuration for API access control
+**Security Boundaries:**
+- Each agent operates within its defined MCP server scope
+- Cross-agent resource access prevented at the factory level
+- Agent failures isolated and don't affect other agents
+- Consistent error handling prevents information leakage
 
-### 3. Error Handling Security
+### 3. Input Validation and Sanitization (Enhanced)
 
-**Information Disclosure Prevention:**
-- Sanitized error messages in API responses
-- Detailed error logging without credential exposure
-- Graceful degradation on security failures
+**Multi-Layer Validation Strategy:**
+```
+Validation Layers:
+- API boundary validation (unchanged)
+- Agent selection validation (NEW)
+- Agent-specific input validation (inherited from BaseAgent)
+- MCP server authorization validation (NEW)
+```
 
 ---
 
 ## Performance Considerations
 
-### 1. Asynchronous Architecture
+### 1. Asynchronous Architecture (Enhanced)
 
-**Concurrency Pattern:**
+**Agent-Aware Concurrency Pattern:**
 ```
-Async Processing Design:
-- Non-blocking I/O operations throughout
-- Concurrent processing of multiple alerts
-- Parallel tool execution where possible
-- Efficient resource utilization
+Multi-Agent Processing Design:
+- Concurrent processing of different alert types using different agents
+- Agent-specific resource pools and connections
+- Isolated agent processing prevents resource contention
+- Efficient agent instantiation and dependency injection
 ```
 
 **Performance Benefits:**
-- Scalable WebSocket connections
-- Efficient resource utilization
-- Concurrent alert processing
-- Optimized I/O operations
+- Multiple agents can process alerts simultaneously
+- Agent specialization improves processing efficiency
+- Focused tool sets reduce LLM decision complexity
+- Resource isolation prevents agent interference
 
-### 2. Resource Management
+### 2. Agent-Specific Resource Management
 
 **Resource Control Mechanisms:**
 ```
-Safety Thresholds:
-- Maximum iteration limits
-- Tool call limits per alert
-- Data collection thresholds
-- Connection timeout configurations
+Agent Resource Controls:
+- Per-agent iteration limits and safety mechanisms
+- Agent-specific MCP server connection pools
+- Shared LLM client resources across agents
+- Isolated agent processing contexts
 ```
 
-**Resource Controls:**
-- Maximum iteration limits prevent infinite loops
-- Tool call limits prevent resource exhaustion
-- Data collection thresholds optimize processing time
-- Connection pooling for MCP servers
+**Resource Optimization:**
+- Agent factory reuses common dependencies
+- MCP connections shared within agent types
+- Specialized agents use focused tool subsets
+- Efficient memory management through inheritance
 
-### 3. Caching and Optimization
+### 3. Performance Monitoring (Enhanced)
 
-**Performance Optimization Strategy:**
-- In-memory processing status management
-- Persistent connection reuse
-- Efficient data structures
-- Optimized communication protocols
+**Agent Performance Tracking:**
+- Processing time by agent type
+- Agent-specific error rates and patterns
+- MCP server performance by agent assignment
+- Resource utilization across agent instances
 
 ---
 
 ## Error Handling and Resilience
 
-### 1. Multi-Layer Error Handling
+### 1. Multi-Layer Error Handling (Enhanced)
 
-**Error Handling Strategy:**
+**Agent-Aware Error Handling Strategy:**
 ```
 Error Handling Layers:
-- Service-level error handling with fallbacks
-- Network-level retry mechanisms
-- Resource-level graceful degradation
-- User-facing error communication
+- Orchestrator-level error handling (agent selection, delegation)
+- Agent-level error handling (processing failures, MCP issues)
+- Service-level error handling (LLM, MCP server connectivity)
+- Network-level retry mechanisms (unchanged)
 ```
 
-**Error Categories:**
-- **LLM Provider Failures**: Fallback to alternative providers or basic analysis
-- **MCP Server Failures**: Graceful degradation with available tools
-- **Network Failures**: Retry mechanisms with exponential backoff
-- **Configuration Errors**: Validation and helpful error messages
+**Enhanced Error Categories:**
+- **Agent Selection Failures**: No agent available for alert type
+- **Agent Instantiation Failures**: Agent class not found or initialization failed
+- **Agent Processing Failures**: Specialized agent processing errors
+- **MCP Server Subset Failures**: Agent's assigned servers unavailable
+- **LLM Provider Failures**: Consistent across all agents
 
-### 2. Graceful Degradation
+### 2. Agent-Specific Graceful Degradation
+
+**Agent Failure Isolation:**
+- **Single Agent Failure**: Other agents continue processing different alert types
+- **Agent MCP Server Failure**: Only affects agents using those specific servers
+- **Agent Registry Failure**: Clear error messages about agent unavailability
+- **Agent Factory Failure**: Specific agent type unavailable, others continue working
 
 **Fallback Strategies:**
-- **No LLM Available**: Return error (LLM is critical for core functionality)
-- **Partial MCP Failures**: Continue with available tools
-- **Runbook Download Failures**: Proceed with basic analysis
-- **WebSocket Failures**: Fall back to HTTP polling
+- **No Specialized Agent**: Return clear error message (no fallback to generic processing)
+- **Agent MCP Server Subset Failure**: Agent continues with available servers
+- **Agent Processing Failure**: Return agent-specific error information
+- **Multiple Alert Types**: Other agents continue processing their assigned types
 
-### 3. Monitoring and Observability
+### 3. Enhanced Monitoring and Observability
 
-**Logging Architecture:**
+**Agent-Aware Logging Architecture:**
 ```
-Logging Categories:
-- Application Events: General system events
-- Communication Logs: External service interactions
-- Security Events: Authentication and authorization
-- Performance Metrics: System performance data
+Enhanced Logging Categories:
+- Orchestrator Events: Agent selection, delegation, coordination
+- Agent Events: Processing steps, iteration progress, results
+- Agent Registry Events: Lookup operations, configuration changes
+- MCP Server Assignment Events: Agent server assignments and failures
+- Agent Error Events: Specialized error tracking by agent type
 ```
 
-**Log Categories:**
-- **Application Logs**: General application events and errors
-- **LLM Communications**: Detailed LLM request/response logging
-- **MCP Communications**: MCP tool call logging
-- **Error Logs**: Dedicated error tracking and analysis
+**Agent-Specific Observability:**
+- Agent performance metrics and processing times
+- Agent-specific error rates and patterns
+- MCP server usage by agent type
+- Agent load distribution and capacity planning
 
 ---
 
 ## Deployment Architecture
 
-### 1. Containerization Strategy
+### 1. Containerization Strategy (Enhanced)
 
-**Container Architecture:**
+**Multi-Layer Container Architecture:**
 ```
 Container Design:
-- Backend: Containerized FastAPI application
-- Frontend: Containerized React application (dev only)
-- Dependencies: External service containers
-- Orchestration: Docker Compose for development
+- Backend: Containerized FastAPI application with multi-layer agent architecture
+- Agent Dependencies: Specialized agent classes included in main application container
+- External Services: MCP servers, LLM providers (unchanged)
+- Configuration: Agent registry and MCP server registry via environment variables
 ```
 
-### 2. Environment Configuration
+### 2. Environment Configuration (Enhanced)
 
 **Production Environment:**
 ```bash
-# Required environment variables
+# Existing configuration (unchanged)
 GEMINI_API_KEY=your_key
 OPENAI_API_KEY=your_key
 GITHUB_TOKEN=your_token
 DEFAULT_LLM_PROVIDER=gemini
 LOG_LEVEL=INFO
+
+# New agent architecture configuration
+AGENT_REGISTRY='{"Namespace is stuck in Terminating": "KubernetesAgent"}'
+MCP_SERVER_REGISTRY='{"kubernetes-server": {...}}'
 ```
 
-### 3. Scaling Considerations
+### 3. Scaling Considerations (Enhanced)
 
-**Horizontal Scaling:**
-- Stateless service design for horizontal scaling
-- Load balancing across multiple instances
-- Shared state management for multi-instance deployments
-- Database integration for persistent storage
+**Multi-Agent Horizontal Scaling:**
+- Agent-specific scaling based on alert type distribution
+- Independent agent performance optimization
+- Specialized agent resource requirements
+- Agent load balancing and distribution strategies
 
 ---
 
 ## Extension Points
 
-### 1. LLM Provider Extensions
+### 1. Agent Architecture Extensions
 
-**Provider Integration Pattern:**
+**New Agent Integration Pattern:**
 ```
-New Provider Integration:
-1. Implement LLMProvider interface
-2. Add provider configuration schema
-3. Update provider factory registration
-4. Add provider-specific error handling
-5. Update documentation and examples
-```
-
-### 2. MCP Server Extensions
-
-**Server Integration Pattern:**
-```
-New Server Integration:
-1. Define server configuration schema
-2. Add server initialization logic
-3. Update tool discovery mechanisms
-4. Add server-specific error handling
-5. Update server registry
+New Specialized Agent:
+1. Create agent class inheriting from BaseAgent
+2. Implement mcp_servers() method defining required server subset
+3. Implement custom_instructions() method for agent-specific guidance
+4. Add agent class to AgentFactory static registry
+5. Update agent registry configuration with alert type mapping
+6. Add required MCP servers to MCP Server Registry
 ```
 
-### 3. Alert Type Extensions
+**Example: ArgoCD Agent**
+```python
+class ArgoCDAgent(BaseAgent):
+    def mcp_servers(self) -> List[str]:
+        return ["argocd-server"]
+    
+    def custom_instructions(self) -> str:
+        return """
+        For ArgoCD sync issues:
+        - Check application health status first
+        - Analyze sync operation logs for specific errors
+        - Consider GitOps workflow and repository state
+        - Look for resource hooks and sync wave dependencies
+        """
+```
 
-**Dynamic Alert Processing:**
-- System supports any alert type with appropriate runbook
-- No hardcoded alert processing logic
-- LLM intelligence adapts to new alert types automatically
-- Runbook-driven processing workflow
+### 2. MCP Server Extensions (Enhanced)
+
+**Agent-Aware Server Integration Pattern:**
+```
+New MCP Server Integration:
+1. Add server configuration to MCP Server Registry
+2. Include server-specific LLM instructions in configuration
+3. Assign server to appropriate agent types
+4. Update agent mcp_servers() methods as needed
+5. Test server integration with assigned agents
+```
+
+### 3. Alert Type Extensions (Simplified)
+
+**Configuration-Based Alert Processing:**
+```
+Adding New Alert Types:
+1. Add MCP servers required for alert type to registry (if needed)
+2. Create or identify appropriate specialized agent class
+3. Add alert type mapping to agent registry configuration
+4. No code changes required - purely configuration-driven
+```
+
+**Dynamic Alert Processing Benefits:**
+- Specialized agents adapt to new alert types automatically
+- Agent-specific tool subsets optimize LLM decision making
+- Domain expertise through agent specialization
+- Configuration-driven extensibility
+
+---
+
+This completes the updated design document reflecting the implemented EP-0002 multi-layer agent architecture. The system now supports specialized agents with focused MCP server subsets, inheritance-based extensibility, and clear separation of concerns between orchestration and domain-specific processing.

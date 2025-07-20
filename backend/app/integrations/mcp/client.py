@@ -12,6 +12,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from app.config.settings import Settings
+from app.services.mcp_server_registry import MCPServerRegistry
 from app.utils.logger import get_module_logger
 
 # Setup logger for this module
@@ -24,27 +25,32 @@ mcp_comm_logger = get_module_logger("mcp.communications")
 class MCPClient:
     """MCP client using the official MCP SDK."""
     
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, mcp_registry: Optional[MCPServerRegistry] = None):
         self.settings = settings
+        self.mcp_registry = mcp_registry or MCPServerRegistry()
         self.sessions: Dict[str, ClientSession] = {}
         self.exit_stack = AsyncExitStack()
         self._initialized = False
     
     async def initialize(self):
-        """Initialize MCP servers based on configuration."""
+        """Initialize MCP servers based on registry configuration."""
         if self._initialized:
             return
             
-        for server_name, server_config in self.settings.mcp_servers.items():
-            if not server_config.get("enabled", True):
+        # Get all server configurations from the registry
+        all_server_ids = self.mcp_registry.get_all_server_ids()
+        
+        for server_id in all_server_ids:
+            server_config = self.mcp_registry.get_server_config(server_id)
+            if not server_config or not server_config.enabled:
                 continue
                 
             try:
                 # Create server parameters for stdio connection
                 server_params = StdioServerParameters(
-                    command=server_config["command"],
-                    args=server_config.get("args", []),
-                    env=server_config.get("env", None)
+                    command=server_config.connection_params.get("command"),
+                    args=server_config.connection_params.get("args", []),
+                    env=server_config.connection_params.get("env", None)
                 )
                 
                 # Connect to the server
@@ -60,11 +66,11 @@ class MCPClient:
                 # Initialize the session
                 await session.initialize()
                 
-                self.sessions[server_name] = session
-                logger.info(f"Initialized MCP server: {server_name}")
+                self.sessions[server_id] = session
+                logger.info(f"Initialized MCP server: {server_id}")
                 
             except Exception as e:
-                logger.error(f"Failed to initialize MCP server {server_name}: {str(e)}")
+                logger.error(f"Failed to initialize MCP server {server_id}: {str(e)}")
         
         self._initialized = True
     

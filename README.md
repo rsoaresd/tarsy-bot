@@ -60,7 +60,7 @@ sre/
 │   │   ├── services/       # Business logic services
 │   │   ├── integrations/   # MCP and LLM integrations
 │   │   │   ├── mcp/        # MCP server integrations
-│   │   │   │   └── mcp_client.py  # Official MCP SDK client
+│   │   │   │   └── client.py      # Official MCP SDK client
 │   │   │   └── llm/        # LLM provider integrations
 │   │   ├── config/         # Configuration management
 │   │   └── utils/          # Utility functions

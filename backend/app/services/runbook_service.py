@@ -2,7 +2,6 @@
 Runbook service for downloading runbooks from GitHub.
 """
 
-from typing import Optional
 import httpx
 
 from app.config.settings import Settings

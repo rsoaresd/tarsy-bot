@@ -88,9 +88,9 @@ async def get_alert_types():
     This endpoint returns a list of alert types used only for dropdown selection
     in the development/testing web interface. In production, external clients
     (like Alert Manager) can submit any alert type. The system analyzes all
-    alert types using the provided runbook and all available MCP tools.
+    alert types using the provided runbook and available agent-specific MCP tools.
     """
-    return get_settings().supported_alerts
+    return alert_service.agent_registry.get_supported_alert_types()
 
 
 @app.post("/alerts", response_model=AlertResponse)
@@ -105,6 +105,8 @@ async def submit_alert(alert: Alert):
         status="queued",
         progress=0,
         current_step="Alert received",
+        current_agent=None,
+        assigned_mcp_servers=None,
         result=None,
         error=None
     )
@@ -167,12 +169,29 @@ async def process_alert_background(alert_id: str, alert: Alert):
         )
         
         # Process the alert using AlertService
-        result = await alert_service.process_alert(
-            alert, 
-            progress_callback=lambda progress, step: asyncio.create_task(
-                update_processing_status(alert_id, "processing", progress, step)
-            )
-        )
+        # The orchestrator sends progress as a dict with agent information
+        def progress_handler(progress, step):
+            # Handle both simple (progress, step) and dict-based callbacks
+            if isinstance(progress, dict):
+                # New format from agent callbacks
+                agent_info = progress
+                return asyncio.create_task(
+                    update_processing_status(
+                        alert_id,
+                        agent_info.get('status', 'processing'),
+                        agent_info.get('progress', 50),
+                        agent_info.get('message', step),
+                        current_agent=agent_info.get('agent'),
+                        assigned_mcp_servers=agent_info.get('assigned_mcp_servers')
+                    )
+                )
+            else:
+                # Legacy format (progress, step)
+                return asyncio.create_task(
+                    update_processing_status(alert_id, "processing", progress, step)
+                )
+        
+        result = await alert_service.process_alert(alert, progress_callback=progress_handler)
         
         # Update status: completed
         await update_processing_status(
@@ -192,7 +211,9 @@ async def update_processing_status(
     progress: int, 
     current_step: str,
     result: str = None,
-    error: str = None
+    error: str = None,
+    current_agent: str = None,
+    assigned_mcp_servers: List[str] = None
 ):
     """Update processing status and notify WebSocket clients."""
     processing_status[alert_id] = ProcessingStatus(
@@ -200,6 +221,8 @@ async def update_processing_status(
         status=status,
         progress=progress,
         current_step=current_step,
+        current_agent=current_agent,
+        assigned_mcp_servers=assigned_mcp_servers,
         result=result,
         error=error
     )

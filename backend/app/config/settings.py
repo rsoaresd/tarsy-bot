@@ -38,9 +38,6 @@ class Settings(BaseSettings):
     # GitHub Configuration
     github_token: Optional[str] = Field(default=None)
     
-    # MCP Server Configuration
-    kubernetes_mcp_url: str = Field(default="http://localhost:8080")
-    
     # LLM Providers Configuration
     llm_providers: Dict = Field(default={
         "gemini": {
@@ -60,27 +57,6 @@ class Settings(BaseSettings):
         }
     })
     
-    # MCP Servers Configuration
-    mcp_servers: Dict[str, Any] = Field(
-        default={
-            "kubernetes": {
-                "type": "kubernetes",
-                "enabled": True,
-                "command": "npx",
-                "args": ["-y", "kubernetes-mcp-server@latest"]
-            }
-        },
-        description="MCP server configurations"
-    )
-    
-    # Supported Alert Types (Development/Testing Web Interface Only)
-    # These alert types are used only for the dropdown selection in the development/testing web interface.
-    # In production, external clients (like Alert Manager) can submit any alert type.
-    # The system provides all available MCP tools to the LLM regardless of alert type.
-    supported_alerts: List[str] = Field(default=[
-        "Namespace is stuck in Terminating"
-    ])
-    
     # Alert Processing Configuration
     max_llm_mcp_iterations: int = Field(
         default=10,
@@ -98,6 +74,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # Allow extra fields to be ignored for backward compatibility
+        extra = "ignore"
         
     def get_llm_config(self, provider: str) -> Dict:
         """Get LLM configuration for a specific provider."""
@@ -118,20 +96,6 @@ class Settings(BaseSettings):
         
         return config
     
-    def get_mcp_config(self, server: str) -> Dict:
-        """Get MCP server configuration."""
-        if server not in self.mcp_servers:
-            raise ValueError(f"Unsupported MCP server: {server}")
-        
-        config = self.mcp_servers[server].copy()
-        
-        # Get URL from environment
-        url_env = config.get("url_env")
-        if url_env:
-            config["url"] = getattr(self, url_env.lower(), "")
-        
-        return config
-
 
 @lru_cache()
 def get_settings() -> Settings:

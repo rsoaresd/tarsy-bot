@@ -26,14 +26,15 @@ interface AlertFormProps {
 
 const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
   const [formData, setFormData] = useState<AlertFormData>({
-    alert: 'Namespace is stuck in Terminating',
+    alert_type: 'Namespace is stuck in Terminating',
     severity: 'warning',
     environment: 'production',
-    cluster: 'https://api.eoxgp-kduq5-osu.y3pp.p3.openshiftapps.com:443',
+    cluster: 'https://add5941aaf85e4df68995e9524adbbf2-87cb619aa3aa8d10.elb.us-east-1.amazonaws.com:6443',
     namespace: 'superman-dev',
     pod: '',
     message: 'namespace is stuck in \'Terminating\' phase',
-    runbook: 'https://github.com/alexeykazakov/runbooks/blob/master/namespace-terminating.md'
+    runbook: 'https://github.com/alexeykazakov/runbooks/blob/master/namespace-terminating.md',
+    context: ''
   });
 
   const [availableAlertTypes, setAvailableAlertTypes] = useState<string[]>([]);
@@ -86,7 +87,7 @@ const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
     try {
       // Create alert object
       const alert: Alert = {
-        alert: formData.alert,
+        alert_type: formData.alert_type,
         severity: formData.severity,
         environment: formData.environment,
         cluster: formData.cluster,
@@ -155,8 +156,8 @@ const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
                 select
                 fullWidth
                 label="Alert Type"
-                value={formData.alert}
-                onChange={(e) => handleInputChange('alert', e.target.value)}
+                value={formData.alert_type}
+                onChange={(e) => handleInputChange('alert_type', e.target.value)}
                 required
               >
                 {availableAlertTypes.map((alertType) => (
@@ -253,6 +254,18 @@ const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
                 onChange={(e) => handleInputChange('runbook', e.target.value)}
                 placeholder="https://github.com/org/repo/blob/master/runbooks/alert.md"
                 required
+              />
+            </Grid>
+
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                multiline
+                rows={2}
+                label="Additional Context (Optional)"
+                value={formData.context}
+                onChange={(e) => handleInputChange('context', e.target.value)}
+                placeholder="Any additional context or details about this alert..."
               />
             </Grid>
 
