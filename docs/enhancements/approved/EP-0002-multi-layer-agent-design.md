@@ -30,6 +30,25 @@ The new architecture consists of four main layers:
 - **Backward Compatibility**: Existing API contracts remain unchanged
 - **Performance**: Minimal overhead with focused tool sets for better LLM decision-making
 
+### MCP Registry Role in Instruction Management
+
+**Central Instruction Authority**: The MCPServerRegistry serves as the single source of truth for all MCP server configurations and their associated LLM instructions. This eliminates instruction duplication and ensures consistency across agents.
+
+**Instruction Composition Pattern**: Agents compose their final LLM instructions from three distinct sources in a hierarchical manner:
+
+1. **General Instructions** (BaseAgent level): Universal SRE guidance applicable to all agents
+2. **MCP Server Instructions** (Registry level): Server-specific operational guidance stored in the global registry  
+3. **Custom Instructions** (Agent level): Optional agent-specific guidance for specialized behavior
+
+**Agent MCP Server Assignment**: Each agent declares its required MCP servers through the abstract `mcp_servers()` method. The agent retrieves the corresponding configurations (including embedded instructions) from the registry and uses only that subset of servers, preventing tool confusion.
+
+**Initial Implementation Example**:
+- **KubernetesAgent**: Uses only `["kubernetes-server"]` from the registry
+- **Future ArgoCDAgent**: Would use only `["argocd-server"]` from the registry
+- **Future Hybrid Agent**: Could use `["kubernetes-server", "aws-server"]` from the registry
+
+This design ensures that each agent receives focused, relevant instructions while maintaining centralized instruction management through the registry.
+
 ### Design Goals
 
 - Enable specialized expertise through inheritance-based agent classes
@@ -104,10 +123,10 @@ The new architecture consists of four main layers:
 #### New Components
 
 - **AlertOrchestrator**: Main orchestration service that receives alerts, downloads runbooks, and delegates to appropriate agent classes (REQ-2.1)
-- **AgentRegistry**: Registry service that maintains configurable mappings between alert types and specialized agent classes (REQ-2.2)
+- **AgentRegistry**: Simple static map that maintains pre-defined mappings between alert types and specialized agent classes, loaded once at startup (REQ-2.2)
 - **BaseAgent**: Abstract base class containing common processing logic for all agents, with abstract methods for customization
 - **KubernetesAgent**: Specialized agent class inheriting from BaseAgent for Kubernetes-related alerts (initial implementation) (REQ-2.3)
-- **MCPServerRegistry**: Global registry of all available MCP servers with embedded instructions that can be easily extended (REQ-2.6)
+- **MCPServerRegistry**: Simple static map of all available MCP servers with embedded instructions, loaded once at startup (REQ-2.6)
 - **AgentFactory**: Factory for resolving agent class names to instantiated classes with dependency injection
 
 #### Modified Components
@@ -130,13 +149,17 @@ The new architecture follows a clear delegation pattern with inheritance-based s
    - Progress callback for status updates
    - MCP server registry for configuration lookup
 5. AlertOrchestrator delegates processing to agent via process_alert(alert, runbook)
-6. Agent internally configures itself:
-   - Calls its mcp_servers() method to get required MCP server IDs
-   - Retrieves server configs from injected MCP registry
-   - Configures MCP client with its specific servers
-   - Calls custom_instructions() for agent-specific guidance
-   - Combines general + MCP server + custom instructions
-7. BaseAgent performs iterative LLM analysis using only the agent's specified MCP servers (REQ-2.8, REQ-2.13)
+6. **Agent Instruction Composition (NEW DETAIL)**:
+   - Agent calls its mcp_servers() method to get required MCP server IDs (e.g., ["kubernetes-server"])
+   - Agent retrieves server configs from injected MCP server registry
+   - Agent extracts instructions from each assigned MCP server config
+   - Agent calls custom_instructions() for any additional agent-specific guidance
+   - **Agent composes final LLM instructions by combining:**
+     * **General instructions** (from BaseAgent): "You are an expert SRE agent..."
+     * **MCP server instructions** (from each assigned server): "For Kubernetes operations: be careful with cluster-scoped listings..."
+     * **Custom instructions** (from agent's custom_instructions()): Optional agent-specific guidance
+   - Agent configures MCP client with ONLY its assigned server subset
+7. BaseAgent performs iterative LLM analysis using the composed instructions and only the agent's specified MCP servers (REQ-2.8, REQ-2.13)
 8. Agents report progress through AlertOrchestrator to WebSocket Manager (REQ-2.14)
 9. Results flow back through the orchestration chain with agent-specific details (REQ-2.10)
 
@@ -221,26 +244,30 @@ sequenceDiagram
 #### New Data Models
 
 ```python
-AgentRegistryEntry:
-  - alert_type: str
-  - agent_class: str (fully qualified class name, e.g., "KubernetesAgent")
-  - enabled: bool
+# Simple static registries - loaded once at startup, no runtime changes
+AgentRegistry:
+  - static_mappings: Dict[str, str]  # alert_type -> agent_class_name (e.g., "Namespace is stuck in Terminating" -> "KubernetesAgent")
+  - get_agent_for_alert_type(alert_type: str) -> Optional[str]  # Simple dictionary lookup
 
 MCPServerConfig:
   - server_id: str
-  - server_type: str (e.g., "kubernetes", "argocd", "database")
+  - server_type: str (e.g., "kubernetes", "argocd", "aws")
   - enabled: bool
   - connection_params: Dict[str, Any]
-  - instructions: str (embedded instructions specific to this MCP server)
+  - instructions: str (embedded LLM instructions specific to this MCP server)
+
+MCPServerRegistry:
+  - static_servers: Dict[str, MCPServerConfig]  # server_id -> MCPServerConfig (e.g., "kubernetes-server" -> config)
+  - get_server_configs(server_ids: List[str]) -> List[MCPServerConfig]  # Simple dictionary lookup
 
 BaseAgent (Abstract Class):
-  - Abstract method: mcp_servers() -> List[str]  # Returns MCP server IDs from global registry
+  - Abstract method: mcp_servers() -> List[str]  # Returns MCP server IDs from static registry
   - Abstract method: custom_instructions() -> str  # Returns agent-specific instructions
   - Common method: process_alert(alert, runbook, callback) -> str  # Standard processing logic
 
 AgentFactory:
-  - Maintains registry of agent class name -> class mappings
-  - Resolves agent class names from configuration to actual Python classes
+  - static_agent_classes: Dict[str, Type[BaseAgent]]  # agent_class_name -> actual Python class
+  - Resolves agent class names to instantiated classes with dependency injection
   - Injects common dependencies (LLM client, MCP client, progress callback, MCP registry)
   - Returns fully configured agent instances ready for processing
 
@@ -248,7 +275,7 @@ AgentProcessingContext:
   - alert: Alert
   - runbook_content: str
   - agent_instance: BaseAgent
-  - selected_mcp_servers: List[MCPServerConfig]  # Retrieved from global registry
+  - selected_mcp_servers: List[MCPServerConfig]  # Retrieved from static registry
   - combined_instructions: str  # General + MCP + Custom instructions
   - progress_callback: Optional[Callable]
 ```
@@ -407,33 +434,30 @@ The multi-layer architecture enhances error handling by:
 
 #### New Configuration Options
 
-- **agent_registry**: Configuration for alert type to agent mappings (REQ-2.2)
-- **agent_configurations**: Agent-specific configuration settings including MCP server assignments (REQ-2.7)
-- **mcp_server_registry**: Global registry of all available MCP servers (REQ-2.6)
-- **agent_mcp_assignments**: Mapping of agents to their assigned MCP server subsets (REQ-2.8)
+- **agent_registry**: Simple static map for alert type to agent class mappings (REQ-2.2)  
+- **mcp_server_registry**: Single source of truth for ALL MCP server configurations with embedded instructions - REPLACES existing mcp_servers (REQ-2.6)
 
-#### Modified Configuration Options
+#### Configuration Consolidation
 
-- **supported_alerts**: Extended to include agent mappings
+- **mcp_servers**: REMOVED - all MCP server configuration now managed exclusively through mcp_server_registry
+- **supported_alerts**: Extended to include agent mappings  
 - **max_llm_mcp_iterations**: Can be overridden per agent type
-- **mcp_servers**: Extended to support global registry with agent-specific assignments (REQ-2.15)
+
+#### Configuration Simplification
+
+The new design eliminates configuration duplication by having MCP Server Registry as the ONLY source for MCP server configurations. The existing `mcp_servers` field in settings.py will be replaced entirely by `mcp_server_registry`.
 
 #### Example Configuration
 
 ```yaml
-# Agent Registry - Maps alert types to agent classes
+# Simple static Agent Registry - loaded once at startup, maps alert types to agent classes
 agent_registry:
-  - alert_type: "Namespace is stuck in Terminating"
-    agent_class: "KubernetesAgent"
-    enabled: true
-  - alert_type: "ArgoCD Sync Failed"
-    agent_class: "ArgoCDAgent"
-    enabled: true
-  - alert_type: "EKS Node Group Issues"
-    agent_class: "KubernetesAWSAgent"
-    enabled: true
+  "Namespace is stuck in Terminating": "KubernetesAgent"
+  "ArgoCD Sync Failed": "ArgoCDAgent"
+  "EKS Node Group Issues": "KubernetesAWSAgent"
 
-# Global MCP Server Registry - Reusable across all agents
+# Simple static MCP Server Registry - REPLACES existing mcp_servers in settings.py
+# This is the ONLY source of truth for MCP server configurations
 mcp_server_registry:
   kubernetes-server:
     server_id: "kubernetes-server"
@@ -479,16 +503,37 @@ mcp_server_registry:
       - Look at CloudWatch metrics for resource utilization
       - Check security groups and NACLs for network issues
 
-# Agent classes define their MCP server requirements in code:
-# - KubernetesAgent.mcp_servers() returns ["kubernetes-server"]
-# - ArgoCDAgent.mcp_servers() returns ["argocd-server"]  
-# - KubernetesAWSAgent.mcp_servers() returns ["kubernetes-server", "aws-server"]
+# Agent classes define their MCP server requirements in code (simple lookups):
+# - KubernetesAgent.mcp_servers() returns ["kubernetes-server"] -> looks up in static registry
+# - ArgoCDAgent.mcp_servers() returns ["argocd-server"] -> looks up in static registry
+# - KubernetesAWSAgent.mcp_servers() returns ["kubernetes-server", "aws-server"] -> looks up in static registry
 ```
 
 #### Implementation Example
 
 ```python
-# AgentFactory implementation
+# Simple static registries implementation
+class AgentRegistry:
+    def __init__(self, config: Dict[str, str]):
+        """Initialize with static alert_type -> agent_class_name mappings"""
+        self.static_mappings = config  # No runtime changes, just a dictionary
+    
+    def get_agent_for_alert_type(self, alert_type: str) -> Optional[str]:
+        """Simple dictionary lookup - no complex logic"""
+        return self.static_mappings.get(alert_type)
+
+class MCPServerRegistry:
+    def __init__(self, config: Dict[str, Dict]):
+        """Initialize with static server configurations"""
+        self.static_servers = {}  # No runtime changes, just a dictionary
+        for server_id, server_config in config.items():
+            self.static_servers[server_id] = MCPServerConfig(**server_config)
+    
+    def get_server_configs(self, server_ids: List[str]) -> List[MCPServerConfig]:
+        """Simple dictionary lookup for multiple servers"""
+        return [self.static_servers[server_id] for server_id in server_ids 
+                if server_id in self.static_servers]
+
 class AgentFactory:
     def __init__(self, llm_client: LLMClient, mcp_client: MCPClient, 
                  progress_callback: Callable, mcp_registry: MCPServerRegistry):
@@ -497,21 +542,19 @@ class AgentFactory:
         self.progress_callback = progress_callback
         self.mcp_registry = mcp_registry
         
-        # Registry of available agent classes
-        self.agent_classes = {
+        # Static registry of available agent classes - loaded once, no runtime changes
+        self.static_agent_classes = {
             "KubernetesAgent": KubernetesAgent,
             "ArgoCDAgent": ArgoCDAgent,
             "KubernetesAWSAgent": KubernetesAWSAgent,
         }
     
     def create_agent(self, agent_class_name: str) -> BaseAgent:
-        """Convert class name string to instantiated agent with dependencies"""
-        if agent_class_name not in self.agent_classes:
+        """Simple class resolution - no complex logic"""
+        if agent_class_name not in self.static_agent_classes:
             raise ValueError(f"Unknown agent class: {agent_class_name}")
         
-        agent_class = self.agent_classes[agent_class_name]
-        
-        # Instantiate with common dependencies
+        agent_class = self.static_agent_classes[agent_class_name]
         return agent_class(
             llm_client=self.llm_client,
             mcp_client=self.mcp_client,
@@ -519,14 +562,88 @@ class AgentFactory:
             mcp_registry=self.mcp_registry
         )
 
-# Usage in AlertOrchestrator
+# Usage in AlertOrchestrator - simple lookups only
 agent_class_name = agent_registry.get_agent_for_alert_type("Namespace is stuck in Terminating")
-# Returns: "KubernetesAgent"
+# Returns: "KubernetesAgent" (simple dict lookup)
 
 agent = agent_factory.create_agent(agent_class_name)
-# Returns: KubernetesAgent instance with all dependencies injected
+# Returns: KubernetesAgent instance (simple class resolution)
 
 result = agent.process_alert(alert, runbook_content)
+
+# BaseAgent instruction composition example
+class BaseAgent(ABC):
+    def _compose_instructions(self) -> str:
+        """Compose final instructions for LLM from multiple sources"""
+        instructions = []
+        
+        # 1. General instructions (common to all agents)
+        instructions.append(self._get_general_instructions())
+        
+        # 2. MCP server specific instructions (from assigned servers)
+        mcp_server_ids = self.mcp_servers()  # Abstract method implemented by subclasses
+        server_configs = self.mcp_registry.get_server_configs(mcp_server_ids)
+        for server_config in server_configs:
+            if server_config.instructions:
+                instructions.append(f"## {server_config.server_type.title()} Server Instructions")
+                instructions.append(server_config.instructions)
+        
+        # 3. Custom instructions (agent-specific, optional)
+        custom_instructions = self.custom_instructions()  # Abstract method
+        if custom_instructions:
+            instructions.append("## Agent-Specific Instructions") 
+            instructions.append(custom_instructions)
+            
+        return "\n\n".join(instructions)
+    
+    def _get_general_instructions(self) -> str:
+        """General instructions common to all SRE agents"""
+        return """## General SRE Agent Instructions
+        
+You are an expert Site Reliability Engineer (SRE) with deep knowledge of:
+- Kubernetes and container orchestration
+- Cloud infrastructure and services  
+- Incident response and troubleshooting
+- System monitoring and alerting
+- GitOps and deployment practices
+
+Analyze alerts thoroughly and provide actionable insights based on:
+1. Alert information and context
+2. Associated runbook procedures  
+3. Real-time system data from available tools
+
+Always be specific, reference actual data, and provide clear next steps."""
+
+# KubernetesAgent implementation example
+class KubernetesAgent(BaseAgent):
+    def mcp_servers(self) -> List[str]:
+        """Return required MCP server IDs for Kubernetes operations"""
+        return ["kubernetes-server"]
+    
+    def custom_instructions(self) -> str:
+        """Return any additional Kubernetes-specific instructions"""
+        return ""  # No custom instructions for initial implementation
+    
+    # The final composed instructions would be:
+    # 1. General SRE instructions (from BaseAgent)  
+    # 2. Kubernetes server instructions (from MCP registry):
+    #    "For Kubernetes operations: be careful with cluster-scoped listings..."
+    # 3. No custom instructions (empty string)
+
+# Future example: Advanced Kubernetes Agent with custom instructions
+class AdvancedKubernetesAgent(BaseAgent):
+    def mcp_servers(self) -> List[str]:
+        return ["kubernetes-server"]
+    
+    def custom_instructions(self) -> str:
+        return """## Advanced Kubernetes Analysis Instructions
+        
+When analyzing Kubernetes issues:
+- Always check for resource quotas and limits first
+- Consider node capacity and scheduling constraints  
+- Look for anti-affinity rules that might affect pod placement
+- Check for disruption budgets that might block operations
+- Consider cluster autoscaling behavior and node lifecycle"""
 ```
 
 ## Testing Strategy
@@ -537,10 +654,10 @@ result = agent.process_alert(alert, runbook_content)
 
 - **AgentRegistry**: Lookup logic, edge cases, agent class name resolution
 - **AgentFactory**: Class resolution, dependency injection, error handling for unknown classes
-- **BaseAgent**: Abstract method enforcement, common processing logic, instruction combination
+- **BaseAgent**: Abstract method enforcement, common processing logic, instruction composition
 - **Individual Agent Classes**: mcp_servers() and custom_instructions() method implementations
 - **AlertOrchestrator**: Delegation logic, error handling, progress callback integration
-- **MCPServerRegistry**: Configuration lookup, server config validation
+- **MCPServerRegistry**: Configuration lookup, server config validation, instruction retrieval
 - **Error Handling**: Unknown alert types, missing agent classes, agent processing failures
 - **Configuration**: Agent registry validation, MCP server registry validation
 
@@ -572,8 +689,9 @@ class MockProgressCallback:
 #### Integration Test Scenarios
 
 - **Complete Alert Processing Flow**: Alert → Orchestrator → AgentFactory → Agent → Result
-- **Agent Class Inheritance**: BaseAgent common logic + specialized agent customization
+- **Agent Class Inheritance**: BaseAgent common logic + specialized agent customization  
 - **MCP Server Integration**: Agent requests specific servers, processes with correct tools
+- **Instruction Composition**: Verify final instructions include general + MCP + custom components
 - **Error Propagation**: Failures at different layers bubble up with appropriate error messages
 - **Progress Updates**: WebSocket callbacks triggered at correct processing stages
 - **Multi-Agent Scenarios**: Different alert types routed to different agent classes
@@ -622,6 +740,25 @@ async def test_unknown_alert_error_handling(integration_test_services):
     
     assert result.status == "error"
     assert "No specialized agent available" in result.error_message
+
+@pytest.mark.integration
+async def test_instruction_composition(integration_test_services):
+    """Test that agents compose instructions from multiple sources"""
+    kubernetes_agent = KubernetesAgent(
+        llm_client=services['llm_client'],
+        mcp_client=services['mcp_client'], 
+        progress_callback=services['progress_callback'],
+        mcp_registry=MockMCPServerRegistry()
+    )
+    
+    instructions = kubernetes_agent._compose_instructions()
+    
+    # Verify instruction composition
+    assert "General SRE Agent Instructions" in instructions
+    assert "Kubernetes Server Instructions" in instructions
+    assert "For Kubernetes operations:" in instructions
+    # Custom instructions should be empty for KubernetesAgent initially
+    assert "Agent-Specific Instructions" not in instructions
 ```
 
 ### Test Structure
@@ -634,12 +771,14 @@ tests/
 │   ├── test_base_agent.py          # BaseAgent common logic
 │   ├── test_kubernetes_agent.py    # KubernetesAgent specifics
 │   ├── test_alert_orchestrator.py  # Orchestrator delegation
-│   └── test_mcp_server_registry.py # MCP server configuration
+│   ├── test_mcp_server_registry.py # MCP server configuration
+│   └── test_instruction_composition.py # Instruction composition logic
 ├── integration/
 │   ├── test_alert_processing_flow.py    # Complete alert flows
 │   ├── test_agent_inheritance.py        # BaseAgent + specialized agents
 │   ├── test_error_handling.py          # Error propagation scenarios
 │   ├── test_mcp_server_integration.py  # Agent MCP server selection
+│   ├── test_instruction_flow.py        # End-to-end instruction composition
 │   └── test_multi_agent_scenarios.py   # Multiple agents processing
 ├── e2e/
 └── fixtures/
@@ -663,6 +802,7 @@ Enhanced logging includes:
 - Agent delegation events and context
 - Agent-specific processing steps and results
 - MCP server subset assignments and initialization (REQ-2.7, REQ-2.8)
+- Instruction composition details (general + MCP + custom components)
 - Clear error messages when no agent is available (REQ-2.24)
 - Agent-specific error details and component failures (REQ-2.28)
 
@@ -677,21 +817,26 @@ The migration follows a phased approach:
 
 ### Backward Compatibility
 
-Full backward compatibility maintained:
+Full backward compatibility maintained for external interfaces:
 - All existing API endpoints unchanged
-- Existing configuration remains valid
 - Same alert processing behavior for existing alert types
+
+### Configuration Migration Required
+
+**Critical**: The existing `mcp_servers` configuration in settings.py will be replaced entirely by `mcp_server_registry` to eliminate duplication and establish single source of truth.
 
 ### Migration Steps
 
 1. Deploy new multi-layer architecture code
-2. Configure global MCP server registry with existing MCP servers (REQ-2.6)
-3. Configure agent registry with "Namespace is stuck in Terminating" → Kubernetes Agent (REQ-2.2)
-4. Assign Kubernetes MCP server subset to Kubernetes Agent (REQ-2.7, REQ-2.8)
-5. Verify processing behavior matches existing system with agent-specific MCP servers
-6. Test error handling for unsupported alert types (REQ-2.24)
-7. Update configuration to enable additional alert types and MCP server assignments
-8. Add new agents with their specific MCP server subsets as needed
+2. **Migrate existing MCP server configuration**: Move `mcp_servers` configuration from settings.py to new `mcp_server_registry` format with embedded instructions
+3. **Remove duplicate configuration**: Delete the existing `mcp_servers` field and `get_mcp_config()` method from settings.py  
+4. Configure agent registry with "Namespace is stuck in Terminating" → KubernetesAgent (REQ-2.2)
+5. Verify KubernetesAgent uses kubernetes-server from MCP Server Registry (no duplication)
+6. Verify processing behavior matches existing system with single source of truth for MCP servers
+7. Test error handling for unsupported alert types (REQ-2.24)
+8. Add new agents with their specific MCP server subsets from the unified registry as needed
+
+**Important**: After migration, MCP Server Registry will be the ONLY source for MCP server configurations. No other configuration should define MCP servers.
 
 ## Alternative Designs Considered
 

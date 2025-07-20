@@ -13,6 +13,7 @@
 
 ### Implementation Summary
 <!-- AI: Summarize the implementation approach based on the design document -->
+<!-- IMPORTANT: Clarify if this is a complete replacement or extension approach. For replacements, emphasize that NO legacy code will be preserved - only external API compatibility is maintained. -->
 
 ### Implementation Goals
 <!-- AI: List the key implementation goals -->
@@ -20,9 +21,16 @@
 - [Implementation goal 2]
 - [Implementation goal 3]
 
+### Implementation Strategy
+<!-- AI: Specify if this is a complete replacement or extension approach -->
+**CRITICAL**: Specify whether this is:
+- **Complete Code Replacement**: Existing implementation will be entirely removed and replaced with new code (maintain only external API compatibility)
+- **Extension/Enhancement**: Existing code will be extended or enhanced (maintain internal compatibility)
+
 ### Implementation Constraints
 <!-- AI: List any implementation constraints -->
-- [Constraint 1]
+- Must maintain external API endpoint contracts without breaking changes (for UI and external integrations)
+- [Internal implementation can be completely replaced if using complete replacement approach]
 - [Constraint 2]
 - [Constraint 3]
 
@@ -31,6 +39,31 @@
 - [ ] [Success criterion 1 from requirements]
 - [ ] [Success criterion 2 from requirements]
 - [ ] [Success criterion 3 from requirements]
+
+### Rollback Strategy
+<!-- AI: Choose appropriate rollback strategy based on implementation approach -->
+**For Complete Code Replacement:**
+- Use git rollbacks to revert modified files to previous versions
+- No legacy code preservation needed - clean rollback to working state
+- Focus on external API compatibility during rollback testing
+
+**For Extensions/Enhancements:**
+- Use specific feature rollbacks while preserving existing functionality
+- May require selective code removal rather than full file rollbacks
+
+### Backward Compatibility Guidelines
+**External API Compatibility (Always Required):**
+- Maintain same REST endpoint paths, methods, and response formats
+- Preserve WebSocket communication contracts
+- Keep same configuration file formats (external)
+- Maintain same command-line interfaces (if any)
+
+**Internal Compatibility (NOT Required for Complete Replacements):**
+- Internal class interfaces can be completely changed
+- Internal method signatures can be completely different
+- Internal data structures can be completely redesigned
+- Internal configuration formats can be completely changed
+- Legacy code does not need to be preserved or wrapped
 
 ## Phase 1: Foundation & Setup
 
@@ -42,10 +75,11 @@
 **Goal:** [Specific goal for this step]
 **Files to Create/Modify:**
 - `path/to/file1.py` (new)
-- `path/to/file2.py` (modify)
-- `path/to/file3.py` (modify)
+- `path/to/file2.py` (modify | completely replace if using replacement approach)
+- `path/to/file3.py` (modify | completely replace if using replacement approach)
 
 **AI Prompt:** `Implement Step 1.1 of EP-XXXX: [step description]`
+<!-- For complete replacements, include phrases like "completely replace", "remove all legacy code", "no legacy preservation" -->
 
 **Tasks:**
 - [ ] [Atomic task 1]
@@ -551,6 +585,13 @@
 
 ## AI Implementation Guide
 
+### Implementation Approach Reminder
+**CRITICAL**: If this is a complete replacement implementation:
+- Remove ALL legacy code - do not preserve, wrap, or extend existing implementation
+- Focus ONLY on maintaining external API endpoint compatibility
+- Use clear AI prompts like "completely replace" and "remove all legacy code"
+- Internal implementation can be entirely different from original
+
 ### Step-by-Step Execution
 1. **Implement each step individually** using the specific AI prompt
 2. **Validate each step** using the success check commands
@@ -561,6 +602,7 @@
 ### Implementation Pattern
 ```
 AI Prompt: "Implement Step X.Y of EP-XXXX: [step description]"
+[For complete replacements, add: "Completely replace existing implementation. Remove all legacy code."]
 Human: Run success check commands
 Human: Verify validation criteria
 Human: Check off completed tasks
@@ -568,9 +610,10 @@ Human: Proceed to next step only if all validation passes
 ```
 
 ### Troubleshooting
-- If a step fails validation, use the rollback plan
+- If a step fails validation, use the appropriate rollback strategy (git revert for complete replacements)
 - Review dependencies before proceeding
 - Check for blockers and resolve them
+- For complete replacements: Don't try to preserve failing code, revert cleanly and retry
 
 ---
 
