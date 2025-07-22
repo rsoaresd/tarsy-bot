@@ -29,7 +29,7 @@ class TestEdgeCases:
         long_message = "This is a very long alert message. " * 500  # ~17KB
         
         long_alert = Alert(
-            alert_type="Namespace is stuck in Terminating",
+            alert_type="NamespaceTerminating",
             severity="high",
             environment="production",
             cluster="https://k8s-cluster.example.com",
@@ -55,7 +55,7 @@ class TestEdgeCases:
         """Test processing alert with special characters and Unicode."""
         # Arrange - Create alert with special characters
         special_alert = Alert(
-            alert_type="Namespace is stuck in Terminating",
+            alert_type="NamespaceTerminating",
             severity="high",
             environment="production-🚨",
             cluster="https://k8s-cluster.example.com",
@@ -81,7 +81,7 @@ class TestEdgeCases:
         """Test processing alert with minimal required fields."""
         # Arrange - Create alert with only required fields
         minimal_alert = Alert(
-            alert_type="Namespace is stuck in Terminating",
+            alert_type="NamespaceTerminating",
             severity="high",
             environment="production",
             cluster="https://k8s-cluster.example.com",
@@ -108,7 +108,7 @@ class TestEdgeCases:
         old_timestamp = datetime.now() - timedelta(days=365)
         
         old_alert = Alert(
-            alert_type="Namespace is stuck in Terminating",
+            alert_type="NamespaceTerminating",
             severity="high",
             environment="production",
             cluster="https://k8s-cluster.example.com",
@@ -137,7 +137,7 @@ class TestEdgeCases:
         mock_runbook_service.download_runbook.side_effect = Exception("Invalid URL")
         
         malformed_alert = Alert(
-            alert_type="Namespace is stuck in Terminating",
+            alert_type="NamespaceTerminating",
             severity="high",
             environment="production",
             cluster="https://k8s-cluster.example.com",
@@ -202,7 +202,7 @@ class TestStressScenarios:
         alerts = []
         for i in range(10):
             alert = Alert(
-                alert_type="Namespace is stuck in Terminating",
+                alert_type="NamespaceTerminating",
                 severity=["low", "medium", "high"][i % 3],
                 environment=f"env-{i}",
                 cluster=f"https://cluster-{i}.example.com",
@@ -296,7 +296,7 @@ class TestStressScenarios:
         large_context = "Large context data: " + "x" * 50000  # 50KB context
         
         large_alert = Alert(
-            alert_type="Namespace is stuck in Terminating",
+            alert_type="NamespaceTerminating",
             severity="high",
             environment="production",
             cluster="https://k8s-cluster.example.com",
@@ -438,7 +438,7 @@ class TestBoundaryConditions:
         """Test handling of various Unicode and encoding scenarios."""
         # Arrange - Create alert with diverse Unicode content
         unicode_alert = Alert(
-            alert_type="Namespace is stuck in Terminating",
+            alert_type="NamespaceTerminating",
             severity="high",
             environment="production",
             cluster="https://k8s-cluster.example.com",

@@ -32,9 +32,9 @@ class TestAgentRegistryIntegration:
         
         # Assert
         supported_types = registry.get_supported_alert_types()
-        assert "Namespace is stuck in Terminating" in supported_types
+        assert "NamespaceTerminating" in supported_types
         
-        agent_class = registry.get_agent_for_alert_type("Namespace is stuck in Terminating")
+        agent_class = registry.get_agent_for_alert_type("NamespaceTerminating")
         assert agent_class == "KubernetesAgent"
 
     def test_agent_registry_custom_mappings(self):
@@ -366,7 +366,7 @@ class TestServiceInteractionPatterns:
             mcp_registry=mock_mcp_server_registry
         )
         
-        alert_type = "Namespace is stuck in Terminating"
+        alert_type = "NamespaceTerminating"
         
         # Act
         agent_class_name = registry.get_agent_for_alert_type(alert_type)

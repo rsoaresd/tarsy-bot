@@ -26,7 +26,7 @@ interface AlertFormProps {
 
 const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
   const [formData, setFormData] = useState<AlertFormData>({
-    alert_type: 'Namespace is stuck in Terminating',
+    alert_type: 'NamespaceTerminating',
     severity: 'warning',
     environment: 'production',
     cluster: 'https://add5941aaf85e4df68995e9524adbbf2-87cb619aa3aa8d10.elb.us-east-1.amazonaws.com:6443',

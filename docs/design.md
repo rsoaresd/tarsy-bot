@@ -254,7 +254,7 @@ class AgentRegistry:
 **Current Mappings:**
 ```
 Alert Type Mappings:
-"Namespace is stuck in Terminating" -> "KubernetesAgent"
+"NamespaceTerminating" -> "KubernetesAgent"
 # Future mappings:
 # "ArgoCD Sync Failed" -> "ArgoCDAgent"
 ```
@@ -546,7 +546,7 @@ sequenceDiagram
     RS-->>AS: Runbook content
     AS->>WS: Update status (processing)
     
-    AS->>AR: get_agent_for_alert_type("Namespace is stuck in Terminating")
+    AS->>AR: get_agent_for_alert_type("NamespaceTerminating")
     alt Agent Available
         AR-->>AS: "KubernetesAgent"
         AS->>AF: create_agent("KubernetesAgent")
@@ -756,7 +756,7 @@ OPENAI_API_KEY=your_openai_key
 GITHUB_TOKEN=your_github_token
 
 # New agent registry configuration
-AGENT_REGISTRY_CONFIG={"Namespace is stuck in Terminating": "KubernetesAgent"}
+AGENT_REGISTRY_CONFIG={"NamespaceTerminating": "KubernetesAgent"}
 MCP_SERVER_REGISTRY_CONFIG={...}
 ```
 
@@ -921,7 +921,7 @@ DEFAULT_LLM_PROVIDER=gemini
 LOG_LEVEL=INFO
 
 # New agent architecture configuration
-AGENT_REGISTRY='{"Namespace is stuck in Terminating": "KubernetesAgent"}'
+AGENT_REGISTRY='{"NamespaceTerminating": "KubernetesAgent"}'
 MCP_SERVER_REGISTRY='{"kubernetes-server": {...}}'
 ```
 

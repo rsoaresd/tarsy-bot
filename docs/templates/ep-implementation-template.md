@@ -103,9 +103,6 @@
 [verification command 3]
 ```
 
-**Rollback Plan:**
-- [How to rollback if this step fails]
-
 #### Step 1.2: [Step Name]
 **Goal:** [Specific goal for this step]
 
@@ -135,9 +132,6 @@
 [verification command 2]
 ```
 
-**Rollback Plan:**
-- [How to rollback if this step fails]
-
 #### Step 1.3: [Step Name]
 **Goal:** [Specific goal for this step]
 
@@ -164,9 +158,6 @@
 [verification command 1]
 [verification command 2]
 ```
-
-**Rollback Plan:**
-- [How to rollback if this step fails]
 
 ### Phase 1 Completion Criteria
 - [ ] [Overall Phase 1 success criterion 1]
@@ -208,9 +199,6 @@
 [verification command 2]
 ```
 
-**Rollback Plan:**
-- [How to rollback if this step fails]
-
 #### Step 2.2: [Step Name]
 **Goal:** [Specific goal for this step]
 
@@ -238,9 +226,6 @@
 [verification command 2]
 ```
 
-**Rollback Plan:**
-- [How to rollback if this step fails]
-
 #### Step 2.3: [Step Name]
 **Goal:** [Specific goal for this step]
 
@@ -267,9 +252,6 @@
 [verification command 1]
 [verification command 2]
 ```
-
-**Rollback Plan:**
-- [How to rollback if this step fails]
 
 ### Phase 2 Completion Criteria
 - [ ] [Overall Phase 2 success criterion 1]
@@ -309,9 +291,6 @@
 [verification command 2]
 ```
 
-**Rollback Plan:**
-- [How to rollback if this step fails]
-
 #### Step 3.2: [Step Name]
 **Goal:** [Specific goal for this step]
 
@@ -339,9 +318,6 @@
 [verification command 2]
 ```
 
-**Rollback Plan:**
-- [How to rollback if this step fails]
-
 #### Step 3.3: [Step Name]
 **Goal:** [Specific goal for this step]
 
@@ -368,9 +344,6 @@
 [verification command 1]
 [verification command 2]
 ```
-
-**Rollback Plan:**
-- [How to rollback if this step fails]
 
 ### Phase 3 Completion Criteria
 - [ ] [Overall Phase 3 success criterion 1]
@@ -409,9 +382,6 @@
 [documentation verification command]
 ```
 
-**Rollback Plan:**
-- [How to rollback if this step fails]
-
 #### Step 4.2: Update Main Documentation
 **Goal:** [Specific goal for this step]
 
@@ -437,9 +407,6 @@
 # Commands to verify this step
 [documentation verification command]
 ```
-
-**Rollback Plan:**
-- [How to rollback if this step fails]
 
 #### Step 4.3: Final Validation
 **Goal:** [Specific goal for this step]
@@ -467,9 +434,6 @@
 # Commands to verify this step
 [final verification command]
 ```
-
-**Rollback Plan:**
-- [How to rollback if this step fails]
 
 ### Phase 4 Completion Criteria
 - [ ] [Overall Phase 4 success criterion 1]
@@ -510,24 +474,6 @@
 <!-- AI: List external dependencies -->
 - [Dependency 1]: [Description]
 - [Dependency 2]: [Description]
-
-## Timeline & Milestones
-
-### Overall Timeline
-- **Phase 1**
-- **Phase 2**
-- **Phase 3**
-- **Phase 4**
-
-### Key Milestones
-- [ ] [Milestone 1]
-- [ ] [Milestone 2]
-- [ ] [Milestone 3]
-- [ ] [Milestone 4]
-
-### Critical Path
-<!-- AI: Identify the critical path -->
-- [Critical step 1] → [Critical step 2] → [Critical step 3]
 
 ## Documentation Updates Required
 

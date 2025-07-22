@@ -362,7 +362,7 @@ curl http://localhost:8000/health
 curl -X POST http://localhost:8000/alerts \
   -H "Content-Type: application/json" \
   -d '{
-    "alert": "Namespace is stuck in Terminating",
+    "alert": "NamespaceTerminating",
     "severity": "warning",
     "environment": "production",
     "cluster": "https://api.test-cluster.example.com:6443",
@@ -510,7 +510,7 @@ To add a new MCP server:
 2. **Configure Alert Type Support**: Add the alert type to the supported alerts list:
    ```python
    supported_alerts: List[str] = Field(default=[
-       "Namespace is stuck in Terminating",
+       "NamespaceTerminating",
        "New Alert Type"
    ])
    ```

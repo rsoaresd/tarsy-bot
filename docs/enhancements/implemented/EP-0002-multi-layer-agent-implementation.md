@@ -35,7 +35,7 @@ The implementation introduces an inheritance-based system where agents extend Ba
 - Agent delegation overhead must be minimal (< 5ms processing time impact)
 
 ### Success Criteria
-- [ ] Kubernetes agent processes "Namespace is stuck in Terminating" alerts with identical quality to current system (REQ-2.4)
+- [ ] Kubernetes agent processes "NamespaceTerminating" alerts with identical quality to current system (REQ-2.4)
 - [ ] Orchestrator layer successfully delegates alerts to appropriate specialized agents (REQ-2.1)
 - [ ] Alert type to agent mapping is defined in configuration files and loaded at startup without requiring code changes (REQ-2.2)
 - [ ] All existing API endpoints continue to work without modification (REQ-2.11)
@@ -255,7 +255,7 @@ pytest tests/unit/test_kubernetes_agent.py -v
 - [ ] **CRITICAL**: Remove existing get_mcp_config() method from settings.py - replaced by MCP Server Registry lookups
 - [ ] Update env.template with simple example configurations showing static registry patterns
 - [ ] Add basic configuration validation for registry entries at application startup only
-- [ ] Include default static configuration mapping "Namespace is stuck in Terminating" to KubernetesAgent with kubernetes-server
+- [ ] Include default static configuration mapping "NamespaceTerminating" to KubernetesAgent with kubernetes-server
 - [ ] Add code comments explaining simple static registry pattern and three-tier instruction composition
 - [ ] Ensure no MCP server configuration duplication - MCP Server Registry as single source of truth
 
@@ -268,7 +268,7 @@ pytest tests/unit/test_kubernetes_agent.py -v
 - [ ] **CRITICAL**: Existing mcp_servers field has been completely removed from settings.py (no duplication)
 - [ ] **CRITICAL**: Existing get_mcp_config() method has been completely removed from settings.py (no duplication)
 - [ ] Basic configuration validation prevents invalid entries at startup and ensures instruction completeness
-- [ ] Default static configuration correctly maps "Namespace is stuck in Terminating" to KubernetesAgent with kubernetes-server assignment
+- [ ] Default static configuration correctly maps "NamespaceTerminating" to KubernetesAgent with kubernetes-server assignment
 - [ ] Three-tier instruction composition is properly configured in static setup (general + MCP + custom)
 - [ ] MCP Server Registry is the ONLY source for MCP server configurations - no other configuration source exists
 - [ ] No runtime configuration changes possible - all registries are immutable after startup
@@ -668,7 +668,7 @@ async def test_kubernetes_alert_full_flow(integration_test_services):
     services['llm_client'].set_response("Namespace finalizers removed")
     
     orchestrator = AlertOrchestrator(services)
-    alert = Alert(type="Namespace is stuck in Terminating")
+    alert = Alert(type="NamespaceTerminating")
     result = await orchestrator.process_alert(alert)
     
     assert result.status == "completed"

@@ -33,7 +33,7 @@ class TestAlertProcessingE2E:
         assert result is not None
         assert "Analysis" in result
         assert "KubernetesAgent" in result or "Kubernetes" in result
-        assert "Namespace is stuck in Terminating" in result or "stuck-namespace" in result
+        assert "NamespaceTerminating" in result or "stuck-namespace" in result
         
         # Verify progress callbacks were called
         assert progress_callback_mock.call_count >= 3
@@ -59,7 +59,7 @@ class TestAlertProcessingE2E:
         
         # Assert - Verify agent registry was called correctly
         mock_agent_registry.get_agent_for_alert_type.assert_called_once_with(
-            "Namespace is stuck in Terminating"
+            "NamespaceTerminating"
         )
         
         # Verify agent factory was called to create KubernetesAgent
@@ -447,7 +447,7 @@ class TestConcurrencyAndPerformance:
         callbacks = []
         for i in range(3):
             alert = Alert(
-                alert_type="Namespace is stuck in Terminating",
+                alert_type="NamespaceTerminating",
                 severity="high",
                 environment=f"env-{i}",
                 cluster="https://k8s-cluster.example.com",

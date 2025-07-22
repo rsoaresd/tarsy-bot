@@ -1,11 +1,11 @@
 # EP-0003: Alert Processing History Service - Design Document
 
-**Status:** Draft  
+**Status:** Approved  
 **Created:** 2024-12-19  
 **Updated:** 2024-12-19  
-**Phase:** Technical Design
-**Requirements Document:** `docs/enhancements/pending/EP-0003-alert-processing-history-requirements.md`
-**Next Phase:** Implementation Plan
+**Phase:** Approved Technical Design
+**Requirements Document:** `docs/enhancements/approved/EP-0003-alert-processing-history-requirements.md`
+**Implementation Plan:** `docs/enhancements/approved/EP-0003-alert-processing-history-implementation.md`
 
 ---
 
@@ -131,6 +131,7 @@ AlertSession:
   - alert_id: str (external alert identifier)
   - alert_data: JSON (original alert payload)
   - agent_type: str (processing agent type)
+  - alert_type: str (nullable, alert type for efficient filtering)
   - status: str (pending, in_progress, completed, failed)
   - started_at: datetime
   - completed_at: datetime (nullable)
@@ -196,10 +197,12 @@ MCPCommunication:
 - **Query Parameters**:
   - `status`: Filter by processing status (pending, in_progress, completed, failed)
   - `agent_type`: Filter by agent type
+  - `alert_type`: Filter by alert type (e.g., 'pod_crash', 'high_cpu', 'disk_full')
   - `start_date`: Filter sessions after date
   - `end_date`: Filter sessions before date
   - `page`: Page number for pagination
   - `page_size`: Number of results per page
+- **Filter Logic**: Multiple query parameters use AND logic (e.g., `alert_type=X&status=Y&start_date=Z` returns sessions matching ALL three criteria)
 - **Response Format**:
   ```json
   {
@@ -460,8 +463,8 @@ MCPCommunication:
 
 ### Dependencies
 
-- SQLAlchemy ORM for database abstraction
-- pydantic for data validation and serialization
+- SQLModel for database abstraction with type safety
+- pydantic for data validation and serialization (included with SQLModel)
 
 ### Constraints
 
@@ -493,14 +496,7 @@ MCPCommunication:
 
 ---
 
-## Next Steps
-
-After design approval:
-1. Create Implementation Plan: `docs/enhancements/pending/EP-0003-alert-processing-history-implementation.md`
-2. Reference this design document in the implementation phase
-3. Ensure implementation plan addresses all design elements
-
-**AI Prompt for Next Phase:**
-```
-Create an implementation plan using the template at docs/templates/ep-implementation-template.md for EP-0003 based on the approved design in this document and the requirements in EP-0003-alert-processing-history-requirements.md.
-``` 
+## Approval Status
+**Status:** Approved for implementation  
+**Approved:** 2024-12-19  
+**Implementation Plan:** `docs/enhancements/approved/EP-0003-alert-processing-history-implementation.md` 

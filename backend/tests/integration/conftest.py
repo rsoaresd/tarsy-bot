@@ -74,7 +74,7 @@ def mock_settings():
 def sample_alert():
     """Create a sample alert for testing."""
     return Alert(
-        alert_type="Namespace is stuck in Terminating",
+        alert_type="NamespaceTerminating",
         severity="high",
         environment="production",
         cluster="https://k8s-cluster.example.com",
@@ -92,7 +92,7 @@ def sample_runbook_content():
     return """# Kubernetes Namespace Stuck in Terminating
 
 ## Overview
-This runbook helps resolve issues where a Kubernetes namespace is stuck in Terminating state.
+This runbook helps resolve issues where a Kubernetes NamespaceTerminating state.
 
 ## Steps
 1. Check for pods with finalizers
@@ -341,7 +341,7 @@ def mock_agent_registry():
     """Mock agent registry."""
     registry = Mock(spec=AgentRegistry)
     registry.get_agent_for_alert_type.return_value = "KubernetesAgent"
-    registry.get_supported_alert_types.return_value = ["Namespace is stuck in Terminating"]
+    registry.get_supported_alert_types.return_value = ["NamespaceTerminating"]
     return registry
 
 

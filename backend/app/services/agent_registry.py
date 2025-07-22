@@ -24,7 +24,7 @@ class AgentRegistry:
     
     # Static mappings defined in the registry itself
     _DEFAULT_MAPPINGS = {
-        "Namespace is stuck in Terminating": "KubernetesAgent",
+        "NamespaceTerminating": "KubernetesAgent",
         # Future mappings will be added here:
         # "ArgoCD Sync Failed": "ArgoCDAgent", 
         # "EKS Node Group Issues": "KubernetesAWSAgent",

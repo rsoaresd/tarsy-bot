@@ -246,7 +246,7 @@ sequenceDiagram
 ```python
 # Simple static registries - loaded once at startup, no runtime changes
 AgentRegistry:
-  - static_mappings: Dict[str, str]  # alert_type -> agent_class_name (e.g., "Namespace is stuck in Terminating" -> "KubernetesAgent")
+  - static_mappings: Dict[str, str]  # alert_type -> agent_class_name (e.g., "NamespaceTerminating" -> "KubernetesAgent")
   - get_agent_for_alert_type(alert_type: str) -> Optional[str]  # Simple dictionary lookup
 
 MCPServerConfig:
@@ -452,7 +452,7 @@ The new design eliminates configuration duplication by having MCP Server Registr
 ```yaml
 # Simple static Agent Registry - loaded once at startup, maps alert types to agent classes
 agent_registry:
-  "Namespace is stuck in Terminating": "KubernetesAgent"
+  "NamespaceTerminating": "KubernetesAgent"
   "ArgoCD Sync Failed": "ArgoCDAgent"
   "EKS Node Group Issues": "KubernetesAWSAgent"
 
@@ -563,7 +563,7 @@ class AgentFactory:
         )
 
 # Usage in AlertOrchestrator - simple lookups only
-agent_class_name = agent_registry.get_agent_for_alert_type("Namespace is stuck in Terminating")
+agent_class_name = agent_registry.get_agent_for_alert_type("NamespaceTerminating")
 # Returns: "KubernetesAgent" (simple dict lookup)
 
 agent = agent_factory.create_agent(agent_class_name)
@@ -722,7 +722,7 @@ async def test_kubernetes_alert_full_flow(integration_test_services):
     orchestrator = AlertOrchestrator(services)
     
     # Process alert
-    alert = Alert(type="Namespace is stuck in Terminating")
+    alert = Alert(type="NamespaceTerminating")
     result = await orchestrator.process_alert(alert)
     
     # Verify flow
@@ -830,7 +830,7 @@ Full backward compatibility maintained for external interfaces:
 1. Deploy new multi-layer architecture code
 2. **Migrate existing MCP server configuration**: Move `mcp_servers` configuration from settings.py to new `mcp_server_registry` format with embedded instructions
 3. **Remove duplicate configuration**: Delete the existing `mcp_servers` field and `get_mcp_config()` method from settings.py  
-4. Configure agent registry with "Namespace is stuck in Terminating" → KubernetesAgent (REQ-2.2)
+4. Configure agent registry with "NamespaceTerminating" → KubernetesAgent (REQ-2.2)
 5. Verify KubernetesAgent uses kubernetes-server from MCP Server Registry (no duplication)
 6. Verify processing behavior matches existing system with single source of truth for MCP servers
 7. Test error handling for unsupported alert types (REQ-2.24)

@@ -66,7 +66,7 @@ The current system consists of:
 
 ### Functional Success Criteria
 - [ ] Orchestrator layer successfully delegates alerts to appropriate specialized agents
-- [ ] Kubernetes agent processes "Namespace is stuck in Terminating" alerts with same quality as current system
+- [ ] Kubernetes agent processes "NamespaceTerminating" alerts with same quality as current system
 - [ ] Alert type to agent mapping is configurable without code changes
 - [ ] New alert types can be added through configuration only
 - [ ] All existing API endpoints continue to work without modification
@@ -186,7 +186,7 @@ The current system consists of:
 ## Acceptance Criteria
 
 ### Functional Acceptance Criteria
-- [ ] "Namespace is stuck in Terminating" alert processes through Kubernetes agent with identical results to current system
+- [ ] "NamespaceTerminating" alert processes through Kubernetes agent with identical results to current system
 - [ ] Agent registry correctly maps alert types to agents based on configuration
 - [ ] Orchestrator successfully delegates processing and aggregates results
 - [ ] All existing API endpoints return expected responses without modification
