@@ -74,6 +74,11 @@ pids
 coverage/
 *.lcov
 
+# Python coverage files
+.coverage
+.coverage.*
+htmlcov/
+
 # ESLint cache
 .eslintcache
 

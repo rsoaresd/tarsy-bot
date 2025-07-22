@@ -26,12 +26,44 @@ dependencies = [
 ]
 requires-python = ">= 3.11"
 
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.10.0",
+    "pytest-cov>=4.1.0",
+    "pytest-xdist>=3.3.1",
+]
+dev = [
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+    "pre-commit>=3.5.0",
+]
+all = [
+    "sre-ai-agent[test,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/alexeykazakov/sre-alert-processing"
+Repository = "https://github.com/alexeykazakov/sre-alert-processing"
+Documentation = "https://github.com/alexeykazakov/sre-alert-processing/backend/docs"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.uv]
+dev-dependencies = []
+# uv-specific settings for faster dependency resolution
+resolution = "highest"
+
+[tool.uv.sources]
+# Configure sources for private packages if needed
+# my-private-package = { git = "https://github.com/private/repo.git" }
 
 [tool.ruff]
 target-version = "py311"
@@ -45,4 +77,70 @@ ignore = ["W291", "W292", "W293"]
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
-line-ending = "auto" 
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = [
+    "-v",
+    "--tb=short", 
+    "--strict-markers",
+    "--disable-warnings",
+]
+markers = [
+    "integration: Integration tests",
+    "unit: Unit tests", 
+    "slow: Slow-running tests",
+    "external: Tests requiring external services",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["*/tests/*", "*/test_*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
+
+[tool.black]
+target-version = ["py311"]
+line-length = 88
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+    | \.venv
+    | \.pytest_cache
+    | __pycache__
+    | build
+    | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false 

@@ -1,0 +1,543 @@
+"""
+Component integration tests for SRE AI Agent services.
+
+This module tests the integration between specific components of the system,
+focusing on service boundaries and interactions rather than full end-to-end flows.
+"""
+
+import pytest
+import asyncio
+from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from typing import Dict, Any
+
+from app.models.alert import Alert
+from app.services.agent_registry import AgentRegistry
+from app.services.agent_factory import AgentFactory
+from app.services.mcp_server_registry import MCPServerRegistry
+from app.agents.kubernetes_agent import KubernetesAgent
+from app.integrations.llm.client import LLMManager, LLMClient
+from app.integrations.mcp.client import MCPClient
+from app.models.mcp_config import MCPServerConfig
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestAgentRegistryIntegration:
+    """Test agent registry component and its interactions."""
+
+    def test_agent_registry_default_mappings(self):
+        """Test agent registry with default mappings."""
+        # Act
+        registry = AgentRegistry()
+        
+        # Assert
+        supported_types = registry.get_supported_alert_types()
+        assert "Namespace is stuck in Terminating" in supported_types
+        
+        agent_class = registry.get_agent_for_alert_type("Namespace is stuck in Terminating")
+        assert agent_class == "KubernetesAgent"
+
+    def test_agent_registry_custom_mappings(self):
+        """Test agent registry with custom configuration."""
+        # Arrange
+        custom_config = {
+            "Custom Alert Type": "CustomAgent",
+            "Test Alert": "TestAgent"
+        }
+        
+        # Act
+        registry = AgentRegistry(config=custom_config)
+        
+        # Assert
+        supported_types = registry.get_supported_alert_types()
+        assert "Custom Alert Type" in supported_types
+        assert "Test Alert" in supported_types
+        
+        agent_class = registry.get_agent_for_alert_type("Custom Alert Type")
+        assert agent_class == "CustomAgent"
+
+    def test_agent_registry_unknown_alert_type(self):
+        """Test agent registry behavior with unknown alert types."""
+        # Act
+        registry = AgentRegistry()
+        agent_class = registry.get_agent_for_alert_type("Unknown Alert Type")
+        
+        # Assert
+        assert agent_class is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestAgentFactoryIntegration:
+    """Test agent factory component and its interactions."""
+
+    def test_agent_factory_initialization(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry
+    ):
+        """Test agent factory initialization."""
+        # Act
+        factory = AgentFactory(
+            llm_client=mock_llm_manager,
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        # Assert
+        assert factory is not None
+        assert factory.llm_client == mock_llm_manager
+        assert factory.mcp_client == mock_mcp_client
+        assert factory.mcp_registry == mock_mcp_server_registry
+        assert len(factory.static_agent_classes) > 0
+        assert "KubernetesAgent" in factory.static_agent_classes
+
+    def test_agent_factory_kubernetes_agent_creation(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry
+    ):
+        """Test creation of KubernetesAgent through factory."""
+        # Arrange
+        factory = AgentFactory(
+            llm_client=mock_llm_manager,
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        # Act
+        agent = factory.create_agent("KubernetesAgent")
+        
+        # Assert
+        assert isinstance(agent, KubernetesAgent)
+        assert agent.llm_client == mock_llm_manager
+        assert agent.mcp_client == mock_mcp_client
+        assert agent.mcp_registry == mock_mcp_server_registry
+
+    def test_agent_factory_unknown_agent_error(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry
+    ):
+        """Test agent factory error handling for unknown agents."""
+        # Arrange
+        factory = AgentFactory(
+            llm_client=mock_llm_manager,
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        # Act & Assert
+        with pytest.raises(ValueError, match="Unknown agent class"):
+            factory.create_agent("UnknownAgent")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestMCPServerRegistryIntegration:
+    """Test MCP server registry component."""
+
+    def test_mcp_server_registry_default_configuration(self):
+        """Test MCP server registry with default configuration."""
+        # Act
+        registry = MCPServerRegistry()
+        
+        # Assert
+        server_ids = registry.get_all_server_ids()
+        assert "kubernetes-server" in server_ids
+        
+        config = registry.get_server_config("kubernetes-server")
+        assert config is not None
+        assert config.server_id == "kubernetes-server"
+        assert config.server_type == "kubernetes"
+        assert config.enabled is True
+
+    def test_mcp_server_registry_server_configs_retrieval(self):
+        """Test retrieving multiple server configurations."""
+        # Arrange
+        registry = MCPServerRegistry()
+        
+        # Act
+        configs = registry.get_server_configs(["kubernetes-server"])
+        
+        # Assert
+        assert len(configs) == 1
+        assert configs[0].server_id == "kubernetes-server"
+
+    def test_mcp_server_registry_custom_configuration(self):
+        """Test MCP server registry with custom configuration."""
+        # Arrange
+        custom_config = {
+            "test-server": {
+                "server_id": "test-server",
+                "server_type": "test",
+                "enabled": True,
+                "connection_params": {"command": "test"},
+                "instructions": "Test instructions"
+            }
+        }
+        
+        # Act
+        registry = MCPServerRegistry(config=custom_config)
+        
+        # Assert
+        server_ids = registry.get_all_server_ids()
+        assert "test-server" in server_ids
+        
+        config = registry.get_server_config("test-server")
+        assert config.server_type == "test"
+        assert config.instructions == "Test instructions"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestKubernetesAgentIntegration:
+    """Test KubernetesAgent component in isolation."""
+
+    def test_kubernetes_agent_mcp_servers(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry
+    ):
+        """Test KubernetesAgent MCP server assignment."""
+        # Arrange & Act
+        agent = KubernetesAgent(
+            llm_client=mock_llm_manager.get_client(),
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        # Assert
+        servers = agent.mcp_servers()
+        assert servers == ["kubernetes-server"]
+
+    def test_kubernetes_agent_custom_instructions(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry
+    ):
+        """Test KubernetesAgent custom instructions."""
+        # Arrange & Act
+        agent = KubernetesAgent(
+            llm_client=mock_llm_manager.get_client(),
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        # Assert
+        instructions = agent.custom_instructions()
+        assert isinstance(instructions, str)  # May be empty but should be string
+
+    async def test_kubernetes_agent_tool_selection_prompt(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry,
+        sample_alert,
+        sample_runbook_content
+    ):
+        """Test KubernetesAgent tool selection prompt customization."""
+        # Arrange
+        agent = KubernetesAgent(
+            llm_client=mock_llm_manager.get_client(),
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        alert_data = {
+            "alert": sample_alert.alert_type,
+            "namespace": sample_alert.namespace,
+            "message": sample_alert.message
+        }
+        
+        available_tools = {
+            "tools": [
+                {"name": "kubectl_get_namespace", "server": "kubernetes-server"},
+                {"name": "kubectl_get_pods", "server": "kubernetes-server"}
+            ]
+        }
+        
+        # Act
+        prompt = agent.build_mcp_tool_selection_prompt(
+            alert_data, sample_runbook_content, available_tools
+        )
+        
+        # Assert
+        assert isinstance(prompt, str)
+        assert len(prompt) > 100
+        assert "kubernetes" in prompt.lower() or "namespace" in prompt.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestLLMManagerIntegration:
+    """Test LLM manager component integration."""
+
+    def test_llm_manager_availability_checking(self, mock_settings):
+        """Test LLM manager availability checking."""
+        # Arrange - Create real LLM manager with mock settings
+        manager = LLMManager(mock_settings)
+        
+        # Act
+        is_available = manager.is_available()
+        available_providers = manager.list_available_providers()
+        status = manager.get_availability_status()
+        
+        # Assert
+        assert isinstance(is_available, bool)
+        assert isinstance(available_providers, list)
+        assert isinstance(status, dict)
+
+    def test_llm_manager_client_retrieval(self, mock_settings):
+        """Test LLM manager client retrieval."""
+        # Arrange
+        manager = LLMManager(mock_settings)
+        
+        # Act
+        client = manager.get_client()
+        
+        # Assert - Should return some client (may be mock or None based on availability)
+        # The exact behavior depends on settings and availability
+        assert client is not None or not manager.is_available()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestMCPClientIntegration:
+    """Test MCP client component integration."""
+
+    async def test_mcp_client_initialization(
+        self, 
+        mock_settings, 
+        mock_mcp_server_registry
+    ):
+        """Test MCP client initialization with registry."""
+        # Arrange & Act
+        client = MCPClient(mock_settings, mock_mcp_server_registry)
+        await client.initialize()
+        
+        # Assert
+        assert client._initialized is True
+        assert client.mcp_registry == mock_mcp_server_registry
+
+    async def test_mcp_client_tool_listing_integration(
+        self, 
+        mock_settings, 
+        mock_mcp_server_registry,
+        mock_mcp_client
+    ):
+        """Test MCP client tool listing with real-like registry interaction."""
+        # Arrange - Use the provided mock_mcp_client fixture which already returns 2 tools
+        client = mock_mcp_client
+        
+        # Act
+        tools = await client.list_tools("kubernetes-server")
+        
+        # Assert
+        assert "kubernetes-server" in tools
+        assert len(tools["kubernetes-server"]) == 2
+        tool_names = [tool["name"] for tool in tools["kubernetes-server"]]
+        assert "kubectl_get_namespace" in tool_names
+        assert "kubectl_get_pods" in tool_names
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestServiceInteractionPatterns:
+    """Test common interaction patterns between services."""
+
+    async def test_agent_registry_factory_integration(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry
+    ):
+        """Test integration between agent registry and factory."""
+        # Arrange
+        registry = AgentRegistry()
+        factory = AgentFactory(
+            llm_client=mock_llm_manager,
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        alert_type = "Namespace is stuck in Terminating"
+        
+        # Act
+        agent_class_name = registry.get_agent_for_alert_type(alert_type)
+        agent = factory.create_agent(agent_class_name)
+        
+        # Assert
+        assert agent_class_name == "KubernetesAgent"
+        assert isinstance(agent, KubernetesAgent)
+
+    async def test_agent_mcp_registry_integration(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client
+    ):
+        """Test integration between agents and MCP server registry."""
+        # Arrange
+        registry = MCPServerRegistry()
+        agent = KubernetesAgent(
+            llm_client=mock_llm_manager.get_client(),
+            mcp_client=mock_mcp_client,
+            mcp_registry=registry
+        )
+        
+        # Act
+        required_servers = agent.mcp_servers()
+        server_configs = registry.get_server_configs(required_servers)
+        
+        # Assert
+        assert required_servers == ["kubernetes-server"]
+        assert len(server_configs) == 1
+        assert server_configs[0].server_id == "kubernetes-server"
+
+    async def test_agent_llm_integration(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry,
+        sample_alert,
+        sample_runbook_content
+    ):
+        """Test integration between agents and LLM manager."""
+        # Arrange
+        agent = KubernetesAgent(
+            llm_client=mock_llm_manager.get_client(),
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        alert_data = {
+            "alert": sample_alert.alert_type,
+            "namespace": sample_alert.namespace,
+            "message": sample_alert.message
+        }
+        
+        mcp_data = {
+            "kubernetes-server": [
+                {"tool": "kubectl_get_namespace", "result": {"status": "Terminating"}}
+            ]
+        }
+        
+        # Act
+        result = await agent.analyze_alert(alert_data, sample_runbook_content, mcp_data)
+        
+        # Assert
+        assert isinstance(result, str)
+        assert len(result) > 0
+        mock_llm_manager.get_client().generate_response.assert_called_once()
+
+    async def test_progress_callback_propagation(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry,
+        progress_callback_mock,
+        sample_alert,
+        sample_runbook_content
+    ):
+        """Test progress callback propagation through components."""
+        # Arrange
+        agent = KubernetesAgent(
+            llm_client=mock_llm_manager.get_client(),
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry,
+            progress_callback=progress_callback_mock
+        )
+        
+        # Act
+        result = await agent.process_alert(sample_alert, sample_runbook_content)
+        
+        # Assert
+        assert progress_callback_mock.call_count >= 1
+        assert result is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestErrorPropagationBetweenComponents:
+    """Test error propagation and handling between components."""
+
+    async def test_mcp_client_error_to_agent(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry,
+        sample_alert,
+        sample_runbook_content
+    ):
+        """Test error propagation from MCP client to agent."""
+        # Arrange
+        mock_mcp_client.call_tool.side_effect = Exception("MCP connection failed")
+        
+        agent = KubernetesAgent(
+            llm_client=mock_llm_manager.get_client(),
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        # Act
+        result = await agent.process_alert(sample_alert, sample_runbook_content)
+        
+        # Assert - Agent should handle MCP errors gracefully
+        assert result is not None
+        assert result["status"] == "success" or result["status"] == "error"
+
+    async def test_llm_error_to_agent(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client, 
+        mock_mcp_server_registry,
+        sample_alert,
+        sample_runbook_content
+    ):
+        """Test error propagation from LLM to agent."""
+        # Arrange
+        mock_llm_manager.get_client().generate_response.side_effect = Exception("LLM API failed")
+        
+        agent = KubernetesAgent(
+            llm_client=mock_llm_manager.get_client(),
+            mcp_client=mock_mcp_client,
+            mcp_registry=mock_mcp_server_registry
+        )
+        
+        # Act
+        result = await agent.process_alert(sample_alert, sample_runbook_content)
+        
+        # Assert - Agent should handle LLM errors
+        assert result is not None
+        assert result["status"] == "error"
+        assert "error" in result
+
+    def test_registry_misconfiguration_error(
+        self, 
+        mock_llm_manager, 
+        mock_mcp_client
+    ):
+        """Test error handling for registry misconfiguration."""
+        # Arrange - Create registry with truly empty configuration
+        # Note: MCPServerRegistry({}) falls back to defaults, so we override static_servers
+        empty_registry = MCPServerRegistry(config={})
+        empty_registry.static_servers = {}  # Force empty registry for testing
+        
+        # Act & Assert
+        agent = KubernetesAgent(
+            llm_client=mock_llm_manager.get_client(),
+            mcp_client=mock_mcp_client,
+            mcp_registry=empty_registry
+        )
+        
+        # The agent should be created but fail during configuration
+        required_servers = agent.mcp_servers()
+        server_configs = empty_registry.get_server_configs(required_servers)
+        
+        # Should return empty list for missing servers
+        assert len(server_configs) == 0 

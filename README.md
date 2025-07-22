@@ -64,7 +64,9 @@ sre/
 │   │   │   └── llm/        # LLM provider integrations
 │   │   ├── config/         # Configuration management
 │   │   └── utils/          # Utility functions
-│   └── pyproject.toml      # uv project configuration and dependencies
+│   ├── pyproject.toml      # uv project configuration and dependencies
+│   ├── uv.lock            # Locked dependencies for reproducible builds
+│   └── tests/             # Comprehensive integration test suite
 ├── frontend/               # React TypeScript frontend
 │   ├── src/
 │   │   ├── components/     # React components
@@ -144,15 +146,13 @@ The LLM-driven approach means new alert types can be handled without code change
 ### Running Tests
 
 ```bash
-# Backend tests
+# Install test dependencies and run integration tests
 cd backend
-source .venv/bin/activate
-python test_mcp_integration.py
-
-# Or use the setup script option
-./setup.sh
-# Choose 'y' when prompted for MCP integration test
+uv sync --extra test
+python tests/run_integration_tests.py
 ```
+
+The test suite includes comprehensive end-to-end integration tests covering the complete alert processing pipeline, agent specialization, error handling, and performance scenarios with full mocking of external services.
 
 ### Architecture Documents
 
