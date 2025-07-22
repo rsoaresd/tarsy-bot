@@ -7,6 +7,7 @@ An intelligent Site Reliability Engineering agent that automatically processes a
 - **[README.md](README.md)**: This file - project overview and quick start
 - **[setup.sh](setup.sh)**: Automated setup script (run this first!)
 - **[DEPLOYMENT.md](DEPLOYMENT.md)**: Advanced deployment, production setup, and development
+- **[backend/DEVELOPMENT.md](backend/DEVELOPMENT.md)**: Development setup guide and testing workflow
 - **[docs/requirements.md](docs/requirements.md)**: Application requirements and specifications
 - **[docs/design.md](docs/design.md)**: System design and architecture documentation
 
