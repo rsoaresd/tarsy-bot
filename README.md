@@ -84,106 +84,37 @@ The SRE AI Agent implements a modern, multi-layer architecture:
 
 ```
 sre/
-├── backend/                 # FastAPI backend with multi-layer agent architecture
+├── backend/                # FastAPI backend with multi-layer agent architecture
 │   ├── app/
-│   │   ├── main.py         # FastAPI application entry point
-│   │   ├── agents/         # Specialized agent classes
-│   │   │   ├── base_agent.py      # Abstract base agent class
-│   │   │   ├── kubernetes_agent.py # Kubernetes-specialized agent
-│   │   │   └── prompt_builder.py  # Centralized prompt construction
-│   │   ├── controllers/    # API controllers and endpoints
-│   │   │   └── history_controller.py # History API endpoints
-│   │   ├── database/       # Database initialization and management
-│   │   │   └── init_db.py  # SQLModel schema creation and setup
-│   │   ├── hooks/          # Event hooks for interaction capture
-│   │   │   ├── base_hooks.py      # Hook context system
-│   │   │   └── history_hooks.py   # History-specific event hooks
-│   │   ├── models/         # Data models and schemas
-│   │   │   ├── alert.py    # Alert processing models
-│   │   │   ├── api_models.py      # API request/response models
-│   │   │   ├── history.py  # SQLModel history database models
-│   │   │   ├── llm.py      # LLM interaction models
-│   │   │   └── mcp_config.py      # MCP server configuration models
-│   │   ├── repositories/   # Database access layer
-│   │   │   ├── base_repository.py # Base repository patterns
-│   │   │   └── history_repository.py # History data access operations
-│   │   ├── services/       # Business logic services
-│   │   │   ├── agent_factory.py   # Agent instantiation and dependency injection
-│   │   │   ├── agent_registry.py  # Alert type to agent mapping
-│   │   │   ├── alert_service.py   # Core alert processing orchestration
-│   │   │   ├── history_service.py # Comprehensive audit trail management
-│   │   │   ├── mcp_server_registry.py # MCP server configuration registry
-│   │   │   ├── runbook_service.py # GitHub runbook integration
-│   │   │   └── websocket_manager.py # Real-time communication
-│   │   ├── integrations/   # External service integrations
-│   │   │   ├── mcp/        # MCP server integrations with hook context
-│   │   │   │   └── client.py      # Official MCP SDK client with history capture
-│   │   │   └── llm/        # LLM provider integrations with hook context
-│   │   │       └── client.py      # Unified LLM client with history capture
+│   │   ├── agents/         # Specialized agent classes (KubernetesAgent, BaseAgent)
+│   │   ├── controllers/    # API controllers and REST endpoints
+│   │   ├── database/       # Database initialization and schema management
+│   │   ├── hooks/          # Event hooks for automatic interaction capture
+│   │   ├── models/         # Data models (Alert, History, API schemas)
+│   │   ├── repositories/   # Database access layer with SQLModel
+│   │   ├── services/       # Business logic (AlertService, HistoryService, AgentRegistry)
+│   │   ├── integrations/   # External integrations (LLM providers, MCP servers)
 │   │   ├── config/         # Configuration management
-│   │   │   └── settings.py # Environment-based configuration
-│   │   └── utils/          # Utility functions
-│   │       └── logger.py   # Structured logging setup
-│   ├── pyproject.toml      # uv project configuration and dependencies
-│   ├── uv.lock            # Locked dependencies for reproducible builds
-│   ├── env.template        # Environment configuration template
-│   ├── DEVELOPMENT.md      # Development setup and workflow guide
-│   └── tests/             # Comprehensive test suite
-│       ├── integration/    # End-to-end integration tests
-│       │   ├── test_alert_processing_e2e.py # Complete workflow tests
-│       │   ├── test_component_integration.py # Component integration tests
-│       │   ├── test_edge_cases.py # Edge case and error handling tests
-│       │   └── test_history_integration.py # History service integration tests
-│       ├── unit/          # Unit tests with mocked dependencies
-│       │   ├── controllers/ # API controller tests
-│       │   │   └── test_history_controller.py
-│       │   ├── repositories/ # Repository layer tests
-│       │   │   └── test_history_repository.py
-│       │   └── services/   # Service layer tests
-│       │       └── test_history_service.py
-│       ├── run_all_tests.py # Execute complete test suite
-│       ├── run_integration_tests.py # Integration tests only
-│       ├── run_unit_tests.py # Unit tests only
-│       └── conftest.py     # Shared test fixtures and configuration
+│   │   └── utils/          # Utility functions and logging
+│   ├── tests/              # Comprehensive test suite (unit, integration, e2e)
+│   ├── pyproject.toml      # Python dependencies and project configuration
+│   └── env.template        # Environment variables template
 ├── frontend/               # React TypeScript development interface
 │   ├── src/
-│   │   ├── components/     # React components for development/testing
-│   │   │   ├── AlertForm.tsx      # Alert submission interface
-│   │   │   ├── ProcessingStatus.tsx # Real-time progress display
-│   │   │   └── ResultDisplay.tsx  # Analysis results presentation
+│   │   ├── components/     # React components (AlertForm, ProcessingStatus, ResultDisplay)
 │   │   ├── services/       # API and WebSocket clients
-│   │   │   ├── api.ts      # HTTP API client
-│   │   │   └── websocket.ts # WebSocket client for real-time updates
-│   │   ├── types/          # TypeScript type definitions
-│   │   │   └── index.ts    # Shared type definitions
-│   │   └── App.tsx         # Main application component
-│   ├── package.json        # Node.js dependencies
-│   ├── package-lock.json   # Locked frontend dependencies
-│   └── tsconfig.json       # TypeScript configuration
+│   │   └── types/          # TypeScript type definitions
+│   └── package.json        # Node.js dependencies
 ├── docs/                   # Comprehensive documentation
 │   ├── requirements.md     # Application requirements and specifications
-│   ├── design.md          # Technical design and architecture
-│   ├── AI_WORKFLOW_GUIDE.md # AI development workflow guide
-│   ├── ENHANCEMENT_SYSTEM_SUMMARY.md # Enhancement proposal system overview
-│   └── enhancements/      # Enhancement proposal system
-│       ├── README.md      # Enhancement process documentation
-│       ├── implemented/   # Completed enhancement proposals
-│       │   ├── EP-0002-multi-layer-agent-design.md
-│       │   ├── EP-0002-multi-layer-agent-implementation.md
-│       │   ├── EP-0002-multi-layer-agent-requirements.md
-│       │   ├── EP-0003-alert-processing-history-design.md
-│       │   ├── EP-0003-alert-processing-history-implementation.md
-│       │   └── EP-0003-alert-processing-history-requirements.md
+│   ├── design.md           # Technical design and architecture documentation
+│   └── enhancements/       # Enhancement proposal system
+│       ├── implemented/    # Completed EPs (EP-0002 Multi-Layer Agents, EP-0003 History Service)
 │       ├── pending/        # Pending enhancement proposals
 │       └── templates/      # EP document templates
-│           ├── enhancement-proposal-template.md
-│           ├── ep-design-template.md
-│           ├── ep-implementation-template.md
-│           └── ep-requirements-template.md
-├── setup.sh               # Automated setup script
-├── DEPLOYMENT.md          # Production deployment guide
-├── docker-compose.yml     # Docker development environment
-└── README.md             # This file - project overview
+├── setup.sh                # Automated setup script
+├── DEPLOYMENT.md           # Production deployment guide
+└── docker-compose.yml      # Docker development environment
 ```
 
 ## Quick Start
