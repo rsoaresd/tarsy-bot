@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive test runner for SRE AI Agent.
+Comprehensive test runner for tarsy.
 
 This script provides simple commands to run different categories of tests:
 - Integration tests only
@@ -95,7 +95,7 @@ def run_tests(test_type, verbose=False):
     if verbose:
         cmd.append("-v")
     
-    print(f"🚀 Running SRE AI Agent {test_description}")
+    print(f"🚀 Running tarsy {test_description}")
     print("=" * 60)
     print(f"Command: {' '.join(cmd)}")
     print(f"Working Directory: {project_root}")
@@ -121,7 +121,7 @@ def run_tests(test_type, verbose=False):
 def main():
     """Main entry point with argument parsing."""
     parser = argparse.ArgumentParser(
-        description="Run SRE AI Agent tests",
+        description="Run tarsy tests",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

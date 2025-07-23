@@ -1,5 +1,5 @@
 """
-Logging configuration and utilities for the SRE AI Agent.
+Logging configuration and utilities for tarsy.
 """
 
 import logging

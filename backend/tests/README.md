@@ -1,6 +1,6 @@
-# SRE AI Agent - Tests
+# Tarsy - Tests 🧪
 
-**✅ Status**: **100% SUCCESS** - Comprehensive test suite with unit and integration tests for the SRE AI Agent.
+**✅ Status**: **100% SUCCESS** - Comprehensive test suite with unit and integration tests for tarsy.
 
 ## 🚀 **Quick Start - Simple Commands**
 

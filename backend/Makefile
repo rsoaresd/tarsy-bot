@@ -1,5 +1,5 @@
-# SRE AI Agent Backend - Makefile
-# ==================================
+# Tarsy Backend - Makefile
+# ==========================
 
 # Default target
 .DEFAULT_GOAL := help
@@ -19,8 +19,8 @@ NC := \033[0m # No Color
 # Help target
 .PHONY: help
 help: ## Show this help message
-	@echo "$(GREEN)SRE AI Agent Backend - Available Commands$(NC)"
-	@echo "==========================================="
+	@echo "$(GREEN)Tarsy Backend - Available Commands$(NC)"
+	@echo "==================================="
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
 
 # Setup and Installation
@@ -108,12 +108,12 @@ fix: lint-fix format ## Auto-fix linting issues and format code
 .PHONY: dev
 dev: ## Start development server with auto-reload
 	@echo "$(GREEN)Starting development server...$(NC)"
-	$(UV) run uvicorn app.main:app --reload --port 8000 --log-level info
+	$(UV) run uvicorn tarsy.main:app --reload --port 8000 --log-level info
 
 .PHONY: dev-debug
 dev-debug: ## Start development server with debug logging
 	@echo "$(GREEN)Starting development server (debug mode)...$(NC)"
-	$(UV) run uvicorn app.main:app --reload --port 8000 --log-level debug
+	$(UV) run uvicorn tarsy.main:app --reload --port 8000 --log-level debug
 
 # Database and Cleanup
 .PHONY: clean
@@ -162,8 +162,8 @@ logs-llm: ## Show recent LLM communication logs
 
 .PHONY: status
 status: ## Show project status and health
-	@echo "$(GREEN)SRE AI Agent Backend Status$(NC)"
-	@echo "=============================="
+	@echo "$(GREEN)Tarsy Backend Status$(NC)"
+	@echo "===================="
 	@echo "Python version: $$(python3 --version)"
 	@echo "UV version: $$(uv --version)"
 	@echo "Dependencies: $$(if [ -f uv.lock ]; then echo 'Locked'; else echo 'Not locked'; fi)"

@@ -1,5 +1,5 @@
 /**
- * Main App component for the SRE AI Agent alert dev UI
+ * Main App component for the tarsy-bot alert dev UI
  */
 
 import React, { useState, useEffect } from 'react';
@@ -149,7 +149,7 @@ function App() {
         <Toolbar>
           <BrainIcon sx={{ mr: 2 }} />
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            SRE AI Agent
+            Tarsy-bot
           </Typography>
           <Typography variant="body2" sx={{ opacity: 0.8 }}>
             Automated Incident Response
@@ -162,7 +162,7 @@ function App() {
         {backendStatus === 'error' && (
           <Alert severity="error" sx={{ mb: 3 }}>
             <Typography variant="body2">
-              <strong>Backend Unavailable:</strong> The SRE AI Agent backend is not responding. 
+              <strong>Backend Unavailable:</strong> The Tarsy-bot backend is not responding. 
               Please ensure the backend server is running on port 8000.
             </Typography>
           </Alert>
@@ -171,7 +171,7 @@ function App() {
         {backendStatus === 'healthy' && appState === 'form' && (
           <Alert severity="success" sx={{ mb: 3 }}>
             <Typography variant="body2">
-              🚀 SRE AI Agent is ready! Submit an alert to see automated incident analysis in action.
+              🚀 Tarsy is ready! Submit an alert to see automated incident analysis in action.
             </Typography>
           </Alert>
         )}
@@ -184,7 +184,7 @@ function App() {
         {/* Footer */}
         <Box mt={6} textAlign="center">
           <Typography variant="body2" color="text.secondary">
-            SRE AI Agent v1.0 - Powered by AI and MCP Servers
+            Tarsy-bot v1.0 - Powered by AI and MCP Servers
           </Typography>
           <Typography variant="caption" color="text.secondary" display="block" mt={1}>
             Submit alerts to get automated runbook analysis and system diagnostics

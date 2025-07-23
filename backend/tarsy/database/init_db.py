@@ -10,7 +10,7 @@ from typing import Optional
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlmodel import Session, SQLModel, create_engine, text
 
-from app.config.settings import get_settings
+from tarsy.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 

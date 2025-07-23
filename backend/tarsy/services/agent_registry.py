@@ -8,7 +8,7 @@ startup with predefined mappings.
 
 from typing import Dict, Optional
 
-from app.utils.logger import get_module_logger
+from tarsy.utils.logger import get_module_logger
 
 logger = get_module_logger(__name__)
 

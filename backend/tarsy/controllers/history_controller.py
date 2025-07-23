@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
-from app.models.api_models import (
+from tarsy.models.api_models import (
     ErrorResponse,
     HealthCheckResponse,
     PaginationInfo,
@@ -20,7 +20,7 @@ from app.models.api_models import (
     SessionSummary,
     TimelineEvent,
 )
-from app.services.history_service import HistoryService, get_history_service
+from tarsy.services.history_service import HistoryService, get_history_service
 
 router = APIRouter(prefix="/api/v1/history", tags=["history"])
 

@@ -1,5 +1,5 @@
 """
-Alert data models for the SRE AI Agent.
+Alert data models for tarsy.
 """
 
 from datetime import datetime

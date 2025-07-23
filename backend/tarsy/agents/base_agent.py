@@ -11,13 +11,13 @@ from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from app.config.settings import get_settings
-from app.integrations.llm.client import LLMClient
-from app.integrations.mcp.client import MCPClient
-from app.models.alert import Alert
-from app.models.llm import LLMMessage
-from app.services.mcp_server_registry import MCPServerRegistry
-from app.utils.logger import get_module_logger
+from tarsy.config.settings import get_settings
+from tarsy.integrations.llm.client import LLMClient
+from tarsy.integrations.mcp.client import MCPClient
+from tarsy.models.alert import Alert
+from tarsy.models.llm import LLMMessage
+from tarsy.services.mcp_server_registry import MCPServerRegistry
+from tarsy.utils.logger import get_module_logger
 
 from .prompt_builder import PromptContext, get_prompt_builder
 

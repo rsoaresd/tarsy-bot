@@ -1,5 +1,5 @@
 """
-Edge cases and stress testing for the SRE AI Agent system.
+Edge cases and stress testing for the tarsy system.
 
 This module contains tests for unusual scenarios, boundary conditions,
 and stress testing of the alert processing pipeline.
@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.models.alert import Alert
+from tarsy.models.alert import Alert
 
 
 @pytest.mark.asyncio

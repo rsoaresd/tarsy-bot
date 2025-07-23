@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models.alert import Alert
+from tarsy.models.alert import Alert
 
 
 @pytest.mark.asyncio

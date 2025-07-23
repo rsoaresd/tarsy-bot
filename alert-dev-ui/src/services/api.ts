@@ -1,5 +1,5 @@
 /**
- * API service for communicating with the SRE AI Agent backend
+ * API service for communicating with the tarsy-bot backend
  */
 
 import axios from 'axios';

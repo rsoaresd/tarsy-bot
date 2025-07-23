@@ -10,9 +10,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.config.settings import Settings
-from app.models.history import AlertSession
-from app.services.history_service import HistoryService, get_history_service
+from tarsy.config.settings import Settings
+from tarsy.models.history import AlertSession
+from tarsy.services.history_service import HistoryService, get_history_service
 
 
 class TestHistoryService:

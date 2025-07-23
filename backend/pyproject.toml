@@ -1,9 +1,9 @@
 [project]
-name = "sre-ai-agent"
+name = "tarsy-bot"
 version = "0.1.0"
-description = "SRE AI Agent for automated incident response"
+description = "Tarsy-bot: Intelligent SRE automation with AI-powered incident response"
 authors = [
-    {name = "SRE Team", email = "sre@example.com"}
+    {name = "Alexey Kazakov", email = "alkazako@redhat.com"}
 ]
 dependencies = [
     "fastapi>=0.104.0",
@@ -43,20 +43,20 @@ dev = [
     "pre-commit>=3.5.0",
 ]
 all = [
-    "sre-ai-agent[test,dev]",
+    "tarsy-bot[test,dev]",
 ]
 
 [project.urls]
-Homepage = "https://github.com/alexeykazakov/sre-alert-processing"
-Repository = "https://github.com/alexeykazakov/sre-alert-processing"
-Documentation = "https://github.com/alexeykazakov/sre-alert-processing/backend/docs"
+Homepage = "https://github.com/alexeykazakov/tarsy-bot"
+Repository = "https://github.com/alexeykazakov/tarsy-bot"
+Documentation = "https://github.com/alexeykazakov/tarsy-bot/backend/docs"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["tarsy"]
 
 [tool.uv]
 dev-dependencies = []
@@ -101,7 +101,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["app"]
+source = ["tarsy"]
 omit = ["*/tests/*", "*/test_*"]
 
 [tool.coverage.report]

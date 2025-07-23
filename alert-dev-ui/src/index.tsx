@@ -1,5 +1,5 @@
 /**
- * Main entry point for the SRE AI Agent React application
+ * Main entry point for the tarsy-bot React application
  */
 
 import React from 'react';

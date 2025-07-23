@@ -10,19 +10,19 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.agents.kubernetes_agent import KubernetesAgent
-from app.config.settings import Settings
-from app.integrations.llm.client import LLMClient, LLMManager
-from app.integrations.mcp.client import MCPClient
-from app.models.alert import Alert
-from app.models.history import AlertSession, LLMInteraction, MCPCommunication
-from app.models.mcp_config import MCPServerConfig
-from app.services.agent_factory import AgentFactory
-from app.services.agent_registry import AgentRegistry
-from app.services.alert_service import AlertService
-from app.services.history_service import HistoryService
-from app.services.mcp_server_registry import MCPServerRegistry
-from app.services.runbook_service import RunbookService
+from tarsy.agents.kubernetes_agent import KubernetesAgent
+from tarsy.config.settings import Settings
+from tarsy.integrations.llm.client import LLMClient, LLMManager
+from tarsy.integrations.mcp.client import MCPClient
+from tarsy.models.alert import Alert
+from tarsy.models.history import AlertSession, LLMInteraction, MCPCommunication
+from tarsy.models.mcp_config import MCPServerConfig
+from tarsy.services.agent_factory import AgentFactory
+from tarsy.services.agent_registry import AgentRegistry
+from tarsy.services.alert_service import AlertService
+from tarsy.services.history_service import HistoryService
+from tarsy.services.mcp_server_registry import MCPServerRegistry
+from tarsy.services.runbook_service import RunbookService
 
 
 @pytest.fixture(scope="session")

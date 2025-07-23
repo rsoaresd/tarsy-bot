@@ -1,6 +1,6 @@
 # AI Workflow Guide - Enhancement Proposals
 
-This guide demonstrates how to use the Enhancement Proposal (EP) system with AI for iterative development of the SRE AI Agent.
+This guide demonstrates how to use the Enhancement Proposal (EP) system with AI for iterative development of tarsy.
 
 ## Quick Start
 

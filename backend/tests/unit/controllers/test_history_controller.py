@@ -12,8 +12,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.controllers.history_controller import HistoryService, router
-from app.services.history_service import get_history_service
+from tarsy.controllers.history_controller import HistoryService, router
+from tarsy.services.history_service import get_history_service
 
 
 class TestHistoryControllerEndpoints:

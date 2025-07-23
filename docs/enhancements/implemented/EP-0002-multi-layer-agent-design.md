@@ -63,7 +63,7 @@ This design ensures that each agent receives focused, relevant instructions whil
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    SRE AI Agent - Multi-Layer               │
+│                      Tarsy - Multi-Layer                    │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │                 API Layer                           │    │

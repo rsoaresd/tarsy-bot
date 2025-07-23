@@ -4,7 +4,7 @@ Runbook service for downloading runbooks from GitHub.
 
 import httpx
 
-from app.config.settings import Settings
+from tarsy.config.settings import Settings
 
 
 class RunbookService:
@@ -17,7 +17,7 @@ class RunbookService:
         # GitHub API headers
         self.headers = {
             "Accept": "application/vnd.github.v3.raw",
-            "User-Agent": "SRE-AI-Agent/1.0"
+            "User-Agent": "Tarsy-bot/1.0"
         }
         
         if self.settings.github_token:

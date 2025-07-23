@@ -9,16 +9,16 @@ agent architecture for alert processing.
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
-from app.config.settings import Settings
-from app.integrations.llm.client import LLMManager
-from app.integrations.mcp.client import MCPClient
-from app.models.alert import Alert
-from app.services.agent_factory import AgentFactory
-from app.services.agent_registry import AgentRegistry
-from app.services.history_service import get_history_service
-from app.services.mcp_server_registry import MCPServerRegistry
-from app.services.runbook_service import RunbookService
-from app.utils.logger import get_module_logger
+from tarsy.config.settings import Settings
+from tarsy.integrations.llm.client import LLMManager
+from tarsy.integrations.mcp.client import MCPClient
+from tarsy.models.alert import Alert
+from tarsy.services.agent_factory import AgentFactory
+from tarsy.services.agent_registry import AgentRegistry
+from tarsy.services.history_service import get_history_service
+from tarsy.services.mcp_server_registry import MCPServerRegistry
+from tarsy.services.runbook_service import RunbookService
+from tarsy.utils.logger import get_module_logger
 
 logger = get_module_logger(__name__)
 

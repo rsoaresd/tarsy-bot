@@ -49,7 +49,7 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ result }) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `sre-analysis-${new Date().toISOString().split('T')[0]}.md`;
+    a.download = `tarsy-analysis-${new Date().toISOString().split('T')[0]}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

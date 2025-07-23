@@ -13,12 +13,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import SQLModel, create_engine
 
-from app.main import app
-from app.models.alert import Alert
+from tarsy.main import tarsy
+from tarsy.models.alert import Alert
 
 # Import history models to ensure they're registered with SQLModel.metadata
-from app.services.alert_service import AlertService
-from app.services.history_service import HistoryService
+from tarsy.services.alert_service import AlertService
+from tarsy.services.history_service import HistoryService
 
 logger = logging.getLogger(__name__)
 
@@ -607,7 +607,7 @@ class TestHistoryAPIIntegration:
     def test_api_sessions_list_integration(self, client, mock_history_service_for_api):
         """Test sessions list API endpoint integration."""
         # Use FastAPI's dependency override system
-        from app.controllers.history_controller import get_history_service
+        from tarsy.controllers.history_controller import get_history_service
         app.dependency_overrides[get_history_service] = lambda: mock_history_service_for_api
         
         try:
@@ -663,7 +663,7 @@ class TestHistoryAPIIntegration:
         }
         
         # Use FastAPI's dependency override system instead of mock patching
-        from app.controllers.history_controller import get_history_service
+        from tarsy.controllers.history_controller import get_history_service
         app.dependency_overrides[get_history_service] = lambda: mock_history_service_for_api
         
         try:
@@ -694,7 +694,7 @@ class TestHistoryAPIIntegration:
     def test_api_health_check_integration(self, client, mock_history_service_for_api):
         """Test health check API endpoint integration."""
         # Use FastAPI's dependency override system
-        from app.controllers.history_controller import get_history_service
+        from tarsy.controllers.history_controller import get_history_service
         app.dependency_overrides[get_history_service] = lambda: mock_history_service_for_api
         
         try:
@@ -721,7 +721,7 @@ class TestHistoryAPIIntegration:
         mock_service.get_sessions_list.side_effect = Exception("Database connection failed")
         
         # Use FastAPI's dependency override system
-        from app.controllers.history_controller import get_history_service
+        from tarsy.controllers.history_controller import get_history_service
         app.dependency_overrides[get_history_service] = lambda: mock_service
         
         try:

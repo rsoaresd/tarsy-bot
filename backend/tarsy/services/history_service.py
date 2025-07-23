@@ -13,10 +13,10 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.config.settings import get_settings
-from app.models.history import AlertSession, LLMInteraction, MCPCommunication
-from app.repositories.base_repository import DatabaseManager
-from app.repositories.history_repository import HistoryRepository
+from tarsy.config.settings import get_settings
+from tarsy.models.history import AlertSession, LLMInteraction, MCPCommunication
+from tarsy.repositories.base_repository import DatabaseManager
+from tarsy.repositories.history_repository import HistoryRepository
 
 logger = logging.getLogger(__name__)
 

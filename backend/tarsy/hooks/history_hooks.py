@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from app.services.history_service import get_history_service
+from tarsy.services.history_service import get_history_service
 
 from .base_hooks import BaseEventHook, generate_step_description
 

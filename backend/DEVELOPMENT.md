@@ -1,6 +1,6 @@
-# Development Setup Guide
+# Development Setup Guide 🛠️
 
-Fast, modern development setup for the SRE AI Agent using **uv** for dependency management.
+Fast, modern development setup for tarsy using **uv** for dependency management.
 
 ## 🚀 **Quick Start**
 

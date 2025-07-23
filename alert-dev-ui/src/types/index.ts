@@ -1,5 +1,5 @@
 /**
- * TypeScript type definitions for the SRE AI Agent alert dev UI
+ * TypeScript type definitions for the tarsy-bot alert dev UI
  */
 
 export interface Alert {

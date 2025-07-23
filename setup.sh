@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# SRE AI Agent - Quick Setup Script
-# This script helps you get started with the SRE AI Agent
+# Tarsy-bot - Quick Setup Script
+# This script helps you get started with tarsy
 
 set -e
 
-echo "🚀 SRE AI Agent - Quick Setup"
+echo "🚀 Tarsy-bot - Quick Setup"
 echo "================================"
 
 # Check if we're in the correct directory
 if [ ! -f "README.md" ] || [ ! -d "backend" ] || [ ! -d "alert-dev-ui" ]; then
-    echo "❌ Error: Please run this script from the root of the SRE AI Agent project"
+    echo "❌ Error: Please run this script from the root of the tarsy project"
     echo "   The script expects to find backend/, alert-dev-ui/, and README.md"
     exit 1
 fi
@@ -165,7 +165,7 @@ echo ""
 echo "3. Start the backend (in a new terminal):"
 echo "   cd backend"
 echo "   source .venv/bin/activate"
-echo "   uvicorn app.main:app --reload --port 8000"
+echo "   uvicorn tarsy.main:app --reload --port 8000"
 echo ""
 echo "4. Start the alert dev UI (in another terminal):"
 echo "   cd alert-dev-ui"

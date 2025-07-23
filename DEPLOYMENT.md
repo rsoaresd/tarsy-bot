@@ -1,6 +1,6 @@
-# SRE AI Agent - Deployment Guide
+# Tarsy-bot - Deployment Guide 🚀
 
-This guide covers advanced deployment scenarios, production setup, and troubleshooting.
+This guide covers advanced deployment scenarios, production setup, and troubleshooting for tarsy.
 
 ## Documentation Overview
 
@@ -14,7 +14,7 @@ This guide covers advanced deployment scenarios, production setup, and troublesh
 
 ## Overview
 
-The SRE AI Agent consists of three main components:
+Tarsy-bot consists of three main components:
 - **Backend**: FastAPI service (Python)
 - **Alert Dev UI**: React application (Node.js)
 - **MCP Server**: Kubernetes integration via npx
@@ -50,7 +50,7 @@ cp env.template .env
 
 # Start the server
 source .venv/bin/activate
-uvicorn app.main:app --reload --port 8000
+uvicorn tarsy.main:app --reload --port 8000
 ```
 
 ### 2. Alert Dev UI Setup
@@ -105,7 +105,7 @@ If you need to test without a real Kubernetes cluster, you can create a mock MCP
 # Create a simple mock server script
 cat > mock_mcp_server.py << 'EOF'
 #!/usr/bin/env python3
-"""Mock MCP Server for testing the SRE AI Agent"""
+"""Mock MCP Server for testing tarsy-bot"""
 
 import asyncio
 import json
@@ -220,12 +220,12 @@ COPY . .
 EXPOSE 8000
 
 # Run application
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "tarsy.main:app", "--host", "0.0.0.0", "--port", "8000"]
 EOF
 
 # Build and run
-docker build -t sre-ai-agent-backend .
-docker run -p 8000:8000 --env-file .env sre-ai-agent-backend
+docker build -t tarsy-backend .
+docker run -p 8000:8000 --env-file .env tarsy-backend
 ```
 
 #### Alert Dev UI Docker
@@ -270,8 +270,8 @@ server {
 EOF
 
 # Build and run
-docker build -t sre-ai-agent-alert-dev-ui .
-docker run -p 3001:80 sre-ai-agent-alert-dev-ui
+docker build -t tarsy-alert-dev-ui .
+docker run -p 3001:80 tarsy-alert-dev-ui
 ```
 
 ## Production Deployment
@@ -303,25 +303,25 @@ Create Kubernetes manifests:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sre-ai-agent-backend
+  name: tarsy-backend
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: sre-ai-agent-backend
+      app: tarsy-backend
   template:
     metadata:
       labels:
-        app: sre-ai-agent-backend
+        app: tarsy-backend
     spec:
       containers:
       - name: backend
-        image: sre-ai-agent-backend:latest
+        image: tarsy-backend:latest
         ports:
         - containerPort: 8000
         envFrom:
         - secretRef:
-            name: sre-ai-agent-secrets
+            name: tarsy-secrets
         resources:
           requests:
             memory: "512Mi"
@@ -333,10 +333,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: sre-ai-agent-backend-service
+  name: tarsy-backend-service
 spec:
   selector:
-    app: sre-ai-agent-backend
+    app: tarsy-backend
   ports:
   - port: 8000
     targetPort: 8000
@@ -352,7 +352,7 @@ spec:
 curl http://localhost:8000/health
 
 # Expected response:
-# {"status": "healthy", "service": "sre-ai-agent"}
+# {"status": "healthy", "service": "tarsy"}
 ```
 
 ### 2. Test Alert Submission
@@ -420,7 +420,7 @@ docker-compose logs -f backend
 docker-compose logs -f alert-dev-ui
 
 # Check specific service
-docker logs sre-ai-agent-backend
+docker logs tarsy-backend
 ```
 
 ## Monitoring
@@ -527,4 +527,4 @@ For issues and questions:
 5. See [README.md](README.md) for basic usage
 6. Run `./setup.sh` for automated setup
 
-The SRE AI Agent is now ready for deployment and use! 
+Tarsy-bot is now ready for deployment and use! 

@@ -9,10 +9,10 @@ from typing import Any, Dict, List, Optional
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from app.config.settings import Settings
-from app.hooks.base_hooks import HookContext
-from app.services.mcp_server_registry import MCPServerRegistry
-from app.utils.logger import get_module_logger
+from tarsy.config.settings import Settings
+from tarsy.hooks.base_hooks import HookContext
+from tarsy.services.mcp_server_registry import MCPServerRegistry
+from tarsy.utils.logger import get_module_logger
 
 # Setup logger for this module
 logger = get_module_logger(__name__)

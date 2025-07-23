@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # SRE AI Agent Backend
+  # Tarsy-bot Backend
   backend:
     build:
       context: ./backend
@@ -18,9 +18,9 @@ services:
     depends_on:
       - kubernetes-mcp
     networks:
-      - sre-network
+      - tarsy-network
 
-  # Alert Dev UI (for production builds)
+  # Tarsy-bot UI (for production builds)
   alert-dev-ui:
     build:
       context: ./alert-dev-ui
@@ -30,7 +30,7 @@ services:
     depends_on:
       - backend
     networks:
-      - sre-network
+      - tarsy-network
 
   # Kubernetes MCP Server (placeholder - should be running separately)
   kubernetes-mcp:
@@ -39,12 +39,12 @@ services:
     ports:
       - "8080:8080"
     networks:
-      - sre-network
+      - tarsy-network
 
 networks:
-  sre-network:
+  tarsy-network:
     driver: bridge
 
 volumes:
-  backend_data:
-  alert_dev_ui_build: 
+  tarsy_backend_data:
+  tarsy_ui_build: 

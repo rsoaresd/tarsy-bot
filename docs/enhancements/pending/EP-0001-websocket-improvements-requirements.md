@@ -9,11 +9,11 @@
 
 ## Executive Summary
 
-This enhancement improves WebSocket connection handling in the SRE AI Agent by implementing automatic reconnection capabilities, connection pooling, and comprehensive error handling to ensure reliable real-time communication between the server and clients during alert processing.
+This enhancement improves WebSocket connection handling in Tarsy by implementing automatic reconnection capabilities, connection pooling, and comprehensive error handling to ensure reliable real-time communication between the server and clients during alert processing.
 
 ## Problem Statement
 
-Currently, WebSocket connections in the SRE AI Agent are fragile and don't handle network disruptions gracefully. When connections drop due to network issues, clients lose real-time progress updates and must manually refresh their browser to reconnect. This creates a poor user experience during critical alert processing scenarios where continuous monitoring is essential.
+Currently, WebSocket connections in Tarsy are fragile and don't handle network disruptions gracefully. When connections drop due to network issues, clients lose real-time progress updates and must manually refresh their browser to reconnect. This creates a poor user experience during critical alert processing scenarios where continuous monitoring is essential.
 
 **Specific Issues:**
 - Connection drops cause complete loss of progress updates

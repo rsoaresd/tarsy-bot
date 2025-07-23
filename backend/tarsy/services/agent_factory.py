@@ -8,10 +8,10 @@ agent classes and handles their creation.
 
 from typing import Any, Dict, Optional, Type
 
-from app.agents.base_agent import BaseAgent
-from app.integrations.llm.client import LLMClient
-from app.integrations.mcp.client import MCPClient
-from app.utils.logger import get_module_logger
+from tarsy.agents.base_agent import BaseAgent
+from tarsy.integrations.llm.client import LLMClient
+from tarsy.integrations.mcp.client import MCPClient
+from tarsy.utils.logger import get_module_logger
 
 from .mcp_server_registry import MCPServerRegistry
 
@@ -58,7 +58,7 @@ class AgentFactory:
         Register all available agent classes in static registry.
         Simple imports without error handling - fail fast if agents are missing.
         """
-        from app.agents.kubernetes_agent import KubernetesAgent
+        from tarsy.agents.kubernetes_agent import KubernetesAgent
         
         self.static_agent_classes = {
             "KubernetesAgent": KubernetesAgent,

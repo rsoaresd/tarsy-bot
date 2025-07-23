@@ -1,4 +1,4 @@
-# EP-0004: SRE Dashboard UI for Alert History - Requirements Document
+# EP-0004: Tarsy Dashboard UI for Alert History - Requirements Document
 
 **Status:** Draft  
 **Created:** 2025-07-23  

@@ -1,6 +1,6 @@
-# SRE AI Agent - Enhancement Proposals
+# Tarsy-bot - Enhancement Proposals
 
-This directory contains Enhancement Proposals (EPs) for the SRE AI Agent project. Enhancement Proposals are used to document, design, and track significant changes to the system in an AI-friendly, iterative manner.
+This directory contains Enhancement Proposals (EPs) for the tarsy-bot project. Enhancement Proposals are used to document, design, and track significant changes to the system in an AI-friendly, iterative manner.
 
 ## Directory Structure
 

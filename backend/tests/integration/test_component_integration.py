@@ -1,5 +1,5 @@
 """
-Component integration tests for SRE AI Agent services.
+Component integration tests for tarsy services.
 
 This module tests the integration between specific components of the system,
 focusing on service boundaries and interactions rather than full end-to-end flows.
@@ -8,12 +8,12 @@ focusing on service boundaries and interactions rather than full end-to-end flow
 
 import pytest
 
-from app.agents.kubernetes_agent import KubernetesAgent
-from app.integrations.llm.client import LLMManager
-from app.integrations.mcp.client import MCPClient
-from app.services.agent_factory import AgentFactory
-from app.services.agent_registry import AgentRegistry
-from app.services.mcp_server_registry import MCPServerRegistry
+from tarsy.agents.kubernetes_agent import KubernetesAgent
+from tarsy.integrations.llm.client import LLMManager
+from tarsy.integrations.mcp.client import MCPClient
+from tarsy.services.agent_factory import AgentFactory
+from tarsy.services.agent_registry import AgentRegistry
+from tarsy.services.mcp_server_registry import MCPServerRegistry
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ This enhancement transforms the current monolithic SRE alert processing system i
 
 ### Current System Limitations
 
-The current SRE AI Agent processes all alerts through a single, monolithic `AlertService` class that handles every type of alert with the same generic approach. This creates several significant limitations:
+The current Tarsy processes all alerts through a single, monolithic `AlertService` class that handles every type of alert with the same generic approach. This creates several significant limitations:
 
 - **Lack of Specialization**: All alerts are processed using the same generic logic, preventing domain-specific optimizations and expertise
 - **Difficult Extensibility**: Adding new alert types requires modifying the core `AlertService` class, violating the open/closed principle

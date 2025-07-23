@@ -11,8 +11,8 @@ from unittest.mock import Mock
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.models.history import AlertSession, LLMInteraction, MCPCommunication
-from app.repositories.history_repository import HistoryRepository
+from tarsy.models.history import AlertSession, LLMInteraction, MCPCommunication
+from tarsy.repositories.history_repository import HistoryRepository
 
 
 class TestHistoryRepository:

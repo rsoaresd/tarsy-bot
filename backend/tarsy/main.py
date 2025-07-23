@@ -1,6 +1,6 @@
 """
-SRE AI Agent - FastAPI Application
-Main entry point for the SRE AI Agent backend service.
+Tarsy-bot - FastAPI Application
+Main entry point for the tarsy backend service.
 """
 
 import asyncio
@@ -11,13 +11,13 @@ from typing import Dict, List
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config.settings import get_settings
-from app.controllers.history_controller import router as history_router
-from app.database.init_db import get_database_info, initialize_database
-from app.models.alert import Alert, AlertResponse, ProcessingStatus
-from app.services.alert_service import AlertService
-from app.services.websocket_manager import WebSocketManager
-from app.utils.logger import get_module_logger, setup_logging
+from tarsy.config.settings import get_settings
+from tarsy.controllers.history_controller import router as history_router
+from tarsy.database.init_db import get_database_info, initialize_database
+from tarsy.models.alert import Alert, AlertResponse, ProcessingStatus
+from tarsy.services.alert_service import AlertService
+from tarsy.services.websocket_manager import WebSocketManager
+from tarsy.utils.logger import get_module_logger, setup_logging
 
 # Setup logger for this module
 logger = get_module_logger(__name__)
@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
     
     # Startup
     await alert_service.initialize()
-    logger.info("SRE AI Agent started successfully!")
+    logger.info("Tarsy started successfully!")
     
     # Log history service status
     db_info = get_database_info()
@@ -66,14 +66,14 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    logger.info("SRE AI Agent shutting down...")
+    logger.info("Tarsy shutting down...")
     await alert_service.close()
-    logger.info("SRE AI Agent shutdown complete")
+    logger.info("Tarsy shutdown complete")
 
 
 # Create FastAPI application
 app = FastAPI(
-    title="SRE AI Agent",
+    title="Tarsy-bot",
     description="Automated incident response agent using AI and MCP servers",
     version="1.0.0",
     lifespan=lifespan
@@ -96,7 +96,7 @@ app.include_router(history_router, tags=["history"])
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"message": "SRE AI Agent is running", "status": "healthy"}
+    return {"message": "Tarsy is running", "status": "healthy"}
 
 
 @app.get("/health")
@@ -106,7 +106,7 @@ async def health_check():
         # Get basic service status
         health_status = {
             "status": "healthy",
-            "service": "sre-ai-agent",
+            "service": "tarsy",
             "timestamp": "2024-12-19T12:00:00Z",  # This will be updated by actual timestamp
         }
         
@@ -136,7 +136,7 @@ async def health_check():
         logger.error(f"Health check failed: {str(e)}")
         return {
             "status": "unhealthy",
-            "service": "sre-ai-agent",
+            "service": "tarsy",
             "error": str(e)
         }
 
@@ -300,7 +300,7 @@ if __name__ == "__main__":
     
     settings = get_settings()
     uvicorn.run(
-        "app.main:app",
+        "tarsy.main:app",
         host=settings.host,
         port=settings.port,
         reload=True

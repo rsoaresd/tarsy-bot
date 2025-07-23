@@ -8,7 +8,7 @@ from typing import Dict, List
 
 from fastapi import WebSocket
 
-from app.models.alert import ProcessingStatus
+from tarsy.models.alert import ProcessingStatus
 
 
 class WebSocketManager:

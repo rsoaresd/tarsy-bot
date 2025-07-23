@@ -11,10 +11,10 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 from langchain_xai import ChatXAI
 
-from app.config.settings import Settings
-from app.hooks.base_hooks import HookContext
-from app.models.llm import LLMMessage
-from app.utils.logger import get_module_logger
+from tarsy.config.settings import Settings
+from tarsy.hooks.base_hooks import HookContext
+from tarsy.models.llm import LLMMessage
+from tarsy.utils.logger import get_module_logger
 
 # Setup logger for this module
 logger = get_module_logger(__name__)

@@ -29,7 +29,7 @@ const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
     alert_type: 'NamespaceTerminating',
     severity: 'warning',
     environment: 'production',
-    cluster: 'https://api.r4r6j-y5frr-z7k.afgo.p3.openshiftapps.com:443',
+    cluster: 'https://api.w7jsp-5gcig-qo9.j2js.p3.openshiftapps.com/',
     namespace: 'superman-dev',
     pod: '',
     message: 'namespace is stuck in \'Terminating\' phase',
@@ -133,7 +133,7 @@ const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
         
         <Typography variant="body2" color="text.secondary" paragraph>
           Use this form to simulate an alert from your monitoring system. 
-          The SRE AI Agent will process the alert, download the runbook, 
+          Tarsy will process the alert, download the runbook, 
           gather system information, and provide detailed analysis.
         </Typography>
 

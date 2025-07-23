@@ -1,4 +1,4 @@
-# SRE AI Agent - Technical Design Document
+# Tarsy-bot - Technical Design Document 🛠️
 
 ## Table of Contents
 1. [System Overview](#system-overview)
@@ -31,7 +31,7 @@ For proposed architectural changes or new design patterns, see the [Enhancement 
 
 ## System Overview
 
-The SRE AI Agent is a **distributed, event-driven system** designed to automate incident response through intelligent alert processing using a **multi-layer agent architecture**. The system implements an **iterative, multi-step analysis architecture** where an orchestrator layer delegates alerts to specialized agents that use Large Language Models (LLMs) to dynamically select and orchestrate Model Context Protocol (MCP) servers for comprehensive incident analysis.
+Tarsy is a **distributed, event-driven system** designed to automate incident response through intelligent alert processing using a **multi-layer agent architecture**. The system implements an **iterative, multi-step analysis architecture** where an orchestrator layer delegates alerts to specialized agents that use Large Language Models (LLMs) to dynamically select and orchestrate Model Context Protocol (MCP) servers for comprehensive incident analysis.
 
 ### Core Design Principles
 
@@ -70,7 +70,7 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                            SRE AI Agent - Multi-Layer Architecture                  │
+│                              Tarsy - Multi-Layer Architecture                       │
 │                                                                                     │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐    │
 │  │                            Alert Dev UI Layer                               │    │

@@ -1,8 +1,8 @@
-# SRE AI Agent - Application Requirements
+# Tarsy-bot - Application Requirements
 
 ## Executive Summary
 
-The SRE AI Agent is an intelligent Site Reliability Engineering system that automates incident response by processing alerts, analyzing runbooks, and performing iterative system diagnostics using AI-powered decision making and Model Context Protocol (MCP) servers. The system implements a multi-layer agent architecture with an orchestrator layer that delegates alert processing to specialized agents based on configurable alert type mappings.
+Tarsy-bot is an intelligent Site Reliability Engineering system that automates incident response by processing alerts, analyzing runbooks, and performing iterative system diagnostics using AI-powered decision making and Model Context Protocol (MCP) servers. The system implements a multi-layer agent architecture with an orchestrator layer that delegates alert processing to specialized agents based on configurable alert type mappings.
 
 ## Document Evolution
 

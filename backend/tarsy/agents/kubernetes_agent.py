@@ -7,7 +7,7 @@ by defining specific MCP servers and custom instructions.
 
 from typing import Dict, List
 
-from app.utils.logger import get_module_logger
+from tarsy.utils.logger import get_module_logger
 
 from .base_agent import BaseAgent
 

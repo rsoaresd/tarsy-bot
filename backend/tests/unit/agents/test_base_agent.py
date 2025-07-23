@@ -9,11 +9,11 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from app.agents.base_agent import BaseAgent
-from app.integrations.llm.client import LLMClient
-from app.integrations.mcp.client import MCPClient
-from app.models.alert import Alert
-from app.services.mcp_server_registry import MCPServerRegistry
+from tarsy.agents.base_agent import BaseAgent
+from tarsy.integrations.llm.client import LLMClient
+from tarsy.integrations.mcp.client import MCPClient
+from tarsy.models.alert import Alert
+from tarsy.services.mcp_server_registry import MCPServerRegistry
 
 
 class TestConcreteAgent(BaseAgent):
