@@ -3,16 +3,16 @@ MCP client using the official MCP SDK for integration with MCP servers.
 """
 
 import json
-from typing import Any, Dict, List, Optional
 from contextlib import AsyncExitStack
+from typing import Any, Dict, List, Optional
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from app.config.settings import Settings
+from app.hooks.base_hooks import HookContext
 from app.services.mcp_server_registry import MCPServerRegistry
 from app.utils.logger import get_module_logger
-from app.hooks.base_hooks import HookContext
 
 # Setup logger for this module
 logger = get_module_logger(__name__)

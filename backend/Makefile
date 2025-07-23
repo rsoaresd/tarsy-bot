@@ -1,0 +1,175 @@
+# SRE AI Agent Backend - Makefile
+# ==================================
+
+# Default target
+.DEFAULT_GOAL := help
+
+# Variables
+PYTHON := python3
+UV := uv
+TEST_DIR := tests
+APP_DIR := app
+
+# Colors for output
+GREEN := \033[0;32m
+YELLOW := \033[0;33m
+RED := \033[0;31m
+NC := \033[0m # No Color
+
+# Help target
+.PHONY: help
+help: ## Show this help message
+	@echo "$(GREEN)SRE AI Agent Backend - Available Commands$(NC)"
+	@echo "==========================================="
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
+
+# Setup and Installation
+.PHONY: install
+install: ## Install all dependencies (production + development + test)
+	@echo "$(GREEN)Installing dependencies...$(NC)"
+	$(UV) sync --extra dev --extra test
+
+.PHONY: install-prod
+install-prod: ## Install production dependencies only
+	@echo "$(GREEN)Installing production dependencies...$(NC)"
+	$(UV) sync
+
+.PHONY: install-dev
+install-dev: ## Install development dependencies (includes test)
+	@echo "$(GREEN)Installing development dependencies...$(NC)"
+	$(UV) sync --extra dev --extra test
+
+# Testing
+.PHONY: test
+test: ## Run all tests (unit + integration)
+	@echo "$(GREEN)Running all tests...$(NC)"
+	$(PYTHON) $(TEST_DIR)/run_all_tests.py
+
+.PHONY: test-unit
+test-unit: ## Run unit tests only
+	@echo "$(GREEN)Running unit tests...$(NC)"
+	$(PYTHON) $(TEST_DIR)/run_unit_tests.py
+
+.PHONY: test-integration
+test-integration: ## Run integration tests only
+	@echo "$(GREEN)Running integration tests...$(NC)"
+	$(PYTHON) $(TEST_DIR)/run_integration_tests.py
+
+.PHONY: test-verbose
+test-verbose: ## Run all tests with verbose output
+	@echo "$(GREEN)Running all tests (verbose)...$(NC)"
+	$(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ -v
+
+.PHONY: test-coverage
+test-coverage: ## Run tests with coverage report
+	@echo "$(GREEN)Running tests with coverage...$(NC)"
+	$(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ --cov=$(APP_DIR) --cov-report=html --cov-report=term-missing
+
+.PHONY: test-quick
+test-quick: ## Run tests in parallel for faster execution
+	@echo "$(GREEN)Running tests in parallel...$(NC)"
+	$(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ -n auto
+
+# Code Quality
+.PHONY: lint
+lint: ## Run linting checks with ruff
+	@echo "$(GREEN)Running linting checks...$(NC)"
+	$(UV) run ruff check $(APP_DIR) $(TEST_DIR)
+
+.PHONY: lint-fix
+lint-fix: ## Run linting checks and auto-fix issues
+	@echo "$(GREEN)Running linting with auto-fix...$(NC)"
+	$(UV) run ruff check --fix $(APP_DIR) $(TEST_DIR)
+
+.PHONY: format
+format: ## Format code with black
+	@echo "$(GREEN)Formatting code...$(NC)"
+	$(UV) run black $(APP_DIR) $(TEST_DIR)
+
+.PHONY: format-check
+format-check: ## Check code formatting without making changes
+	@echo "$(GREEN)Checking code formatting...$(NC)"
+	$(UV) run black --check $(APP_DIR) $(TEST_DIR)
+
+.PHONY: type-check
+type-check: ## Run type checking with mypy
+	@echo "$(GREEN)Running type checks...$(NC)"
+	$(UV) run mypy $(APP_DIR)
+
+.PHONY: quality
+quality: lint format-check type-check ## Run all code quality checks
+	@echo "$(GREEN)All code quality checks completed!$(NC)"
+
+.PHONY: fix
+fix: lint-fix format ## Auto-fix linting issues and format code
+	@echo "$(GREEN)Code fixes and formatting applied!$(NC)"
+
+# Development Server
+.PHONY: dev
+dev: ## Start development server with auto-reload
+	@echo "$(GREEN)Starting development server...$(NC)"
+	$(UV) run uvicorn app.main:app --reload --port 8000 --log-level info
+
+.PHONY: dev-debug
+dev-debug: ## Start development server with debug logging
+	@echo "$(GREEN)Starting development server (debug mode)...$(NC)"
+	$(UV) run uvicorn app.main:app --reload --port 8000 --log-level debug
+
+# Database and Cleanup
+.PHONY: clean
+clean: ## Clean up generated files and caches
+	@echo "$(GREEN)Cleaning up...$(NC)"
+	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	find . -type f -name "*.pyo" -delete 2>/dev/null || true
+	find . -type f -name ".coverage" -delete 2>/dev/null || true
+	rm -rf htmlcov/ 2>/dev/null || true
+	rm -rf .mypy_cache/ 2>/dev/null || true
+	rm -rf .ruff_cache/ 2>/dev/null || true
+
+.PHONY: clean-db
+clean-db: ## Clean up database files (USE WITH CAUTION)
+	@echo "$(RED)WARNING: This will delete database files!$(NC)"
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		echo "$(YELLOW)Removing database files...$(NC)"; \
+		rm -f history.db history.db-shm history.db-wal; \
+		echo "$(GREEN)Database files removed$(NC)"; \
+	else \
+		echo "$(GREEN)Cancelled$(NC)"; \
+	fi
+
+# Utility targets
+.PHONY: check
+check: quality test-unit ## Run quality checks and unit tests (fast CI check)
+	@echo "$(GREEN)Quick check completed successfully!$(NC)"
+
+.PHONY: ci
+ci: quality test ## Run full CI pipeline (quality + all tests)
+	@echo "$(GREEN)CI pipeline completed successfully!$(NC)"
+
+.PHONY: logs
+logs: ## Show recent application logs
+	@echo "$(GREEN)Recent application logs:$(NC)"
+	@if [ -f logs/app.log ]; then tail -n 50 logs/app.log; else echo "No application logs found"; fi
+
+.PHONY: logs-llm
+logs-llm: ## Show recent LLM communication logs
+	@echo "$(GREEN)Recent LLM communication logs:$(NC)"
+	@if [ -f logs/llm_communications.log ]; then tail -n 50 logs/llm_communications.log; else echo "No LLM logs found"; fi
+
+.PHONY: status
+status: ## Show project status and health
+	@echo "$(GREEN)SRE AI Agent Backend Status$(NC)"
+	@echo "=============================="
+	@echo "Python version: $$(python3 --version)"
+	@echo "UV version: $$(uv --version)"
+	@echo "Dependencies: $$(if [ -f uv.lock ]; then echo 'Locked'; else echo 'Not locked'; fi)"
+	@echo "Tests: $$(find tests/ -name 'test_*.py' | wc -l) test files"
+	@echo "Database: $$(if [ -f history.db ]; then echo 'Present'; else echo 'Not found'; fi)"
+	@echo "Logs: $$(if [ -d logs ]; then ls logs/ | wc -l; else echo '0'; fi) log files"
+
+# Export variables for sub-processes
+export PYTHONPATH := $(shell pwd):$(PYTHONPATH) 

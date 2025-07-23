@@ -6,10 +6,11 @@ including agent selection, delegation, LLM interactions, MCP tool execution,
 and error handling scenarios.
 """
 
-import pytest
 import asyncio
-from unittest.mock import AsyncMock, patch
 from datetime import datetime
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from app.models.alert import Alert
 
@@ -462,7 +463,7 @@ class TestConcurrencyAndPerformance:
         # Act - Process alerts concurrently
         tasks = [
             alert_service.process_alert(alert, callback) 
-            for alert, callback in zip(alerts, callbacks)
+            for alert, callback in zip(alerts, callbacks, strict=False)
         ]
         results = await asyncio.gather(*tasks)
         

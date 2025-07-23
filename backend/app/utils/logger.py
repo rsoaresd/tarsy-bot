@@ -6,7 +6,6 @@ import logging
 import logging.config
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Create logs directory if it doesn't exist
 LOGS_DIR = Path("logs")

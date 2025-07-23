@@ -5,13 +5,14 @@ Tests the history service functionality with mocked dependencies to ensure
 proper business logic implementation without external dependencies.
 """
 
-import pytest
-from unittest.mock import Mock, patch
 from datetime import datetime, timezone
+from unittest.mock import Mock, patch
 
-from app.services.history_service import HistoryService, get_history_service
-from app.models.history import AlertSession
+import pytest
+
 from app.config.settings import Settings
+from app.models.history import AlertSession
+from app.services.history_service import HistoryService, get_history_service
 
 
 class TestHistoryService:

@@ -5,13 +5,12 @@ This module contains tests for unusual scenarios, boundary conditions,
 and stress testing of the alert processing pipeline.
 """
 
-import pytest
 import asyncio
-from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime, timedelta
 
+import pytest
+
 from app.models.alert import Alert
-from app.services.alert_service import AlertService
 
 
 @pytest.mark.asyncio

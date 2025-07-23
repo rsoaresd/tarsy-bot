@@ -136,6 +136,43 @@ This will automatically:
 
 For advanced users or troubleshooting, see [DEPLOYMENT.md](DEPLOYMENT.md) for detailed manual setup instructions.
 
+## Running the Applications
+
+After setup is complete, you can run both applications:
+
+### Backend (FastAPI Server)
+```bash
+# Make sure you're in the project root directory first
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --reload --port 8000
+```
+The backend will be available at: http://localhost:8000
+
+### Alert Dev UI (React App)
+```bash
+# From the project root directory
+cd alert-dev-ui
+PORT=3001 npm start
+```
+The frontend will be available at: http://localhost:3001
+
+> **Note**: Start the backend first, then the frontend. The React app is configured to proxy API requests to the backend.
+
+### Troubleshooting
+
+**If you get "No such file or directory" for .venv/bin/activate:**
+- Make sure you're in the `backend/` directory, not the project root
+- Run `pwd` to check your current location
+
+**If you get "ModuleNotFoundError" for sqlmodel or other packages:**
+```bash
+cd backend
+source .venv/bin/activate
+uv sync  # This reinstalls all dependencies
+uvicorn app.main:app --reload --port 8000
+```
+
 ### Environment Configuration
 
 The setup script will create `backend/.env` from the template. You'll need to add your API keys:

@@ -5,16 +5,16 @@ Handles all LLM providers through LangChain's abstraction.
 
 from typing import Dict, List, Optional
 
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_xai import ChatXAI
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
+from langchain_xai import ChatXAI
 
 from app.config.settings import Settings
+from app.hooks.base_hooks import HookContext
 from app.models.llm import LLMMessage
 from app.utils.logger import get_module_logger
-from app.hooks.base_hooks import HookContext
 
 # Setup logger for this module
 logger = get_module_logger(__name__)
@@ -189,9 +189,9 @@ class LLMManager:
     def _initialize_clients(self):
         """Initialize LLM clients using unified implementation."""
         # Initialize each configured LLM provider
-        for provider_name, provider_config in self.settings.llm_providers.items():
+        for provider_name in self.settings.llm_providers.keys():
             try:
-                config = provider_config
+                config = self.settings.get_llm_config(provider_name)
                 
                 if not config.get("api_key"):
                     logger.warning(f"Skipping {provider_name}: No API key provided")

@@ -5,9 +5,11 @@ This agent inherits from BaseAgent and specializes in Kubernetes operations
 by defining specific MCP servers and custom instructions.
 """
 
-from typing import List, Dict
-from .base_agent import BaseAgent
+from typing import Dict, List
+
 from app.utils.logger import get_module_logger
+
+from .base_agent import BaseAgent
 
 logger = get_module_logger(__name__)
 

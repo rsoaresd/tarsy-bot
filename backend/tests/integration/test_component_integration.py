@@ -5,19 +5,15 @@ This module tests the integration between specific components of the system,
 focusing on service boundaries and interactions rather than full end-to-end flows.
 """
 
-import pytest
-import asyncio
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from typing import Dict, Any
 
-from app.models.alert import Alert
-from app.services.agent_registry import AgentRegistry
-from app.services.agent_factory import AgentFactory
-from app.services.mcp_server_registry import MCPServerRegistry
+import pytest
+
 from app.agents.kubernetes_agent import KubernetesAgent
-from app.integrations.llm.client import LLMManager, LLMClient
+from app.integrations.llm.client import LLMManager
 from app.integrations.mcp.client import MCPClient
-from app.models.mcp_config import MCPServerConfig
+from app.services.agent_factory import AgentFactory
+from app.services.agent_registry import AgentRegistry
+from app.services.mcp_server_registry import MCPServerRegistry
 
 
 @pytest.mark.asyncio

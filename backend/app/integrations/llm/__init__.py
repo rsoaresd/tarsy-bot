@@ -1,4 +1,4 @@
 # LLM integrations package
-from .client import LLMManager, LLMClient
+from .client import LLMClient, LLMManager
 
 __all__ = ["LLMManager", "LLMClient"] 

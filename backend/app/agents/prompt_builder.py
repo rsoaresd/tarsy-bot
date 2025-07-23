@@ -6,9 +6,8 @@ and modify prompts without touching business logic in agents.
 """
 
 import json
-from typing import Dict, List, Any, Optional
-from datetime import datetime, UTC
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -397,9 +396,7 @@ Please be specific and reference the actual data provided. Use exact resource na
                             params = item.get('parameters', {})
                             
                             # Create a descriptive key for the result
-                            if tool_name == 'resources_list' and 'kind' in params:
-                                result_key = f"{tool_name}_{params['kind']}_result"
-                            elif tool_name == 'resources_get' and 'kind' in params:
+                            if tool_name == 'resources_list' and 'kind' in params or tool_name == 'resources_get' and 'kind' in params:
                                 result_key = f"{tool_name}_{params['kind']}_result"
                             else:
                                 result_key = f"{tool_name}_result"

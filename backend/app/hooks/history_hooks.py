@@ -6,12 +6,13 @@ to the history service with microsecond-precision timestamps and human-readable
 step descriptions for chronological timeline reconstruction.
 """
 
-from typing import Any, Dict, Optional
-from datetime import datetime, timezone
 import logging
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+from app.services.history_service import get_history_service
 
 from .base_hooks import BaseEventHook, generate_step_description
-from app.services.history_service import get_history_service
 
 logger = logging.getLogger(__name__)
 

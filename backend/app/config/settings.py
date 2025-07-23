@@ -2,9 +2,8 @@
 Application settings and configuration management.
 """
 
-import os
 from functools import lru_cache
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings

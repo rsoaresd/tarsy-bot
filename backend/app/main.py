@@ -12,12 +12,12 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import get_settings
+from app.controllers.history_controller import router as history_router
+from app.database.init_db import get_database_info, initialize_database
 from app.models.alert import Alert, AlertResponse, ProcessingStatus
 from app.services.alert_service import AlertService
 from app.services.websocket_manager import WebSocketManager
-from app.controllers.history_controller import router as history_router
-from app.database.init_db import initialize_database, get_database_info
-from app.utils.logger import setup_logging, get_module_logger
+from app.utils.logger import get_module_logger, setup_logging
 
 # Setup logger for this module
 logger = get_module_logger(__name__)

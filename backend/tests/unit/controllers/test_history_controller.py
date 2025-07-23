@@ -5,13 +5,14 @@ Tests the REST API endpoints for the history service with mocked services
 to ensure proper request/response handling and API contract compliance.
 """
 
-import pytest
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
-from datetime import datetime, timezone, timedelta
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
 
-from app.controllers.history_controller import router, HistoryService
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.controllers.history_controller import HistoryService, router
 from app.services.history_service import get_history_service
 
 

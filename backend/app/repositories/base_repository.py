@@ -5,12 +5,13 @@ Provides common database operations and session management using SQLModel
 for all repository classes in the system.
 """
 
-from typing import Generic, TypeVar, Optional, List, Dict, Any
-from sqlmodel import SQLModel, Session, select, func
-from sqlalchemy import create_engine, Engine, text
-from sqlalchemy.orm import sessionmaker
-from abc import ABC
 import logging
+from abc import ABC
+from typing import Any, Generic, List, Optional, TypeVar
+
+from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.orm import sessionmaker
+from sqlmodel import Session, SQLModel, func, select
 
 logger = logging.getLogger(__name__)
 

@@ -6,13 +6,14 @@ proper dependency injection. It maintains a static registry of available
 agent classes and handles their creation.
 """
 
-from typing import Dict, Type, Optional, Any
+from typing import Any, Dict, Optional, Type
 
 from app.agents.base_agent import BaseAgent
 from app.integrations.llm.client import LLMClient
 from app.integrations.mcp.client import MCPClient
-from .mcp_server_registry import MCPServerRegistry
 from app.utils.logger import get_module_logger
+
+from .mcp_server_registry import MCPServerRegistry
 
 logger = get_module_logger(__name__)
 

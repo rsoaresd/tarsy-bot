@@ -6,18 +6,18 @@ specialized agents based on alert type. It implements the multi-layer
 agent architecture for alert processing.
 """
 
-from typing import Callable, Optional
 from datetime import datetime, timezone
+from typing import Callable, Optional
 
 from app.config.settings import Settings
-from app.models.alert import Alert
-from app.services.runbook_service import RunbookService
-from app.services.agent_registry import AgentRegistry
-from app.services.agent_factory import AgentFactory
-from app.services.mcp_server_registry import MCPServerRegistry
-from app.services.history_service import get_history_service
-from app.integrations.mcp.client import MCPClient
 from app.integrations.llm.client import LLMManager
+from app.integrations.mcp.client import MCPClient
+from app.models.alert import Alert
+from app.services.agent_factory import AgentFactory
+from app.services.agent_registry import AgentRegistry
+from app.services.history_service import get_history_service
+from app.services.mcp_server_registry import MCPServerRegistry
+from app.services.runbook_service import RunbookService
 from app.utils.logger import get_module_logger
 
 logger = get_module_logger(__name__)
@@ -266,19 +266,19 @@ class AlertService:
             Formatted response string
         """
         response_parts = [
-            f"# Alert Analysis Report",
-            f"",
+            "# Alert Analysis Report",
+            "",
             f"**Alert Type:** {alert.alert_type}",
             f"**Processing Agent:** {agent_name}",
             f"**Environment:** {alert.environment}",
             f"**Severity:** {alert.severity}",
             f"**Timestamp:** {timestamp or datetime.now(timezone.utc).isoformat()}",
-            f"",
-            f"## Analysis",
-            f"",
+            "",
+            "## Analysis",
+            "",
             analysis,
-            f"",
-            f"---",
+            "",
+            "---",
             f"*Processed by {agent_name} in {iterations} iterations*"
         ]
         
@@ -302,8 +302,8 @@ class AlertService:
             Formatted error response string
         """
         response_parts = [
-            f"# Alert Processing Error",
-            f"",
+            "# Alert Processing Error",
+            "",
             f"**Alert Type:** {alert.alert_type}",
             f"**Environment:** {alert.environment}",
             f"**Error:** {error}",
@@ -313,13 +313,13 @@ class AlertService:
             response_parts.append(f"**Failed Agent:** {agent_name}")
         
         response_parts.extend([
-            f"",
-            f"## Troubleshooting",
-            f"",
-            f"1. Check that the alert type is supported",
-            f"2. Verify agent configuration in settings",
-            f"3. Ensure all required services are available",
-            f"4. Review logs for detailed error information"
+            "",
+            "## Troubleshooting",
+            "",
+            "1. Check that the alert type is supported",
+            "2. Verify agent configuration in settings",
+            "3. Ensure all required services are available",
+            "4. Review logs for detailed error information"
         ])
         
         return "\n".join(response_parts)

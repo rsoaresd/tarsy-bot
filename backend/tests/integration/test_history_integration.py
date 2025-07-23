@@ -5,19 +5,20 @@ Tests the complete workflow integration with mocked external services
 to ensure proper end-to-end functionality and component interaction.
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime, timezone, timedelta
-from fastapi.testclient import TestClient
-from sqlmodel import SQLModel, create_engine, Session
 import logging
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlmodel import SQLModel, create_engine
 
 from app.main import app
+from app.models.alert import Alert
+
+# Import history models to ensure they're registered with SQLModel.metadata
 from app.services.alert_service import AlertService
 from app.services.history_service import HistoryService
-from app.models.alert import Alert
-# Import history models to ensure they're registered with SQLModel.metadata
-from app.models.history import AlertSession, LLMInteraction, MCPCommunication
 
 logger = logging.getLogger(__name__)
 

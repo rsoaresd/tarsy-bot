@@ -5,13 +5,14 @@ Tests the repository layer functionality with in-memory database to ensure
 proper data access layer implementation and database operations.
 """
 
-import pytest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
-from datetime import datetime, timezone, timedelta
-from sqlmodel import SQLModel, create_engine, Session
 
-from app.repositories.history_repository import HistoryRepository
+import pytest
+from sqlmodel import Session, SQLModel, create_engine
+
 from app.models.history import AlertSession, LLMInteraction, MCPCommunication
+from app.repositories.history_repository import HistoryRepository
 
 
 class TestHistoryRepository:

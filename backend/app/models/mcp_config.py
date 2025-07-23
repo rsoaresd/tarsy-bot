@@ -5,7 +5,8 @@ This module defines the data models for MCP server configurations
 used in the multi-layer agent architecture.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict
+
 from pydantic import BaseModel, Field
 
 

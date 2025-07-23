@@ -6,14 +6,15 @@ and MCP communications with filtering, pagination, and chronological timeline
 reconstruction capabilities.
 """
 
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone, timedelta
-from sqlmodel import Session, select, and_, or_
-from sqlalchemy import func, desc, asc
-
-from .base_repository import BaseRepository
-from ..models.history import AlertSession, LLMInteraction, MCPCommunication
 import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import asc, desc, func
+from sqlmodel import Session, and_, or_, select
+
+from ..models.history import AlertSession, LLMInteraction, MCPCommunication
+from .base_repository import BaseRepository
 
 logger = logging.getLogger(__name__)
 

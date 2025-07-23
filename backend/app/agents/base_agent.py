@@ -5,20 +5,21 @@ This module provides the abstract base class that all specialized agents must in
 It implements common processing logic and defines abstract methods for agent-specific behavior.
 """
 
+import asyncio
 import json
 from abc import ABC, abstractmethod
-from typing import List, Optional, Callable, Dict, Any
-import asyncio
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+from typing import Any, Callable, Dict, List, Optional
 
-from app.models.alert import Alert
-from app.models.llm import LLMMessage
+from app.config.settings import get_settings
 from app.integrations.llm.client import LLMClient
 from app.integrations.mcp.client import MCPClient
+from app.models.alert import Alert
+from app.models.llm import LLMMessage
 from app.services.mcp_server_registry import MCPServerRegistry
 from app.utils.logger import get_module_logger
-from .prompt_builder import get_prompt_builder, PromptContext
-from app.config.settings import get_settings
+
+from .prompt_builder import PromptContext, get_prompt_builder
 
 logger = get_module_logger(__name__)
 
@@ -391,7 +392,8 @@ class BaseAgent(ABC):
         self,
         alert: Alert,
         runbook_content: str,
-        callback: Optional[Callable] = None
+        callback: Optional[Callable] = None,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Process an alert using the agent's specialized knowledge.

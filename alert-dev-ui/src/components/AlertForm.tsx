@@ -29,7 +29,7 @@ const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
     alert_type: 'NamespaceTerminating',
     severity: 'warning',
     environment: 'production',
-    cluster: 'https://api.wagzm-3t4k6-3m5.zlsw.p3.openshiftapps.com:443',
+    cluster: 'https://api.r4r6j-y5frr-z7k.afgo.p3.openshiftapps.com:443',
     namespace: 'superman-dev',
     pod: '',
     message: 'namespace is stuck in \'Terminating\' phase',

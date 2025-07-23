@@ -6,8 +6,9 @@ Handles database schema creation and initialization for the history service.
 
 import logging
 from typing import Optional
-from sqlmodel import SQLModel, create_engine, Session, text
+
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlmodel import Session, SQLModel, create_engine, text
 
 from app.config.settings import get_settings
 

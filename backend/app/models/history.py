@@ -7,10 +7,11 @@ and MCP communications with microsecond-precision timestamps for exact
 chronological ordering.
 """
 
-from sqlmodel import SQLModel, Field, Relationship, Column, JSON
-from datetime import datetime, UTC
-from typing import Optional, TYPE_CHECKING
 import uuid
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Optional
+
+from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
     # Import for type hints only to avoid circular imports

@@ -8,12 +8,13 @@ This script provides simple commands to run different categories of tests:
 - All tests
 """
 
-import sys
-import subprocess
 import argparse
-from pathlib import Path
 import importlib.util
 import shutil
+import subprocess
+import sys
+from pathlib import Path
+
 
 def check_uv_available():
     """Check if uv is available in the system."""

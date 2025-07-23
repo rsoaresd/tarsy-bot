@@ -4,25 +4,25 @@ Pytest configuration and fixtures for integration tests.
 This module provides fixtures for mocking external services in e2e tests.
 """
 
-import pytest
 import asyncio
-from unittest.mock import Mock, AsyncMock, MagicMock
-from typing import Dict, Any, List, Optional
+from unittest.mock import AsyncMock, Mock
 
+import pytest
+from sqlmodel import Session, SQLModel, create_engine
+
+from app.agents.kubernetes_agent import KubernetesAgent
 from app.config.settings import Settings
+from app.integrations.llm.client import LLMClient, LLMManager
+from app.integrations.mcp.client import MCPClient
 from app.models.alert import Alert
-from app.services.alert_service import AlertService
-from app.services.agent_registry import AgentRegistry
+from app.models.history import AlertSession, LLMInteraction, MCPCommunication
+from app.models.mcp_config import MCPServerConfig
 from app.services.agent_factory import AgentFactory
+from app.services.agent_registry import AgentRegistry
+from app.services.alert_service import AlertService
+from app.services.history_service import HistoryService
 from app.services.mcp_server_registry import MCPServerRegistry
 from app.services.runbook_service import RunbookService
-from app.integrations.llm.client import LLMManager, LLMClient
-from app.integrations.mcp.client import MCPClient
-from app.agents.kubernetes_agent import KubernetesAgent
-from app.models.mcp_config import MCPServerConfig
-from app.services.history_service import HistoryService
-from app.models.history import AlertSession, LLMInteraction, MCPCommunication
-from sqlmodel import SQLModel, create_engine, Session
 
 
 @pytest.fixture(scope="session")

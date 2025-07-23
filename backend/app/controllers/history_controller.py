@@ -7,20 +7,20 @@ and chronological timeline reconstruction.
 """
 
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
-from fastapi.responses import JSONResponse
+from typing import Optional
 
-from app.services.history_service import get_history_service, HistoryService
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+
 from app.models.api_models import (
-    SessionsListResponse, 
-    SessionDetailResponse, 
-    HealthCheckResponse, 
     ErrorResponse,
-    SessionSummary,
+    HealthCheckResponse,
     PaginationInfo,
-    TimelineEvent
+    SessionDetailResponse,
+    SessionsListResponse,
+    SessionSummary,
+    TimelineEvent,
 )
+from app.services.history_service import HistoryService, get_history_service
 
 router = APIRouter(prefix="/api/v1/history", tags=["history"])
 

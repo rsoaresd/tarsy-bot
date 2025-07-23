@@ -6,17 +6,17 @@ lifecycle, LLM interaction tracking, MCP communication logging, and timeline
 reconstruction with graceful degradation when database is unavailable.
 """
 
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
 import logging
-from contextlib import contextmanager
-import time
 import random
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
-from app.repositories.history_repository import HistoryRepository
-from app.repositories.base_repository import DatabaseManager
-from app.models.history import AlertSession, LLMInteraction, MCPCommunication
 from app.config.settings import get_settings
+from app.models.history import AlertSession, LLMInteraction, MCPCommunication
+from app.repositories.base_repository import DatabaseManager
+from app.repositories.history_repository import HistoryRepository
 
 logger = logging.getLogger(__name__)
 

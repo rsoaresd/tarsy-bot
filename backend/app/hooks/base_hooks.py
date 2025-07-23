@@ -6,14 +6,14 @@ without modifying their core logic, with comprehensive error handling to prevent
 hooks from breaking parent operations.
 """
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Callable, Optional
-from datetime import datetime, timezone
-import logging
 import asyncio
-import uuid
 import functools
 import inspect
+import logging
+import uuid
+from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +281,7 @@ class HookManager:
                 # Use asyncio.gather with return_exceptions=True to prevent one hook failure from affecting others
                 hook_results = await asyncio.gather(*tasks, return_exceptions=True)
                 
-                for hook_name, result in zip(hook_names, hook_results):
+                for hook_name, result in zip(hook_names, hook_results, strict=False):
                     if isinstance(result, Exception):
                         logger.error(f"Hook '{hook_name}' raised exception: {result}")
                         results[hook_name] = False
