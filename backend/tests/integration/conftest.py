@@ -20,6 +20,9 @@ from app.integrations.llm.client import LLMManager, LLMClient
 from app.integrations.mcp.client import MCPClient
 from app.agents.kubernetes_agent import KubernetesAgent
 from app.models.mcp_config import MCPServerConfig
+from app.services.history_service import HistoryService
+from app.models.history import AlertSession, LLMInteraction, MCPCommunication
+from sqlmodel import SQLModel, create_engine, Session
 
 
 @pytest.fixture(scope="session")
@@ -356,7 +359,7 @@ def mock_agent_factory(mock_llm_manager, mock_mcp_client, mock_mcp_server_regist
             mock_agent = Mock(spec=KubernetesAgent)
             
             # Mock the process_alert method to actually call dependencies for test verification
-            async def mock_process_alert(alert, runbook_content, callback=None):
+            async def mock_process_alert(alert, runbook_content, callback=None, session_id=None):
                 # Simulate calling LLM client multiple times as a real agent would
                 llm_client = mock_llm_manager.get_client()
                 
@@ -429,6 +432,166 @@ async def alert_service(mock_settings, mock_runbook_service, mock_agent_registry
     service.agent_factory = mock_agent_factory
     
     yield service
+
+
+# History Service Test Fixtures
+
+@pytest.fixture
+def history_test_database_engine():
+    """Create in-memory SQLite engine for history service testing."""
+    engine = create_engine("sqlite:///:memory:", echo=False)
+    SQLModel.metadata.create_all(engine)
+    return engine
+
+
+@pytest.fixture
+def mock_history_service():
+    """Create mock history service for testing."""
+    service = Mock(spec=HistoryService)
+    service.enabled = True
+    service.is_enabled = True
+    service.create_session.return_value = "mock-session-123"
+    service.update_session_status.return_value = True
+    service.log_llm_interaction.return_value = True
+    service.log_mcp_communication.return_value = True
+    service.get_sessions_list.return_value = ([], 0)
+    service.get_session_timeline.return_value = None
+    service.test_database_connection.return_value = True
+    service.health_check.return_value = {
+        "enabled": True,
+        "healthy": True,
+        "database_url": "sqlite:///test.db",
+        "retention_days": 90
+    }
+    return service
+
+
+@pytest.fixture
+def sample_alert_session():
+    """Create sample AlertSession for testing."""
+    return AlertSession(
+        session_id="test-session-123",
+        alert_id="test-alert-456",
+        alert_data={
+            "alert_type": "NamespaceTerminating",
+            "environment": "production",
+            "cluster": "k8s-prod",
+            "namespace": "stuck-namespace",
+            "message": "Test alert message",
+            "severity": "high"
+        },
+        agent_type="KubernetesAgent",
+        alert_type="NamespaceTerminating",
+        status="in_progress",
+        started_at=pytest.lazy_fixture('datetime_now_utc'),
+        session_metadata={"test": "metadata"}
+    )
+
+
+@pytest.fixture
+def sample_llm_interaction():
+    """Create sample LLMInteraction for testing."""
+    return LLMInteraction(
+        interaction_id="llm-interaction-789",
+        session_id="test-session-123",
+        prompt_text="Analyze the namespace termination issue",
+        response_text="The namespace is stuck due to finalizers",
+        model_used="gpt-4",
+        timestamp=pytest.lazy_fixture('datetime_now_utc'),
+        step_description="Initial analysis",
+        duration_ms=1500,
+        token_usage={"prompt_tokens": 150, "completion_tokens": 50, "total_tokens": 200}
+    )
+
+
+@pytest.fixture
+def sample_mcp_communication():
+    """Create sample MCPCommunication for testing."""
+    return MCPCommunication(
+        communication_id="mcp-comm-101",
+        session_id="test-session-123",
+        server_name="kubernetes-server",
+        communication_type="tool_call",
+        tool_name="kubectl_get_namespace",
+        tool_arguments={"namespace": "stuck-namespace"},
+        tool_result={"status": "Terminating", "finalizers": ["test-finalizer"]},
+        timestamp=pytest.lazy_fixture('datetime_now_utc'),
+        step_description="Check namespace status",
+        duration_ms=800,
+        success=True,
+        available_tools=["kubectl_get_namespace", "kubectl_describe_namespace"]
+    )
+
+
+@pytest.fixture
+def datetime_now_utc():
+    """Provide current UTC datetime for testing."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
+
+
+@pytest.fixture
+def history_service_with_test_db(history_test_database_engine):
+    """Create HistoryService with test database for integration testing."""
+    from unittest.mock import patch
     
-    # Cleanup
-    await service.close() 
+    mock_settings = Mock()
+    mock_settings.history_enabled = True
+    mock_settings.history_database_url = "sqlite:///:memory:"
+    mock_settings.history_retention_days = 90
+    
+    with patch('app.services.history_service.get_settings', return_value=mock_settings):
+        service = HistoryService()
+        
+        # Override database engine for testing
+        service.db_manager.engine = history_test_database_engine
+        service.db_manager.SessionLocal = lambda: Session(history_test_database_engine)
+        service._is_healthy = True
+        service._initialization_attempted = True
+        
+        return service
+
+
+@pytest.fixture
+def mock_history_timeline_data():
+    """Create mock timeline data for testing."""
+    from datetime import datetime, timezone
+    
+    return {
+        "session_info": {
+            "session_id": "test-session-123",
+            "alert_id": "test-alert-456",
+            "alert_type": "NamespaceTerminating",
+            "agent_type": "KubernetesAgent",
+            "status": "completed",
+            "started_at": datetime.now(timezone.utc),
+            "completed_at": datetime.now(timezone.utc),
+            "error_message": None
+        },
+        "chronological_timeline": [
+            {
+                "type": "llm_interaction",
+                "timestamp": datetime.now(timezone.utc),
+                "step_description": "Initial analysis",
+                "prompt_text": "Analyze the issue",
+                "response_text": "Found the problem",
+                "model_used": "gpt-4",
+                "duration_ms": 1500
+            },
+            {
+                "type": "mcp_communication",
+                "timestamp": datetime.now(timezone.utc),
+                "step_description": "Check namespace status",
+                "server_name": "kubernetes-server",
+                "tool_name": "kubectl_get_namespace",
+                "success": True,
+                "duration_ms": 800
+            }
+        ],
+        "summary": {
+            "total_interactions": 2,
+            "llm_interactions": 1,
+            "mcp_communications": 1,
+            "total_duration_ms": 2300
+        }
+    } 

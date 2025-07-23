@@ -15,6 +15,8 @@ from app.config.settings import get_settings
 from app.models.alert import Alert, AlertResponse, ProcessingStatus
 from app.services.alert_service import AlertService
 from app.services.websocket_manager import WebSocketManager
+from app.controllers.history_controller import router as history_router
+from app.database.init_db import initialize_database, get_database_info
 from app.utils.logger import setup_logging, get_module_logger
 
 # Setup logger for this module
@@ -24,18 +26,28 @@ logger = get_module_logger(__name__)
 processing_status: Dict[str, ProcessingStatus] = {}
 alert_service: AlertService = None
 websocket_manager: WebSocketManager = None
+alert_processing_semaphore: asyncio.Semaphore = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global alert_service, websocket_manager
+    global alert_service, websocket_manager, alert_processing_semaphore
     
     # Initialize services
     settings = get_settings()
     
     # Setup logging
     setup_logging(settings.log_level)
+    
+    # Initialize concurrency control
+    alert_processing_semaphore = asyncio.Semaphore(settings.max_concurrent_alerts)
+    logger.info(f"Alert processing concurrency limit: {settings.max_concurrent_alerts}")
+    
+    # Initialize database for history service
+    db_init_success = initialize_database()
+    if not db_init_success and settings.history_enabled:
+        logger.warning("History database initialization failed - continuing with history service disabled")
     
     alert_service = AlertService(settings)
     websocket_manager = WebSocketManager()
@@ -44,10 +56,19 @@ async def lifespan(app: FastAPI):
     await alert_service.initialize()
     logger.info("SRE AI Agent started successfully!")
     
+    # Log history service status
+    db_info = get_database_info()
+    if db_info.get("enabled"):
+        logger.info(f"History service: ENABLED (Database: {db_info.get('database_name', 'unknown')})")
+    else:
+        logger.info("History service: DISABLED")
+    
     yield
     
     # Shutdown
     logger.info("SRE AI Agent shutting down...")
+    await alert_service.close()
+    logger.info("SRE AI Agent shutdown complete")
 
 
 # Create FastAPI application
@@ -68,6 +89,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Register API routers
+app.include_router(history_router, tags=["history"])
+
 
 @app.get("/")
 async def root():
@@ -77,8 +101,44 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "sre-ai-agent"}
+    """Comprehensive health check endpoint."""
+    try:
+        # Get basic service status
+        health_status = {
+            "status": "healthy",
+            "service": "sre-ai-agent",
+            "timestamp": "2024-12-19T12:00:00Z",  # This will be updated by actual timestamp
+        }
+        
+        # Add history service status
+        db_info = get_database_info()
+        history_status = "disabled"
+        if db_info.get("enabled"):
+            if db_info.get("connection_test"):
+                history_status = "healthy"
+            else:
+                history_status = "unhealthy"
+                health_status["status"] = "degraded"  # Overall status degraded if history fails
+        
+        health_status["services"] = {
+            "alert_processing": "healthy",
+            "history_service": history_status,
+            "database": {
+                "enabled": db_info.get("enabled", False),
+                "connected": db_info.get("connection_test", False) if db_info.get("enabled") else None,
+                "retention_days": db_info.get("retention_days") if db_info.get("enabled") else None
+            }
+        }
+        
+        return health_status
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "service": "sre-ai-agent",
+            "error": str(e)
+        }
 
 
 @app.get("/alert-types", response_model=List[str])
@@ -161,48 +221,49 @@ async def websocket_endpoint(websocket: WebSocket, alert_id: str):
 
 
 async def process_alert_background(alert_id: str, alert: Alert):
-    """Background task to process an alert."""
-    try:
-        # Update status: processing started
-        await update_processing_status(
-            alert_id, "processing", 10, "Starting alert processing"
-        )
-        
-        # Process the alert using AlertService
-        # The orchestrator sends progress as a dict with agent information
-        def progress_handler(progress, step):
-            # Handle both simple (progress, step) and dict-based callbacks
-            if isinstance(progress, dict):
-                # New format from agent callbacks
-                agent_info = progress
-                return asyncio.create_task(
-                    update_processing_status(
-                        alert_id,
-                        agent_info.get('status', 'processing'),
-                        agent_info.get('progress', 50),
-                        agent_info.get('message', step),
-                        current_agent=agent_info.get('agent'),
-                        assigned_mcp_servers=agent_info.get('assigned_mcp_servers')
+    """Background task to process an alert with concurrency control."""
+    async with alert_processing_semaphore:
+        try:
+            # Update status: processing started
+            await update_processing_status(
+                alert_id, "processing", 10, "Starting alert processing"
+            )
+            
+            # Process the alert using AlertService
+            # The orchestrator sends progress as a dict with agent information
+            def progress_handler(progress, step):
+                # Handle both simple (progress, step) and dict-based callbacks
+                if isinstance(progress, dict):
+                    # New format from agent callbacks
+                    agent_info = progress
+                    return asyncio.create_task(
+                        update_processing_status(
+                            alert_id,
+                            agent_info.get('status', 'processing'),
+                            agent_info.get('progress', 50),
+                            agent_info.get('message', step),
+                            current_agent=agent_info.get('agent'),
+                            assigned_mcp_servers=agent_info.get('assigned_mcp_servers')
+                        )
                     )
-                )
-            else:
-                # Legacy format (progress, step)
-                return asyncio.create_task(
-                    update_processing_status(alert_id, "processing", progress, step)
-                )
-        
-        result = await alert_service.process_alert(alert, progress_callback=progress_handler)
-        
-        # Update status: completed
-        await update_processing_status(
-            alert_id, "completed", 100, "Processing completed", result
-        )
-        
-    except Exception as e:
-        # Update status: error
-        await update_processing_status(
-            alert_id, "error", 0, "Processing failed", None, str(e)
-        )
+                else:
+                    # Legacy format (progress, step)
+                    return asyncio.create_task(
+                        update_processing_status(alert_id, "processing", progress, step)
+                    )
+            
+            result = await alert_service.process_alert(alert, progress_callback=progress_handler)
+            
+            # Update status: completed
+            await update_processing_status(
+                alert_id, "completed", 100, "Processing completed", result
+            )
+            
+        except Exception as e:
+            # Update status: error
+            await update_processing_status(
+                alert_id, "error", 0, "Processing failed", None, str(e)
+            )
 
 
 async def update_processing_status(

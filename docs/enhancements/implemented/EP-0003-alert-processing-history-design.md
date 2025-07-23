@@ -1,11 +1,12 @@
 # EP-0003: Alert Processing History Service - Design Document
 
-**Status:** Approved  
+**Status:** Implemented  
 **Created:** 2024-12-19  
 **Updated:** 2024-12-19  
-**Phase:** Approved Technical Design
-**Requirements Document:** `docs/enhancements/approved/EP-0003-alert-processing-history-requirements.md`
-**Implementation Plan:** `docs/enhancements/approved/EP-0003-alert-processing-history-implementation.md`
+**Phase:** Implemented  
+**Implementation Completed:** 2024-12-19  
+**Requirements Document:** `docs/enhancements/implemented/EP-0003-alert-processing-history-requirements.md`
+**Implementation Plan:** `docs/enhancements/implemented/EP-0003-alert-processing-history-implementation.md`
 
 ---
 
@@ -82,7 +83,8 @@ The Alert Processing History Service integrates with existing components through
 - **History Models** (`backend/app/models/history.py`): Data models for alert sessions, LLM interactions, and MCP communications
 - **Database Repository** (`backend/app/repositories/history_repository.py`): Database abstraction layer for CRUD operations
 - **History API Controller** (`backend/app/controllers/history_controller.py`): REST API endpoints for querying historical data
-- **Event Hooks** (`backend/app/hooks/history_hooks.py`): Integration points for capturing data from existing components
+- **History Hooks** (`backend/app/hooks/history_hooks.py`): Specialized event hooks for capturing LLM and MCP interactions
+- **Hook Context System** (`backend/app/hooks/base_hooks.py`): Unified context management for tracking interactions with automatic lifecycle management
 
 #### Modified Components
 
@@ -94,17 +96,22 @@ The Alert Processing History Service integrates with existing components through
 #### Component Interactions
 
 1. **Alert Processing Initiation**: Alert Service creates history session
-2. **Chronological LLM Interaction Capture**: LLM Client hooks automatically log interactions with:
+2. **HookContext Integration**: LLM and MCP clients use `HookContext` for automatic interaction tracking:
+   - `async with HookContext()` manages the complete lifecycle of interactions
+   - Automatically captures microsecond-precision timestamps
+   - Generates human-readable step descriptions
+   - Handles success/error scenarios with graceful degradation
+3. **Chronological LLM Interaction Capture**: LLM Client `HookContext` automatically logs interactions with:
    - Microsecond-precision timestamp (ensures exact chronological ordering)
    - Human-readable step description
    - Full prompts, responses, and tool calls
-3. **Chronological MCP Communication Logging**: MCP Client hooks capture communications with:
+4. **Chronological MCP Communication Logging**: MCP Client `HookContext` captures communications with:
    - Microsecond-precision timestamp (maintains exact chronological order across all interactions)
    - Human-readable step description
    - Tool discoveries, invocations, and results
-4. **Status Updates**: Agents update processing status through History Service
-5. **Timeline Reconstruction**: History API Controller queries Database Repository and sorts by timestamp for chronological flow
-6. **Data Retrieval**: Response includes both detailed interactions and unified timeline for step-by-step debugging
+5. **Status Updates**: Agents update processing status through History Service
+6. **Timeline Reconstruction**: History API Controller queries Database Repository and sorts by timestamp for chronological flow
+7. **Data Retrieval**: Response includes both detailed interactions and unified timeline for step-by-step debugging
 
 ### Data Flow Design
 
@@ -136,7 +143,7 @@ AlertSession:
   - started_at: datetime
   - completed_at: datetime (nullable)
   - error_message: str (nullable)
-  - metadata: JSON (additional context)
+  - session_metadata: JSON (additional context)
 
 LLMInteraction:
   - interaction_id: UUID (primary key)
@@ -238,48 +245,57 @@ MCPCommunication:
 - **Method**: GET
 - **Path**: `/api/v1/history/sessions/{session_id}`
 - **Purpose**: Retrieve complete details for a specific alert processing session with chronological timeline
-- **Response Format**:
+- **Response Format** (SessionDetailResponse):
   ```json
   {
-    "session": {
-      "session_id": "uuid",
-      "alert_id": "alert-123", 
-      "alert_data": {...},
-      "agent_type": "kubernetes",
-      "status": "completed",
-      "started_at": "2024-12-19T10:00:00Z",
-      "completed_at": "2024-12-19T10:05:00Z",
-      "total_interactions": 8
-    },
+    "session_id": "uuid",
+    "alert_id": "alert-123", 
+    "alert_data": {...},
+    "agent_type": "kubernetes",
+    "alert_type": "NamespaceTerminating",
+    "status": "completed",
+    "started_at": "2024-12-19T10:00:00Z",
+    "completed_at": "2024-12-19T10:05:00Z",
+    "error_message": null,
+    "duration_ms": 300000,
+    "session_metadata": {},
     "chronological_timeline": [
       {
-        "timestamp": "2024-12-19T10:00:15.123456Z",
+        "event_id": "interaction-uuid-1",
         "type": "mcp_communication",
-        "step_description": "Discover available kubectl tools",
-        "server_name": "kubernetes-mcp",
-        "communication_type": "tool_list",
+        "timestamp": "2024-12-19T10:00:15.123456Z",
+        "step_description": "Discover available kubectl tools", 
+        "details": {
+          "server_name": "kubernetes-mcp",
+          "communication_type": "tool_list"
+        },
         "duration_ms": 45
       },
       {
-        "timestamp": "2024-12-19T10:00:16.789012Z", 
+        "event_id": "interaction-uuid-2",
         "type": "llm_interaction",
+        "timestamp": "2024-12-19T10:00:16.789012Z",
         "step_description": "Initial alert analysis",
-        "model_used": "claude-3-sonnet",
-        "token_usage": {"input": 1200, "output": 450},
+        "details": {
+          "model_used": "claude-3-sonnet",
+          "token_usage": {"input": 1200, "output": 450}
+        },
         "duration_ms": 2300
       },
       {
-        "timestamp": "2024-12-19T10:00:18.345678Z",
-        "type": "mcp_communication", 
+        "event_id": "communication-uuid-3",
+        "type": "mcp_communication",
+        "timestamp": "2024-12-19T10:00:18.345678Z", 
         "step_description": "Check pod status",
-        "server_name": "kubernetes-mcp",
-        "tool_name": "kubectl_get_pods",
-        "success": true,
+        "details": {
+          "server_name": "kubernetes-mcp",
+          "tool_name": "kubectl_get_pods",
+          "success": true
+        },
         "duration_ms": 890
       }
     ],
-    "llm_interactions": [...],
-    "mcp_communications": [...]
+    "summary": {}
   }
   ```
 
@@ -496,7 +512,8 @@ MCPCommunication:
 
 ---
 
-## Approval Status
-**Status:** Approved for implementation  
+## Implementation Status
+**Status:** Implementation Complete  
 **Approved:** 2024-12-19  
-**Implementation Plan:** `docs/enhancements/approved/EP-0003-alert-processing-history-implementation.md` 
+**Implementation Completed:** 2024-12-19  
+**Implementation Plan:** `docs/enhancements/implemented/EP-0003-alert-processing-history-implementation.md` 

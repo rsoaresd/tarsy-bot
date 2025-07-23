@@ -3,7 +3,6 @@ Unified LLM client implementation using LangChain.
 Handles all LLM providers through LangChain's abstraction.
 """
 
-import uuid
 from typing import Dict, List, Optional
 
 from langchain_openai import ChatOpenAI
@@ -15,6 +14,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from app.config.settings import Settings
 from app.models.llm import LLMMessage
 from app.utils.logger import get_module_logger
+from app.hooks.base_hooks import HookContext
 
 # Setup logger for this module
 logger = get_module_logger(__name__)
@@ -100,24 +100,48 @@ class LLMClient:
         if not self.available or not self.llm_client:
             raise Exception(f"{self.provider_name} client not available")
         
-        # Generate unique request ID for tracking
-        request_id = str(uuid.uuid4())[:8]
-        
-        # Log the outgoing prompt/messages
-        self._log_llm_request(messages, request_id, **kwargs)
-        
-        try:
-            langchain_messages = self._convert_messages(messages)
-            response = await self.llm_client.ainvoke(langchain_messages)
+        # Use HookContext to handle all hook lifecycle management
+        async with HookContext(
+            service_type="llm",
+            method_name="generate_response", 
+            session_id=kwargs.get('session_id'),
+            messages=messages,
+            model=self.model,
+            provider=self.provider_name,
+            **kwargs
+        ) as hook_ctx:
             
-            # Log the response
-            self._log_llm_response(response.content, request_id)
+            # Get request ID for logging
+            request_id = hook_ctx.get_request_id()
             
-            return response.content
-        except Exception as e:
-            # Log the error
-            self._log_llm_error(str(e), request_id)
-            raise Exception(f"{self.provider_name} API error: {str(e)}")
+            # Log the outgoing prompt/messages
+            self._log_llm_request(messages, request_id, **kwargs)
+            
+            try:
+                # Execute the LLM call
+                langchain_messages = self._convert_messages(messages)
+                response = await self.llm_client.ainvoke(langchain_messages)
+                
+                # Log the response
+                self._log_llm_response(response.content, request_id)
+                
+                # Prepare result for hooks
+                result = {
+                    'content': response.content,
+                    'provider': self.provider_name,
+                    'model': self.model,
+                    'request_id': request_id
+                }
+                
+                # Complete the hook context with success
+                await hook_ctx.complete_success(result)
+                
+                return response.content
+                
+            except Exception as e:
+                # Log the error (hooks will be triggered automatically by context manager)
+                self._log_llm_error(str(e), request_id)
+                raise Exception(f"{self.provider_name} API error: {str(e)}")
     
     def _log_llm_request(self, messages: List[LLMMessage], request_id: str, **kwargs):
         """Log the outgoing LLM request."""
@@ -167,7 +191,7 @@ class LLMManager:
         # Initialize each configured LLM provider
         for provider_name, provider_config in self.settings.llm_providers.items():
             try:
-                config = self.settings.get_llm_config(provider_name)
+                config = provider_config
                 
                 if not config.get("api_key"):
                     logger.warning(f"Skipping {provider_name}: No API key provided")
@@ -198,6 +222,7 @@ class LLMManager:
             available = list(self.clients.keys())
             raise Exception(f"LLM provider not available. Available: {available}")
         
+        # Ensure session_id and other context is passed through to enable history tracking
         return await client.generate_response(messages, **kwargs)
 
     def list_available_providers(self) -> List[str]:

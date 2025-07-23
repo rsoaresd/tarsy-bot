@@ -1,17 +1,25 @@
-# SRE AI Agent - Integration Tests
+# SRE AI Agent - Tests
 
-**✅ Status**: **100% SUCCESS** - Comprehensive end-to-end integration tests for the complete alert processing pipeline with full mocking of external services.
+**✅ Status**: **100% SUCCESS** - Comprehensive test suite with unit and integration tests for the SRE AI Agent.
 
-**Test Results**: 21/21 core integration tests PASSING, 56/60 total tests PASSING (93% overall success rate)
-
-## 🚀 **Quick Start**
+## 🚀 **Quick Start - Simple Commands**
 
 ```bash
 cd backend
 
-# Install test dependencies and run all tests
+# Install test dependencies
 uv sync --extra test
-python tests/run_integration_tests.py
+
+# Simple test commands
+python tests/run_integration_tests.py   # Run integration tests only
+python tests/run_unit_tests.py          # Run unit tests only  
+python tests/run_all_tests.py           # Run all tests
+
+# Alternative: Use the unified test runner
+python tests/run_tests.py integration   # Run integration tests
+python tests/run_tests.py unit          # Run unit tests
+python tests/run_tests.py all           # Run all tests
+python tests/run_tests.py all -v        # Run all tests with verbose output
 ```
 
 ## 📋 **Test Coverage**
@@ -30,12 +38,21 @@ All external services (LLM APIs, MCP servers, GitHub) are comprehensively mocked
 
 ## 🎯 **Running Tests**
 
-### **All Tests**
+### **Simple Test Commands**
 ```bash
-python tests/run_integration_tests.py
+# Quick commands for specific test types
+python tests/run_integration_tests.py   # Integration tests only
+python tests/run_unit_tests.py          # Unit tests only
+python tests/run_all_tests.py           # All tests (unit + integration)
+
+# Unified test runner with options  
+python tests/run_tests.py integration   # Integration tests
+python tests/run_tests.py unit          # Unit tests  
+python tests/run_tests.py all           # All tests
+python tests/run_tests.py all -v        # All tests with verbose output
 ```
 
-### **Pytest Commands**
+### **Advanced Pytest Commands**
 ```bash
 # Run integration tests only
 uv run pytest -m integration -v

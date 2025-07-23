@@ -20,6 +20,7 @@
 This design document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant architectural changes are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
 
 ### Recent Changes
+- **EP-0003 (IMPLEMENTED)**: Alert Processing History Service - Added comprehensive audit trail capture and database persistence with REST API endpoints for historical data access
 - **EP-0002 (IMPLEMENTED)**: Multi-Layer Agent Architecture - Transformed monolithic alert processing into orchestrator + specialized agents architecture
 - This document was established as the baseline technical design
 - Future changes will be tracked through Enhancement Proposals in `docs/enhancements/`
@@ -41,6 +42,7 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 5. **Extensible Architecture**: Inheritance-based agent design for easy addition of new specialized agents
 6. **Real-time Communication**: WebSocket-based progress updates and status tracking with agent identification
 7. **Resilient Design**: Graceful degradation and comprehensive error handling across agent layers
+8. **Comprehensive Audit Trail**: Persistent history capture of all alert processing workflows with chronological timeline reconstruction
 
 ### Technology Stack
 
@@ -52,6 +54,8 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 - **Communication**: WebSocket for real-time updates with agent context, REST API for external integration
 - **Configuration**: Environment-based configuration with agent registry and MCP server registry
 - **Logging**: Structured logging with separate channels for orchestrator and agent components
+- **History Service**: SQLModel-based database persistence with comprehensive audit trail capture
+- **Database**: SQLite with PostgreSQL migration support, automatic schema creation and management
 
 **Frontend (Development/Testing Only):**
 - **Framework**: React with TypeScript
@@ -92,6 +96,11 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 │  │  │   Agent         │    │   Agent         │    │   MCP Server    │          │    │
 │  │  │   Registry      │    │   Factory       │    │   Registry      │          │    │
 │  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
+│  │                                                                             │    │
+│  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
+│  │  │   History       │    │   History       │    │   Database      │          │    │
+│  │  │   Service       │    │   API           │    │   Manager       │          │    │
+│  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
 │  └─────────────────────────────────────────────────────────────────────────────┘    │
 │                                                                                     │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐    │
@@ -113,6 +122,11 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 │  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
 │  │  │   LLM           │    │   MCP Client    │    │   Runbook       │          │    │
 │  │  │   Manager       │    │   Manager       │    │   Service       │          │    │
+│  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
+│  │                                                                             │    │
+│  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
+│  │  │   History       │    │   Hook Context  │    │   History       │          │    │
+│  │  │   Repository    │    │   System        │    │   Models        │          │    │
 │  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
 │  └─────────────────────────────────────────────────────────────────────────────┘    │
 │                                                                                     │
@@ -164,6 +178,12 @@ graph TD
     C --> R[Progress Updates]
     R --> I
     
+    C --> HS[History Service]
+    HS --> HDB[(History Database)]
+    
+    F --> HC[Hook Context]
+    HC --> HS
+    
     subgraph "Agent Processing Loop"
         F --> Q
         Q --> S[Tool Selection from Agent Subset]
@@ -177,6 +197,13 @@ graph TD
     
     W --> C
     C --> I
+    
+    subgraph "History Capture"
+        K --> HC
+        M --> HC
+        HC --> HA[History API]
+        HA --> HDB
+    end
 ```
 
 ---
@@ -194,6 +221,11 @@ GET /processing-status/{id}  # Check processing status (includes agent info)
 GET /alert-types          # Get supported alert types (from agent registry)
 GET /health               # Health check
 WebSocket /ws/{id}        # Real-time progress updates (agent-aware)
+
+History API Endpoints:
+GET /api/v1/history/sessions          # List alert processing sessions with filtering and pagination
+GET /api/v1/history/sessions/{id}     # Get detailed session information with chronological timeline
+GET /api/v1/history/health           # History service health check
 ```
 
 **Core Features:**
@@ -514,11 +546,161 @@ class WebSocketManager:
 - **Error Handling**: Automatic cleanup of broken connections
 - **DateTime Serialization**: Built-in support for datetime object serialization in JSON messages
 
+### 13. History Service
+
+Comprehensive audit trail capture and management for alert processing workflows:
+
+```
+Interface Pattern:
+class HistoryService:
+    def __init__(self)
+    def initialize(self) -> bool
+    def create_session(self, alert_id: str, alert_data: Dict, agent_type: str, alert_type: Optional[str] = None) -> Optional[str]
+    def update_session_status(self, session_id: str, status: str, error_message: Optional[str] = None) -> bool
+    def log_llm_interaction(self, session_id: str, prompt_text: str, response_text: str, model_used: str, step_description: str, **kwargs) -> bool
+    def log_mcp_communication(self, session_id: str, server_name: str, communication_type: str, step_description: str, success: bool, **kwargs) -> bool
+    def get_sessions_list(self, filters: Dict = None, page: int = 1, page_size: int = 20) -> Tuple[List, int]
+    def get_session_timeline(self, session_id: str) -> Dict
+```
+
+**Core Features:**
+- **Session Lifecycle Management**: Complete tracking from alert initiation to completion
+- **Automatic Interaction Capture**: Transparent integration with LLM and MCP clients via HookContext
+- **Microsecond Precision Timing**: Exact chronological ordering of all interactions
+- **Database Abstraction**: SQLModel-based persistence with SQLite and PostgreSQL support
+- **Graceful Degradation**: Continues operation when database is unavailable
+- **Retry Logic**: Exponential backoff for transient database failures
+- **Configuration Management**: Environment-based settings for database URL, retention, and enablement
+
+### 14. History Models
+
+SQLModel-based database models for comprehensive audit trail persistence:
+
+```
+Data Models:
+AlertSession:
+- session_id: str (primary key)
+- alert_id: str
+- alert_data: dict (JSON)
+- agent_type: str
+- alert_type: Optional[str]
+- status: str (pending, in_progress, completed, failed)
+- started_at: datetime
+- completed_at: Optional[datetime]
+- error_message: Optional[str]
+- session_metadata: Optional[dict] (JSON)
+
+LLMInteraction:
+- interaction_id: str (primary key)
+- session_id: str (foreign key)
+- timestamp: datetime (microsecond precision)
+- prompt_text: str
+- response_text: str
+- tool_calls: Optional[dict] (JSON)
+- tool_results: Optional[dict] (JSON)
+- model_used: str
+- token_usage: Optional[dict] (JSON)
+- duration_ms: int
+- step_description: str
+
+MCPCommunication:
+- communication_id: str (primary key)
+- session_id: str (foreign key)
+- timestamp: datetime (microsecond precision)
+- server_name: str
+- communication_type: str
+- tool_name: Optional[str]
+- tool_arguments: Optional[dict] (JSON)
+- tool_result: Optional[dict] (JSON)
+- available_tools: Optional[dict] (JSON)
+- duration_ms: int
+- success: bool
+- error_message: Optional[str]
+- step_description: str
+```
+
+### 15. History Repository
+
+Database access layer for alert processing history with advanced querying capabilities:
+
+```
+Interface Pattern:
+class HistoryRepository:
+    def __init__(self, session: Session)
+    def create_alert_session(self, alert_session: AlertSession) -> Optional[AlertSession]
+    def get_alert_session(self, session_id: str) -> Optional[AlertSession]
+    def update_alert_session(self, alert_session: AlertSession) -> bool
+    def get_alert_sessions(self, status: str = None, agent_type: str = None, alert_type: str = None, 
+                          start_date: datetime = None, end_date: datetime = None, page: int = 1, page_size: int = 20) -> Dict
+    def create_llm_interaction(self, llm_interaction: LLMInteraction) -> Optional[LLMInteraction]
+    def create_mcp_communication(self, mcp_communication: MCPCommunication) -> Optional[MCPCommunication]
+    def get_session_timeline(self, session_id: str) -> Dict
+```
+
+**Core Features:**
+- **Complex Filtering**: Support for multiple simultaneous filters using AND logic
+- **Pagination Support**: Efficient handling of large datasets
+- **Chronological Timeline Reconstruction**: Merged LLM and MCP interactions ordered by timestamp
+- **SQLModel Integration**: Type-safe database operations with modern Python typing
+- **Relationship Management**: Automatic foreign key handling and cascade operations
+
+### 16. History API Controller
+
+REST API endpoints for accessing alert processing history:
+
+```
+Interface Pattern:
+@router.get("/api/v1/history/sessions")
+async def list_sessions(status: str = None, agent_type: str = None, alert_type: str = None,
+                       start_date: datetime = None, end_date: datetime = None,
+                       page: int = 1, page_size: int = 20) -> SessionsListResponse
+
+@router.get("/api/v1/history/sessions/{session_id}")
+async def get_session_detail(session_id: str) -> SessionDetailResponse
+
+@router.get("/api/v1/history/health")
+async def health_check() -> HealthCheckResponse
+```
+
+**Core Features:**
+- **Advanced Filtering**: Multiple filter combinations with AND logic for precise queries
+- **Pagination**: Efficient handling of large result sets with metadata
+- **Chronological Timeline**: Complete session details with merged interaction timeline
+- **Health Monitoring**: Database connectivity and service status checking
+- **Type Safety**: Pydantic response models for consistent API contracts
+
+### 17. Hook Context System
+
+Automatic interaction capture system for transparent history logging:
+
+```
+Interface Pattern:
+class HookContext:
+    def __init__(self, service_type: str, method_name: str, session_id: str = None, **kwargs)
+    async def __aenter__(self)
+    async def __aexit__(self, exc_type, exc_val, exc_tb)
+    async def complete_success(self, result: Any)
+    def get_request_id(self) -> str
+
+Usage Pattern:
+async with HookContext(service_type="llm", method_name="generate_response", 
+                      session_id=session_id, **context) as hook_ctx:
+    result = await llm_operation()
+    await hook_ctx.complete_success(result)
+```
+
+**Core Features:**
+- **Automatic Lifecycle Management**: Context manager handles interaction timing and logging
+- **Transparent Integration**: Works with existing LLM and MCP client code
+- **Error Handling**: Graceful degradation when history service is unavailable
+- **Request Tracking**: Unique request IDs for correlation and debugging
+- **Microsecond Timing**: Precise timing information for performance analysis
+
 ---
 
 ## Data Flow Architecture
 
-### 1. Multi-Layer Alert Processing Pipeline
+### 1. Multi-Layer Alert Processing Pipeline with History Capture
 
 ```mermaid
 sequenceDiagram
@@ -534,9 +716,13 @@ sequenceDiagram
     participant MCP as MCP Client
     participant RS as Runbook Service
     participant GitHub as GitHub API
+    participant HS as History Service
+    participant HDB as History Database
     
     Client->>API: POST /alerts
     API->>AS: process_alert()
+    AS->>HS: create_session()
+    HS->>HDB: Store session
     AS->>WS: Update status (queued)
     WS->>Client: WebSocket update
     
@@ -554,6 +740,8 @@ sequenceDiagram
         
         AS->>KA: process_alert(alert, runbook_content, callback)
         Note over KA: Agent configures MCP client<br/>with kubernetes-server only
+        AS->>HS: update_session_status(in_progress)
+        HS->>HDB: Update session
         KA->>WS: Update status (processing - Kubernetes Agent)
         WS->>Client: Status update with agent info
         
@@ -566,19 +754,31 @@ sequenceDiagram
         MCP-->>KA: Kubernetes-specific tool inventory
         
         loop Iterative Analysis (bounded)
+            Note over KA,LLM: HookContext captures LLM interaction
             KA->>LLM: determine_mcp_tools (via PromptBuilder)
+            LLM-->>HS: log_llm_interaction (via HookContext)
+            HS->>HDB: Store LLM interaction
             LLM-->>KA: Tool selection + parameters
+            Note over KA,MCP: HookContext captures MCP communication
             KA->>MCP: call_tool (kubernetes-server)
+            MCP-->>HS: log_mcp_communication (via HookContext)
+            HS->>HDB: Store MCP communication
             MCP-->>KA: Tool results
             KA->>LLM: analyze_partial_results (via PromptBuilder)
+            LLM-->>HS: log_llm_interaction (via HookContext)
+            HS->>HDB: Store LLM interaction
             LLM-->>KA: Continue/stop decision
             KA->>WS: Progress update
             WS->>Client: Status update with iteration info
         end
         
         KA->>LLM: analyze_alert (final analysis via PromptBuilder)
+        LLM-->>HS: log_llm_interaction (via HookContext)
+        HS->>HDB: Store final LLM interaction
         LLM-->>KA: Complete analysis
         KA-->>AS: Analysis result with agent metadata
+        AS->>HS: update_session_status(completed)
+        HS->>HDB: Update session as completed
         AS->>WS: Update status (completed)
         WS->>Client: Final result with agent details
     else No Agent Available
@@ -617,6 +817,50 @@ ProcessingStatus Entity:
 - result: Optional[string]        # Final analysis result
 - error: Optional[string]         # Error message if failed
 - timestamp: datetime             # Auto-generated timestamp
+- session_id: Optional[string]    # History session ID for audit trail access
+```
+
+**History Data Models:**
+```
+AlertSession Entity:
+- session_id: string (primary key)
+- alert_id: string
+- alert_data: object              # Complete alert information
+- agent_type: string              # Processing agent type
+- alert_type: Optional[string]    # Alert type for filtering
+- status: string                  # pending, in_progress, completed, failed
+- started_at: datetime            # Session start timestamp
+- completed_at: Optional[datetime] # Session completion timestamp
+- error_message: Optional[string] # Error message if failed
+- session_metadata: Optional[object] # Additional context
+
+LLMInteraction Entity:
+- interaction_id: string (primary key)
+- session_id: string (foreign key)
+- timestamp: datetime             # Microsecond precision for chronological ordering
+- prompt_text: string             # Complete prompt sent to LLM
+- response_text: string           # Complete response from LLM
+- tool_calls: Optional[object]    # Tool calls made during interaction
+- tool_results: Optional[object]  # Results from tool calls
+- model_used: string              # LLM model identifier
+- token_usage: Optional[object]   # Token usage statistics
+- duration_ms: integer            # Interaction duration
+- step_description: string        # Human-readable step description
+
+MCPCommunication Entity:
+- communication_id: string (primary key)
+- session_id: string (foreign key)
+- timestamp: datetime             # Microsecond precision for chronological ordering
+- server_name: string             # MCP server identifier
+- communication_type: string      # tool_list, tool_call, result
+- tool_name: Optional[string]     # Tool name for tool calls
+- tool_arguments: Optional[object] # Tool call arguments
+- tool_result: Optional[object]   # Tool call result
+- available_tools: Optional[object] # Available tools for tool_list
+- duration_ms: integer            # Communication duration
+- success: boolean                # Success/failure status
+- error_message: Optional[string] # Error message if failed
+- step_description: string        # Human-readable step description
 ```
 
 **Agent Processing Context:**
@@ -920,9 +1164,14 @@ GITHUB_TOKEN=your_token
 DEFAULT_LLM_PROVIDER=gemini
 LOG_LEVEL=INFO
 
-# New agent architecture configuration
+# Agent architecture configuration
 AGENT_REGISTRY='{"NamespaceTerminating": "KubernetesAgent"}'
 MCP_SERVER_REGISTRY='{"kubernetes-server": {...}}'
+
+# History service configuration
+HISTORY_ENABLED=true
+HISTORY_DATABASE_URL=sqlite:///history.db
+HISTORY_RETENTION_DAYS=90
 ```
 
 ### 3. Scaling Considerations (Enhanced)

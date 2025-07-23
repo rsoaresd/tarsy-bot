@@ -6,8 +6,8 @@ specialized agents based on alert type. It implements the multi-layer
 agent architecture for alert processing.
 """
 
-from typing import Any, Callable, Dict, Optional
-from datetime import datetime
+from typing import Callable, Optional
+from datetime import datetime, timezone
 
 from app.config.settings import Settings
 from app.models.alert import Alert
@@ -15,6 +15,7 @@ from app.services.runbook_service import RunbookService
 from app.services.agent_registry import AgentRegistry
 from app.services.agent_factory import AgentFactory
 from app.services.mcp_server_registry import MCPServerRegistry
+from app.services.history_service import get_history_service
 from app.integrations.mcp.client import MCPClient
 from app.integrations.llm.client import LLMManager
 from app.utils.logger import get_module_logger
@@ -41,6 +42,7 @@ class AlertService:
         
         # Initialize services
         self.runbook_service = RunbookService(settings)
+        self.history_service = get_history_service()
         
         # Initialize registries first
         self.agent_registry = AgentRegistry()
@@ -102,7 +104,10 @@ class AlertService:
         Returns:
             Analysis result as a string
         """
+        session_id = None
         try:
+            # Will create history session after determining agent type
+            
             # Step 1: Validate prerequisites
             if not self.llm_manager.is_available():
                 raise Exception("Cannot process alert: No LLM providers are available")
@@ -123,12 +128,21 @@ class AlertService:
                 )
                 logger.error(error_msg)
                 
+                # Update history session with error
+                self._update_session_error(session_id, error_msg)
+                
                 if progress_callback:
                     await progress_callback(100, f"Error: {error_msg}")
                     
                 return self._format_error_response(alert, error_msg)
             
             logger.info(f"Selected agent {agent_class_name} for alert type: {alert.alert_type}")
+            
+            # Create history session now that we have the agent type
+            session_id = self._create_history_session(alert, agent_class_name)
+            
+            # Update history session with agent selection
+            self._update_session_status(session_id, "in_progress", f"Selected agent: {agent_class_name}")
             
             # Step 3: Download runbook
             if progress_callback:
@@ -151,6 +165,9 @@ class AlertService:
                 error_msg = f"Failed to create agent: {str(e)}"
                 logger.error(error_msg)
                 
+                # Update history session with agent creation error
+                self._update_session_error(session_id, error_msg)
+                
                 if progress_callback:
                     await progress_callback(100, f"Error: {error_msg}")
                     
@@ -168,11 +185,12 @@ class AlertService:
                     f"[{agent_class_name}] {status.get('message', 'Processing...')}"
                 )
             
-            # Process alert with agent
+            # Process alert with agent (pass session_id for history tracking)
             agent_result = await agent.process_alert(
                 alert=alert,
                 runbook_content=runbook_content,
-                callback=agent_progress_callback
+                callback=agent_progress_callback,
+                session_id=session_id
             )
             
             # Step 6: Format and return results
@@ -189,6 +207,9 @@ class AlertService:
                     timestamp=agent_result.get('timestamp')
                 )
                 
+                # Mark history session as completed successfully
+                self._update_session_completed(session_id, "completed")
+                
                 if progress_callback:
                     await progress_callback(100, "Analysis completed successfully")
                 
@@ -198,6 +219,9 @@ class AlertService:
                 # Handle agent processing error
                 error_msg = agent_result.get('error', 'Unknown agent error')
                 logger.error(f"Agent {agent_class_name} failed: {error_msg}")
+                
+                # Update history session with agent error
+                self._update_session_error(session_id, error_msg)
                 
                 if progress_callback:
                     await progress_callback(100, f"Agent error: {error_msg}")
@@ -211,6 +235,9 @@ class AlertService:
         except Exception as e:
             error_msg = f"Alert processing failed: {str(e)}"
             logger.error(error_msg, exc_info=True)
+            
+            # Update history session with general processing error
+            self._update_session_error(session_id, error_msg)
             
             if progress_callback:
                 await progress_callback(100, f"Error: {error_msg}")
@@ -245,7 +272,7 @@ class AlertService:
             f"**Processing Agent:** {agent_name}",
             f"**Environment:** {alert.environment}",
             f"**Severity:** {alert.severity}",
-            f"**Timestamp:** {timestamp or datetime.utcnow().isoformat()}",
+            f"**Timestamp:** {timestamp or datetime.now(timezone.utc).isoformat()}",
             f"",
             f"## Analysis",
             f"",
@@ -296,6 +323,119 @@ class AlertService:
         ])
         
         return "\n".join(response_parts)
+    
+    # History Session Management Methods
+    def _create_history_session(self, alert: Alert, agent_class_name: Optional[str] = None) -> Optional[str]:
+        """
+        Create a history session for alert processing.
+        
+        Args:
+            alert: The alert being processed
+            agent_class_name: Optional agent class name (if already determined)
+            
+        Returns:
+            Session ID if created successfully, None if history service unavailable
+        """
+        try:
+            if not self.history_service or not self.history_service.enabled:
+                return None
+            
+            # Use provided agent class name or determine it
+            if agent_class_name is None:
+                agent_class_name = self.agent_registry.get_agent_for_alert_type(alert.alert_type)
+            agent_type = agent_class_name or 'unknown'
+            
+            # Generate alert ID from alert data if not present
+            alert_id = getattr(alert, 'id', f"{alert.alert_type}_{alert.environment}_{alert.namespace}_{int(datetime.now(timezone.utc).timestamp())}")
+            
+            session_id = self.history_service.create_session(
+                alert_id=alert_id,
+                alert_data={
+                    'alert_type': alert.alert_type,
+                    'environment': alert.environment,
+                    'cluster': alert.cluster,
+                    'namespace': alert.namespace,
+                    'runbook': alert.runbook,
+                    'message': alert.message,
+                    'severity': alert.severity,
+                    'pod': getattr(alert, 'pod', None),
+                    'context': getattr(alert, 'context', None),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                 },
+                agent_type=agent_type,
+                alert_type=alert.alert_type
+            )
+            
+            logger.info(f"Created history session {session_id} for alert {alert_id}")
+            return session_id
+            
+        except Exception as e:
+            logger.warning(f"Failed to create history session: {str(e)}")
+            return None
+    
+    def _update_session_status(self, session_id: Optional[str], status: str, message: Optional[str] = None):
+        """
+        Update history session status.
+        
+        Args:
+            session_id: Session ID to update
+            status: New status
+            message: Optional status message (not used by current history service API)
+        """
+        try:
+            if not session_id or not self.history_service or not self.history_service.enabled:
+                return
+                
+            self.history_service.update_session_status(
+                session_id=session_id,
+                status=status
+            )
+            
+        except Exception as e:
+            logger.warning(f"Failed to update session status: {str(e)}")
+    
+    def _update_session_completed(self, session_id: Optional[str], status: str):
+        """
+        Mark history session as completed.
+        
+        Args:
+            session_id: Session ID to complete
+            status: Final status (e.g., 'completed', 'error')
+        """
+        try:
+            if not session_id or not self.history_service or not self.history_service.enabled:
+                return
+                
+            # The history service automatically sets completed_at when status is 'completed' or 'failed'
+            self.history_service.update_session_status(
+                session_id=session_id,
+                status=status
+            )
+            
+        except Exception as e:
+            logger.warning(f"Failed to mark session completed: {str(e)}")
+    
+    def _update_session_error(self, session_id: Optional[str], error_message: str):
+        """
+        Mark history session as failed with error.
+        
+        Args:
+            session_id: Session ID to update
+            error_message: Error message
+        """
+        try:
+            if not session_id or not self.history_service or not self.history_service.enabled:
+                return
+                
+            # Status 'failed' will automatically set completed_at in the history service
+            self.history_service.update_session_status(
+                session_id=session_id,
+                status='failed',
+                error_message=error_message
+            )
+            
+        except Exception as e:
+            logger.warning(f"Failed to update session error: {str(e)}")
     
     async def close(self):
         """

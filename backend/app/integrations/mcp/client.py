@@ -2,9 +2,7 @@
 MCP client using the official MCP SDK for integration with MCP servers.
 """
 
-import asyncio
 import json
-import uuid
 from typing import Any, Dict, List, Optional
 from contextlib import AsyncExitStack
 
@@ -14,6 +12,7 @@ from mcp.client.stdio import stdio_client
 from app.config.settings import Settings
 from app.services.mcp_server_registry import MCPServerRegistry
 from app.utils.logger import get_module_logger
+from app.hooks.base_hooks import HookContext
 
 # Setup logger for this module
 logger = get_module_logger(__name__)
@@ -74,68 +73,80 @@ class MCPClient:
         
         self._initialized = True
     
-    async def list_tools(self, server_name: Optional[str] = None) -> Dict[str, List[Dict[str, Any]]]:
+    async def list_tools(self, server_name: Optional[str] = None, **kwargs) -> Dict[str, List[Dict[str, Any]]]:
         """List available tools from MCP servers."""
         if not self._initialized:
             await self.initialize()
         
-        # Generate unique request ID for tracking
-        request_id = str(uuid.uuid4())[:8]
-        
-        # Log the tools listing request
-        self._log_mcp_list_tools_request(server_name, request_id)
-        
-        all_tools = {}
-        
-        if server_name:
-            # List tools from specific server
-            if server_name in self.sessions:
-                try:
-                    session = self.sessions[server_name]
-                    tools_result = await session.list_tools()
-                    tools = []
-                    for tool in tools_result.tools:
-                        tool_dict = {
-                            "name": tool.name,
-                            "description": tool.description or "",
-                            "inputSchema": tool.inputSchema
-                        }
-                        tools.append(tool_dict)
-                    all_tools[server_name] = tools
-                    
-                    # Log the successful response
-                    self._log_mcp_list_tools_response(server_name, tools, request_id)
-                    
-                except Exception as e:
-                    logger.error(f"Error listing tools from {server_name}: {str(e)}")
-                    self._log_mcp_list_tools_error(server_name, str(e), request_id)
-                    all_tools[server_name] = []
-        else:
-            # List tools from all servers
-            for name, session in self.sessions.items():
-                try:
-                    tools_result = await session.list_tools()
-                    tools = []
-                    for tool in tools_result.tools:
-                        tool_dict = {
-                            "name": tool.name,
-                            "description": tool.description or "",
-                            "inputSchema": tool.inputSchema
-                        }
-                        tools.append(tool_dict)
-                    all_tools[name] = tools
-                    
-                    # Log the successful response for this server
-                    self._log_mcp_list_tools_response(name, tools, request_id)
-                    
-                except Exception as e:
-                    logger.error(f"Error listing tools from {name}: {str(e)}")
-                    self._log_mcp_list_tools_error(name, str(e), request_id)
-                    all_tools[name] = []
-        
-        return all_tools
+        # Use HookContext to handle all hook lifecycle management
+        async with HookContext(
+            service_type="mcp",
+            method_name="list_tools",
+            session_id=kwargs.get('session_id'),
+            server_name=server_name,
+            **kwargs
+        ) as hook_ctx:
+            
+            # Get request ID for logging
+            request_id = hook_ctx.get_request_id()
+            
+            # Log the tools listing request
+            self._log_mcp_list_tools_request(server_name, request_id)
+            
+            all_tools = {}
+            
+            if server_name:
+                # List tools from specific server
+                if server_name in self.sessions:
+                    try:
+                        session = self.sessions[server_name]
+                        tools_result = await session.list_tools()
+                        tools = []
+                        for tool in tools_result.tools:
+                            tool_dict = {
+                                "name": tool.name,
+                                "description": tool.description or "",
+                                "inputSchema": tool.inputSchema
+                            }
+                            tools.append(tool_dict)
+                        all_tools[server_name] = tools
+                        
+                        # Log the successful response
+                        self._log_mcp_list_tools_response(server_name, tools, request_id)
+                        
+                    except Exception as e:
+                        logger.error(f"Error listing tools from {server_name}: {str(e)}")
+                        self._log_mcp_list_tools_error(server_name, str(e), request_id)
+                        all_tools[server_name] = []
+            else:
+                # List tools from all servers
+                for name, session in self.sessions.items():
+                    try:
+                        tools_result = await session.list_tools()
+                        tools = []
+                        for tool in tools_result.tools:
+                            tool_dict = {
+                                "name": tool.name,
+                                "description": tool.description or "",
+                                "inputSchema": tool.inputSchema
+                            }
+                            tools.append(tool_dict)
+                        all_tools[name] = tools
+                        
+                        # Log the successful response for this server
+                        self._log_mcp_list_tools_response(name, tools, request_id)
+                        
+                    except Exception as e:
+                        logger.error(f"Error listing tools from {name}: {str(e)}")
+                        self._log_mcp_list_tools_error(name, str(e), request_id)
+                        all_tools[name] = []
+            
+            # Complete the hook context with success
+            await hook_ctx.complete_success(all_tools)
+            
+            return all_tools
     
-    async def call_tool(self, server_name: str, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_tool(self, server_name: str, tool_name: str, parameters: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Call a specific tool on an MCP server."""
         if not self._initialized:
             await self.initialize()
@@ -143,45 +154,59 @@ class MCPClient:
         if server_name not in self.sessions:
             raise Exception(f"MCP server not found: {server_name}")
         
-        # Generate unique request ID for tracking
-        request_id = str(uuid.uuid4())[:8]
-        
-        # Log the outgoing tool call
-        self._log_mcp_request(server_name, tool_name, parameters, request_id)
-        
-        session = self.sessions[server_name]
-        
-        try:
-            result = await session.call_tool(tool_name, parameters)
+        # Use HookContext to handle all hook lifecycle management
+        async with HookContext(
+            service_type="mcp",
+            method_name="call_tool",
+            session_id=kwargs.get('session_id'),
+            server_name=server_name,
+            tool_name=tool_name,
+            tool_arguments=parameters,
+            **kwargs
+        ) as hook_ctx:
             
-            # Convert result to dictionary
-            if hasattr(result, 'content'):
-                # Handle different content types
-                content = result.content
-                if isinstance(content, list):
-                    # Extract text content from the list
-                    text_parts = []
-                    for item in content:
-                        if hasattr(item, 'text'):
-                            text_parts.append(item.text)
-                        elif hasattr(item, 'type') and item.type == 'text':
-                            text_parts.append(str(item))
-                    response_dict = {"result": "\n".join(text_parts)}
-                else:
-                    response_dict = {"result": str(content)}
-            else:
-                response_dict = {"result": str(result)}
+            # Get request ID for logging
+            request_id = hook_ctx.get_request_id()
             
-            # Log the successful response
-            self._log_mcp_response(server_name, tool_name, response_dict, request_id)
+            # Log the outgoing tool call
+            self._log_mcp_request(server_name, tool_name, parameters, request_id)
             
-            return response_dict
+            session = self.sessions[server_name]
+            
+            try:
+                result = await session.call_tool(tool_name, parameters)
                 
-        except Exception as e:
-            # Log the error
-            error_msg = f"Failed to call tool {tool_name} on {server_name}: {str(e)}"
-            self._log_mcp_error(server_name, tool_name, str(e), request_id)
-            raise Exception(error_msg)
+                # Convert result to dictionary
+                if hasattr(result, 'content'):
+                    # Handle different content types
+                    content = result.content
+                    if isinstance(content, list):
+                        # Extract text content from the list
+                        text_parts = []
+                        for item in content:
+                            if hasattr(item, 'text'):
+                                text_parts.append(item.text)
+                            elif hasattr(item, 'type') and item.type == 'text':
+                                text_parts.append(str(item))
+                        response_dict = {"result": "\n".join(text_parts)}
+                    else:
+                        response_dict = {"result": str(content)}
+                else:
+                    response_dict = {"result": str(result)}
+                
+                # Log the successful response
+                self._log_mcp_response(server_name, tool_name, response_dict, request_id)
+                
+                # Complete the hook context with success
+                await hook_ctx.complete_success(response_dict)
+                
+                return response_dict
+                    
+            except Exception as e:
+                # Log the error (hooks will be triggered automatically by context manager)
+                error_msg = f"Failed to call tool {tool_name} on {server_name}: {str(e)}"
+                self._log_mcp_error(server_name, tool_name, str(e), request_id)
+                raise Exception(error_msg)
     
     def _log_mcp_request(self, server_name: str, tool_name: str, parameters: Dict[str, Any], request_id: str):
         """Log the outgoing MCP tool call request."""

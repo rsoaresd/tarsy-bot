@@ -71,6 +71,30 @@ class Settings(BaseSettings):
         description="Maximum data points before stopping processing (when combined with min iterations)"
     )
     
+    # History Service Configuration
+    history_database_url: str = Field(
+        default="sqlite:///history.db",
+        description="Database connection string for alert processing history"
+    )
+    history_enabled: bool = Field(
+        default=True,
+        description="Enable/disable history capture for alert processing"
+    )
+    history_retention_days: int = Field(
+        default=90,
+        description="Number of days to retain alert processing history data"
+    )
+    
+    # Concurrency Control Configuration
+    max_concurrent_alerts: int = Field(
+        default=5,
+        description="Maximum number of alerts that can be processed concurrently"
+    )
+    alert_queue_timeout: int = Field(
+        default=300,
+        description="Timeout in seconds for alerts waiting in queue"
+    )
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

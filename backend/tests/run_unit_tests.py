@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple script to run integration tests only.
+Simple script to run unit tests only.
 """
 
 import sys
@@ -12,4 +12,4 @@ sys.path.insert(0, str(Path(__file__).parent))
 from run_tests import run_tests
 
 if __name__ == "__main__":
-    sys.exit(run_tests("integration", verbose=True)) 
+    sys.exit(run_tests("unit", verbose=True)) 
