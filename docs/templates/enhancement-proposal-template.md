@@ -1,8 +1,7 @@
 # EP-XXXX: [Title - Brief Description of Enhancement]
 
 **Status:** Draft | Review | Approved | Implemented  
-**Created:** YYYY-MM-DD  
-**Updated:** YYYY-MM-DD  
+**Created:** YYYY-MM-DD  <!-- AI: Replace with actual current date in format YYYY-MM-DD -->  
 
 ---
 

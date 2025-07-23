@@ -1,8 +1,7 @@
 # EP-0001: WebSocket Connection Improvements - Requirements Document
 
 **Status:** Draft  
-**Created:** 2024-01-15  
-**Updated:** 2024-01-15  
+**Created:** 2025-07-23  
 **Phase:** Requirements Definition
 **Next Phase:** Design Document
 

@@ -1,8 +1,7 @@
 # EP-XXXX: [Title] - Implementation Plan
 
 **Status:** Draft | Review | Approved | In Progress | Completed  
-**Created:** YYYY-MM-DD  
-**Updated:** YYYY-MM-DD  
+**Created:** YYYY-MM-DD  <!-- AI: Replace with actual current date in format YYYY-MM-DD -->
 **Phase:** Implementation Planning & Execution
 **Requirements Document:** `docs/enhancements/pending/EP-XXXX-requirements.md`
 **Design Document:** `docs/enhancements/pending/EP-XXXX-design.md`

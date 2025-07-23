@@ -1,8 +1,7 @@
 # EP-0002: Multi-Layer Agent Architecture - Design Document
 
 **Status:** Approved  
-**Created:** 2024-12-19  
-**Updated:** 2024-12-19  
+**Created:** 2025-07-23  
 **Phase:** Design Complete
 **Requirements Document:** `docs/enhancements/approved/EP-0002-multi-layer-agent-requirements.md`
 **Next Phase:** Implementation

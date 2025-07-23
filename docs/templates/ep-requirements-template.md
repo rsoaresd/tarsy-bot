@@ -1,8 +1,7 @@
 # EP-XXXX: [Title] - Requirements Document
 
 **Status:** Draft | Review | Approved  
-**Created:** YYYY-MM-DD  
-**Updated:** YYYY-MM-DD  
+**Created:** YYYY-MM-DD  <!-- AI: Replace with actual current date in format YYYY-MM-DD -->
 **Phase:** Requirements Definition
 **Next Phase:** Design Document
 

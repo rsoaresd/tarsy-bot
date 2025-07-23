@@ -1,8 +1,7 @@
 # EP-XXXX: [Title] - Design Document
 
 **Status:** Draft | Review | Approved  
-**Created:** YYYY-MM-DD  
-**Updated:** YYYY-MM-DD  
+**Created:** YYYY-MM-DD  <!-- AI: Replace with actual current date in format YYYY-MM-DD -->
 **Phase:** Technical Design
 **Requirements Document:** `docs/enhancements/pending/EP-XXXX-requirements.md`
 **Next Phase:** Implementation Plan

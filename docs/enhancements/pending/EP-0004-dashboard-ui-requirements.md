@@ -1,8 +1,7 @@
 # EP-0004: SRE Dashboard UI for Alert History - Requirements Document
 
 **Status:** Draft  
-**Created:** 2024-12-19  
-**Updated:** 2024-12-19  
+**Created:** 2025-07-23  
 **Phase:** Requirements Definition
 **Next Phase:** Design Document
 
@@ -10,7 +9,7 @@
 
 ## Executive Summary
 
-Create a standalone SRE dashboard (`sre-dashboard/`) for SRE engineers to monitor and analyze alert processing history. This dashboard will be an independent React application separate from the existing alert dev UI (`alert-dev-ui/`), providing comprehensive visibility into historical alert processing workflows, ongoing operations, and system performance analytics.
+Create a standalone SRE dashboard (`sre-dashboard/`) for SRE engineers to monitor and analyze alert processing history. This dashboard will be an independent React application separate from the existing alert dev UI (`alert-dev-ui/`), providing comprehensive visibility into historical alert processing workflows, ongoing operations, and detailed timing information for each processing step.
 
 ## Problem Statement
 
@@ -20,7 +19,7 @@ With EP-0003 implementing comprehensive alert processing history capture, SRE en
 - Debug failed or problematic alert processing workflows
 - Filter and search through historical alert data efficiently
 - Visualize the chronological timeline of LLM and MCP interactions
-- Generate insights for system performance optimization
+- View timing information for each processing step and total alert processing duration
 
 The existing alert dev UI serves only as a development/testing interface for submitting alerts and should remain unchanged for that purpose.
 
@@ -51,7 +50,7 @@ The existing alert dev UI serves only as a development/testing interface for sub
 - No historical data visualization or analysis capabilities
 - No filtering or search functionality for past alert processing
 - No detailed timeline view of LLM and MCP interactions
-- No performance analytics or trend analysis
+- No timing information showing duration of each processing step
 - No dedicated interface for troubleshooting failed alerts
 
 ### What Works Well (Preserve)
@@ -71,21 +70,15 @@ The existing alert dev UI serves only as a development/testing interface for sub
 - [ ] Timeline shows all LLM prompts/responses and MCP tool interactions with timestamps
 - [ ] Real-time monitoring displays currently processing alerts with progress indicators
 - [ ] Error details and debugging information are clearly presented for failed alerts
-- [ ] Dashboard displays key performance metrics and processing statistics
+- [ ] Dashboard displays timing information for each processing step and total alert processing duration
 
 ### Non-Functional Success Criteria
-- [ ] Dashboard loads and renders large datasets (100+ sessions) within 2 seconds
-- [ ] Filtering and search operations complete within 1 second for typical queries
+- [ ] Dashboard loads and renders large datasets (100+ sessions) at reasonable speed for productive use
+- [ ] Filtering and search operations complete quickly enough to maintain workflow efficiency
 - [ ] Application maintains responsive performance on mobile and desktop devices
-- [ ] Real-time updates display within 500ms of backend status changes
-- [ ] UI handles concurrent user sessions without performance degradation
+- [ ] Real-time updates display promptly to provide current status information
+- [ ] System handles multiple users accessing the dashboard simultaneously without individual user performance degradation
 - [ ] Interface meets WCAG 2.1 AA accessibility standards
-
-### Business Success Criteria
-- [ ] SRE team adoption rate of 80%+ within first month of deployment
-- [ ] Reduction in alert processing debugging time by 50%
-- [ ] Increased visibility into system performance patterns and bottlenecks
-- [ ] Enhanced operational confidence through transparent monitoring capabilities
 
 ## Functional Requirements
 
@@ -112,10 +105,10 @@ The existing alert dev UI serves only as a development/testing interface for sub
 ## Non-Functional Requirements
 
 ### Performance Requirements
-- **REQ-4.15**: Initial dashboard load shall complete within 3 seconds under normal network conditions
+- **REQ-4.15**: Initial dashboard load shall complete at reasonable speed to maintain user productivity
 - **REQ-4.16**: Session list pagination shall support 1000+ historical sessions efficiently
-- **REQ-4.17**: Filter operations shall complete within 1 second for queries returning up to 100 results
-- **REQ-4.18**: Real-time updates shall display within 500ms of backend status changes
+- **REQ-4.17**: Filter operations shall complete quickly enough to support interactive exploration of data
+- **REQ-4.18**: Real-time updates shall display promptly to provide current operational status
 
 ### Security Requirements
 - **REQ-4.19**: Dashboard shall implement secure communication with backend API services
@@ -210,10 +203,10 @@ The existing alert dev UI serves only as a development/testing interface for sub
 - [ ] Error states display helpful information for debugging failed alerts
 
 ### Non-Functional Acceptance Criteria
-- [ ] Dashboard loads within 3 seconds on standard hardware and network conditions
+- [ ] Dashboard loads at reasonable speed on standard hardware and network conditions
 - [ ] Pagination handles 100+ sessions per page without performance degradation
-- [ ] Filter operations complete within 1 second for typical query sizes
-- [ ] Application remains responsive during concurrent user sessions
+- [ ] Filter operations complete quickly enough for interactive use
+- [ ] Application remains responsive when multiple users are accessing the system simultaneously
 - [ ] Interface works correctly on desktop (1920x1080) and tablet (768x1024) screen sizes
 
 ### Integration Acceptance Criteria
