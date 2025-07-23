@@ -44,7 +44,7 @@ The current WebSocket implementation in `app/services/websocket_manager.py` prov
 
 - **Primary Users**: SRE operators monitoring alert processing in real-time
 - **Secondary Users**: System administrators managing the platform
-- **Technical Teams**: Frontend and backend development teams
+- **Technical Teams**: Alert dev UI and backend development teams
 - **Business Impact**: Improved reliability of incident response monitoring
 
 ## Success Criteria
@@ -111,7 +111,7 @@ The current WebSocket implementation in `app/services/websocket_manager.py` prov
 
 ### Technical Constraints
 - Must work with existing FastAPI WebSocket implementation
-- Must maintain compatibility with current frontend React components
+- Must maintain compatibility with current alert dev UI React components
 - Must not break existing alert processing functionality
 
 ### Business Constraints
@@ -136,7 +136,7 @@ The current WebSocket implementation in `app/services/websocket_manager.py` prov
 
 - **Internal Dependencies**: Existing WebSocket implementation in `app/services/websocket_manager.py`
 - **External Dependencies**: No new external dependencies required
-- **Team Dependencies**: Frontend team for client-side implementation
+- **Team Dependencies**: Alert dev UI team for client-side implementation
 
 ## Risk Assessment
 

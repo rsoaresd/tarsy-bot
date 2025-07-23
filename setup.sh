@@ -9,9 +9,9 @@ echo "🚀 SRE AI Agent - Quick Setup"
 echo "================================"
 
 # Check if we're in the correct directory
-if [ ! -f "README.md" ] || [ ! -d "backend" ] || [ ! -d "frontend" ]; then
+if [ ! -f "README.md" ] || [ ! -d "backend" ] || [ ! -d "alert-dev-ui" ]; then
     echo "❌ Error: Please run this script from the root of the SRE AI Agent project"
-    echo "   The script expects to find backend/, frontend/, and README.md"
+    echo "   The script expects to find backend/, alert-dev-ui/, and README.md"
     exit 1
 fi
 
@@ -129,10 +129,10 @@ fi
 
 cd ..
 
-# Setup frontend
+# Setup alert dev UI
 echo ""
-echo "🔧 Setting up frontend..."
-cd frontend
+echo "🔧 Setting up alert dev UI..."
+cd alert-dev-ui
 
 echo "📦 Installing Node.js dependencies..."
 npm install
@@ -167,14 +167,14 @@ echo "   cd backend"
 echo "   source .venv/bin/activate"
 echo "   uvicorn app.main:app --reload --port 8000"
 echo ""
-echo "4. Start the frontend (in another terminal):"
-echo "   cd frontend"
+echo "4. Start the alert dev UI (in another terminal):"
+echo "   cd alert-dev-ui"
 echo "   PORT=3001 npm start"
 echo ""
 echo "5. Open your browser to: http://localhost:3001"
 echo ""
 echo "🔗 Useful links:"
-echo "   - Frontend: http://localhost:3001"
+echo "   - Alert Dev UI: http://localhost:3001"
 echo "   - Backend API: http://localhost:8000"
 echo "   - API Docs: http://localhost:8000/docs"
 echo ""

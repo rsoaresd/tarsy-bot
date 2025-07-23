@@ -1,5 +1,5 @@
 /**
- * Main App component for the SRE AI Agent frontend
+ * Main App component for the SRE AI Agent alert dev UI
  */
 
 import React, { useState, useEffect } from 'react';

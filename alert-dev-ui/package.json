@@ -1,5 +1,5 @@
 {
-  "name": "sre-ai-agent-frontend",
+  "name": "sre-ai-agent-alert-dev-ui",
   "version": "0.1.0",
   "private": true,
   "dependencies": {

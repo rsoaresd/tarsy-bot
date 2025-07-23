@@ -16,7 +16,7 @@ This guide covers advanced deployment scenarios, production setup, and troublesh
 
 The SRE AI Agent consists of three main components:
 - **Backend**: FastAPI service (Python)
-- **Frontend**: React application (Node.js)
+- **Alert Dev UI**: React application (Node.js)
 - **MCP Server**: Kubernetes integration via npx
 
 ## Environment Variables
@@ -53,10 +53,10 @@ source .venv/bin/activate
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 2. Frontend Setup
+### 2. Alert Dev UI Setup
 
 ```bash
-cd frontend
+cd alert-dev-ui
 
 # Install dependencies
 npm install
@@ -67,7 +67,7 @@ PORT=3001 npm start
 
 ### 3. Service URLs
 
-- **Frontend**: http://localhost:3001
+- **Alert Dev UI**: http://localhost:3001
 - **Backend API**: http://localhost:8000
 - **API Documentation**: http://localhost:8000/docs
 - **MCP Server**: Automatically started via npx
@@ -228,10 +228,10 @@ docker build -t sre-ai-agent-backend .
 docker run -p 8000:8000 --env-file .env sre-ai-agent-backend
 ```
 
-#### Frontend Docker
+#### Alert Dev UI Docker
 
 ```bash
-cd frontend
+cd alert-dev-ui
 
 # Create Dockerfile
 cat > Dockerfile << 'EOF'
@@ -270,8 +270,8 @@ server {
 EOF
 
 # Build and run
-docker build -t sre-ai-agent-frontend .
-docker run -p 3001:80 sre-ai-agent-frontend
+docker build -t sre-ai-agent-alert-dev-ui .
+docker run -p 3001:80 sre-ai-agent-alert-dev-ui
 ```
 
 ## Production Deployment
@@ -394,7 +394,7 @@ curl http://localhost:8000/processing-status/{alert_id}
    - Verify Python dependencies are installed
    - Check port 8000 is available
 
-2. **Frontend can't connect to backend**
+2. **Alert Dev UI can't connect to backend**
    - Verify backend is running on port 8000
    - Check CORS configuration
    - Verify proxy setting in package.json
@@ -417,7 +417,7 @@ tail -f backend/logs/app.log
 
 # Docker logs
 docker-compose logs -f backend
-docker-compose logs -f frontend
+docker-compose logs -f alert-dev-ui
 
 # Check specific service
 docker logs sre-ai-agent-backend

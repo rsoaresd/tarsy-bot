@@ -6,7 +6,7 @@
 3. [Backend Components](#backend-components)
 4. [Data Flow Architecture](#data-flow-architecture)
 5. [Integration Patterns](#integration-patterns)
-6. [Frontend Development Interface](#frontend-development-interface)
+6. [Alert Dev UI Development Interface](#alert-dev-ui-development-interface)
 7. [Security Architecture](#security-architecture)
 8. [Performance Considerations](#performance-considerations)
 9. [Error Handling and Resilience](#error-handling-and-resilience)
@@ -57,7 +57,7 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 - **History Service**: SQLModel-based database persistence with comprehensive audit trail capture
 - **Database**: SQLite with PostgreSQL migration support, automatic schema creation and management
 
-**Frontend (Development/Testing Only):**
+**Alert Dev UI (Development/Testing Only):**
 - **Framework**: React with TypeScript
 - **UI Library**: Material-UI (MUI) for modern, responsive interface
 - **Communication**: Axios for HTTP requests, native WebSocket for real-time updates including agent status
@@ -73,7 +73,7 @@ The SRE AI Agent is a **distributed, event-driven system** designed to automate 
 │                            SRE AI Agent - Multi-Layer Architecture                  │
 │                                                                                     │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐    │
-│  │                              Frontend Layer                                 │    │
+│  │                            Alert Dev UI Layer                               │    │
 │  │                        (Development/Testing Only)                           │    │
 │  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
 │  │  │   Alert Form    │    │ Processing      │    │ Result Display  │          │    │
@@ -950,14 +950,14 @@ The GitHub integration remains the same but now serves runbook content to specia
 
 ---
 
-## Frontend Development Interface
+## Alert Dev UI Development Interface
 
-The frontend is enhanced to display agent-specific information while maintaining its role as a **React-based development and testing interface** for system validation and demonstration.
+The alert dev UI is enhanced to display agent-specific information while maintaining its role as a **React-based development and testing interface** for system validation and demonstration.
 
 ### Architecture Overview
 
 ```
-Frontend/ (Enhanced)
+alert-dev-ui/ (Enhanced)
 ├── src/
 │   ├── components/
 │   │   ├── AlertForm.tsx       # Alert submission form (unchanged)

@@ -42,7 +42,7 @@ The Alert Processing History Service integrates with existing components through
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Frontend      │    │   Alert Service  │    │  History API    │
+│  Alert Dev UI   │    │   Alert Service  │    │  History API    │
 │                 │    │                  │    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                        │                        │
@@ -305,7 +305,7 @@ MCPCommunication:
 - REST endpoints integrate with existing FastAPI router structure
 - Authentication/authorization reuses existing security middleware
 - Error handling follows established API error response patterns
-- Response formats compatible with future frontend dashboard integration
+- Response formats compatible with future dashboard integration
 - Active sessions retrieved using `/sessions?status=in_progress` or `/sessions?status=pending`
 - Same detail level provided for all sessions regardless of status
 - **Chronological Timeline**: Primary feature for step-by-step debugging and flow analysis
@@ -465,7 +465,7 @@ MCPCommunication:
 
 - No breaking changes to existing API endpoints
 - Alert processing workflow unchanged
-- Existing frontend interfaces unaffected
+- Existing alert dev UI interfaces unaffected
 
 ### Migration Steps
 

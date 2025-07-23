@@ -37,7 +37,7 @@ The SRE AI Agent implements a modern, multi-layer architecture:
 - **Multi-Layer Backend**: FastAPI-based service with orchestrator and specialized agent layers
 - **Agent Specialization**: Domain-specific agents (KubernetesAgent) with focused MCP server subsets
 - **History Service**: Comprehensive audit trail capture with SQLModel database persistence
-- **Frontend**: React TypeScript development interface for testing and demonstration
+- **Alert Dev UI**: React TypeScript development interface for testing and demonstration
 - **MCP Integration**: Official `mcp` library with agent-specific server assignments and hook context
 - **LLM Support**: Unified LLM client supporting multiple providers (OpenAI, Google, xAI) with automatic interaction logging
 
@@ -99,7 +99,7 @@ sre/
 │   ├── tests/              # Comprehensive test suite (unit, integration, e2e)
 │   ├── pyproject.toml      # Python dependencies and project configuration
 │   └── env.template        # Environment variables template
-├── frontend/               # React TypeScript development interface
+├── alert-dev-ui/           # React TypeScript development interface
 │   ├── src/
 │   │   ├── components/     # React components (AlertForm, ProcessingStatus, ResultDisplay)
 │   │   ├── services/       # API and WebSocket clients
@@ -127,7 +127,7 @@ sre/
 
 This will automatically:
 - Check prerequisites
-- Set up both backend and frontend
+- Set up both backend and alert dev UI
 - Create the environment file
 - Install all dependencies
 - Provide next steps for starting the services
@@ -150,8 +150,8 @@ The setup script will create `backend/.env` from the template. You'll need to ad
 ## Usage
 
 1. **Start the Backend**: The FastAPI server runs on http://localhost:8000
-2. **Start the Frontend**: The React app runs on http://localhost:3001
-3. **Submit an Alert**: Use the frontend form to simulate an alert
+2. **Start the Alert Dev UI**: The React app runs on http://localhost:3001
+3. **Submit an Alert**: Use the alert dev UI form to simulate an alert
 4. **Monitor Progress**: Watch real-time progress updates
 5. **View Results**: See the detailed LLM analysis
 

@@ -22,13 +22,13 @@ The current implementation processes alerts through various agents and integrati
 - `backend/app/agents/` - Various agents that process alerts
 - `backend/app/integrations/llm/client.py` - LLM communication layer
 - `backend/app/integrations/mcp/client.py` - MCP server communication
-- `backend/app/services/websocket_manager.py` - Real-time updates to frontend
+- `backend/app/services/websocket_manager.py` - Real-time updates to alert dev UI
 
 **Current Flow:**
 1. Alert received via WebSocket or API
 2. Alert processed through appropriate agent
 3. LLM and MCP interactions occur during processing
-4. Results sent to frontend via WebSocket
+4. Results sent to alert dev UI via WebSocket
 5. Processing completes with no historical data retained
 
 **Current Limitations:**
@@ -77,8 +77,8 @@ The current implementation processes alerts through various agents and integrati
 ### User Interface Requirements
 - **REQ-3.6**: Service shall expose REST API endpoints for alert history retrieval
 - **REQ-3.7**: API shall support filtering and pagination for large datasets
-- **REQ-3.8**: Service shall provide backend integration points for future frontend dashboard development
-- **Note**: Frontend UI changes and dashboard development are explicitly out of scope for this EP and will be addressed in a separate enhancement proposal
+- **REQ-3.8**: Service shall provide backend integration points for future dashboard development
+- **Note**: Alert dev UI changes and dashboard development are explicitly out of scope for this EP and will be addressed in a separate enhancement proposal
 
 ### Integration Requirements
 - **REQ-3.9**: Service shall integrate with minimal impact to existing alert processing workflow
@@ -126,8 +126,8 @@ The current implementation processes alerts through various agents and integrati
 - Dashboard development will follow this foundation service
 
 ## Out of Scope
-- Frontend UI changes and dashboard development (separate EP required)
-- Real-time WebSocket integration for frontend status updates (separate EP)
+- Alert dev UI changes and dashboard development (separate EP required)
+- Real-time WebSocket integration for alert dev UI status updates (separate EP)
 - Real-time analytics and alerting based on historical data
 - Data export functionality for external analysis tools
 - Advanced query optimization for large datasets
