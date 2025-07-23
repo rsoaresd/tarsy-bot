@@ -85,3 +85,160 @@ Tarsy implements a modern, multi-layer architecture:
 ## Project Structure
 
 ```
+tarsy-bot/
+├── backend/                # FastAPI backend with multi-layer agent architecture
+│   ├── tarsy/
+│   │   ├── agents/         # Specialized agent classes (KubernetesAgent, BaseAgent)
+│   │   ├── controllers/    # API controllers and REST endpoints
+│   │   ├── database/       # Database initialization and schema management
+│   │   ├── hooks/          # Event hooks for automatic interaction capture
+│   │   ├── models/         # Data models (Alert, History, API schemas)
+│   │   ├── repositories/   # Database access layer with SQLModel
+│   │   ├── services/       # Business logic (AlertService, HistoryService, AgentRegistry)
+│   │   ├── integrations/   # External integrations (LLM providers, MCP servers)
+│   │   ├── config/         # Configuration management
+│   │   └── utils/          # Utility functions and logging
+│   ├── tests/              # Comprehensive test suite (unit, integration, e2e)
+│   ├── pyproject.toml      # Python dependencies and project configuration
+│   └── env.template        # Environment variables template
+├── alert-dev-ui/           # React TypeScript development interface
+│   ├── src/
+│   │   ├── components/     # React components (AlertForm, ProcessingStatus, ResultDisplay)
+│   │   ├── services/       # API and WebSocket clients
+│   │   └── types/          # TypeScript type definitions
+│   └── package.json        # Node.js dependencies
+├── docs/                   # Comprehensive documentation
+│   ├── requirements.md     # Application requirements and specifications
+│   ├── design.md           # Technical design and architecture documentation
+│   └── enhancements/       # Enhancement proposal system
+│       ├── implemented/    # Completed EPs (EP-0002 Multi-Layer Agents, EP-0003 History Service)
+│       ├── pending/        # Pending enhancement proposals
+│       └── templates/      # EP document templates
+├── setup.sh                # Automated setup script
+├── DEPLOYMENT.md           # Production deployment guide
+└── docker-compose.yml      # Docker development environment
+```
+
+## Quick Start
+
+### Automated Setup (Recommended)
+
+```bash
+./setup.sh
+```
+
+This will automatically:
+- Check prerequisites
+- Set up both backend and alert dev UI
+- Create the environment file
+- Install all dependencies
+- Provide next steps for starting the services
+
+### Manual Setup
+
+For advanced users or troubleshooting, see [DEPLOYMENT.md](DEPLOYMENT.md) for detailed manual setup instructions.
+
+## Running the Applications
+
+After setup is complete, you can run both applications:
+
+### Backend (FastAPI Server)
+```bash
+# Make sure you're in the project root directory first
+cd backend
+source .venv/bin/activate
+uvicorn tarsy.main:app --reload --port 8000
+```
+The backend will be available at: http://localhost:8000
+
+### Alert Dev UI (React App)
+```bash
+# From the project root directory
+cd alert-dev-ui
+PORT=3001 npm start
+```
+The frontend will be available at: http://localhost:3001
+
+> **Note**: Start the backend first, then the frontend. The React app is configured to proxy API requests to the backend.
+
+### Troubleshooting
+
+**If you get "No such file or directory" for .venv/bin/activate:**
+- Make sure you're in the `backend/` directory, not the project root
+- Run `pwd` to check your current location
+
+**If you get "ModuleNotFoundError" for sqlmodel or other packages:**
+```bash
+cd backend
+source .venv/bin/activate
+uv sync  # This reinstalls all dependencies
+uvicorn tarsy.main:app --reload --port 8000
+```
+
+### Environment Configuration
+
+The setup script will create `backend/.env` from the template. You'll need to add your API keys:
+
+- **Google (Gemini)**: Get from [Google AI Studio](https://aistudio.google.com/app/apikey)
+- **OpenAI**: Get from [OpenAI Platform](https://platform.openai.com/api-keys)
+- **xAI (Grok)**: Get from [xAI Console](https://console.x.ai/)
+- **GitHub Token**: Get from [GitHub Settings](https://github.com/settings/tokens)
+
+> **Note**: You need at least one LLM API key and the GitHub token for the agent to work.
+
+## Usage
+
+1. **Start the Backend**: The FastAPI server runs on http://localhost:8000
+2. **Start the Alert Dev UI**: The React app runs on http://localhost:3001
+3. **Submit an Alert**: Use the alert dev UI form to simulate an alert
+4. **Monitor Progress**: Watch real-time progress updates
+5. **View Results**: See the detailed LLM analysis
+
+## Supported Alert Types
+
+Currently supported:
+- **Namespace stuck in Terminating**: Analyzes stuck Kubernetes namespaces
+
+The LLM-driven approach means new alert types can be handled without code changes, as long as:
+- A runbook exists for the alert
+- The MCP servers have relevant tools available
+
+## API Endpoints
+
+### Core API
+- `GET /` - Health check endpoint
+- `GET /health` - Comprehensive health check with service status
+- `POST /alerts` - Submit a new alert for processing
+- `GET /alert-types` - Get supported alert types
+- `GET /processing-status/{alert_id}` - Get processing status
+- `WebSocket /ws/{alert_id}` - Real-time progress updates
+
+### History API (EP-0003)
+- `GET /api/v1/history/sessions` - List alert processing sessions with filtering and pagination
+- `GET /api/v1/history/sessions/{session_id}` - Get detailed session with chronological timeline
+- `GET /api/v1/history/health` - History service health check and database status
+
+## Development
+
+### Adding New Components
+
+- **Alert Types**: Add to `supported_alerts` in `config/settings.py` and create corresponding runbooks
+- **MCP Servers**: Update `mcp_servers` configuration in `settings.py` 
+- **LLM Providers**: See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions
+
+### Running Tests
+
+```bash
+# Install test dependencies and run integration tests
+cd backend
+make test
+```
+
+The test suite includes comprehensive end-to-end integration tests covering the complete alert processing pipeline, agent specialization, error handling, and performance scenarios with full mocking of external services.
+
+### Architecture Documents
+
+- [docs/requirements.md](docs/requirements.md): Application requirements and specifications
+- [docs/design.md](docs/design.md): System design and architecture documentation
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Production deployment and advanced configuration
+```

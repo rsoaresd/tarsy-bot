@@ -471,7 +471,7 @@ class TestHistoryControllerValidation:
     
     def test_sessions_list_pagination_validation(self, client, mock_history_service):
         """Test pagination parameter validation."""
-        with patch('app.controllers.history_controller.get_history_service', return_value=mock_history_service):
+        with patch('tarsy.controllers.history_controller.get_history_service', return_value=mock_history_service):
             # Test negative page number
             response = client.get("/api/v1/history/sessions?page=-1")
             assert response.status_code == 422

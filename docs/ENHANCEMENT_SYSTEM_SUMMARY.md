@@ -182,7 +182,7 @@ Status: Implemented
 **Success Check:**
 ```bash
 python -m pytest backend/tests/test_connection_pool.py -v
-python -c "from app.services.connection_pool import ConnectionPool; print('Success')"
+python -c "from tarsy.services.connection_pool import ConnectionPool; print('Success')"
 ```
 ```
 

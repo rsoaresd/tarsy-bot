@@ -86,8 +86,8 @@ The implementation introduces an inheritance-based system where agents extend Ba
 ```bash
 # Commands to verify this step
 cd backend
-python -c "from app.agents.base_agent import BaseAgent; print('BaseAgent imported successfully')"
-python -c "from abc import ABC; from app.agents.base_agent import BaseAgent; print('BaseAgent is abstract:', BaseAgent.__abstractmethods__)"
+python -c "from tarsy.agents.base_agent import BaseAgent; print('BaseAgent imported successfully')"
+python -c "from abc import ABC; from tarsy.agents.base_agent import BaseAgent; print('BaseAgent is abstract:', BaseAgent.__abstractmethods__)"
 pytest tests/unit/test_base_agent.py -v
 ```
 
@@ -129,8 +129,8 @@ pytest tests/unit/test_base_agent.py -v
 ```bash
 # Commands to verify this step
 cd backend
-python -c "from app.services.mcp_server_registry import MCPServerRegistry; registry = MCPServerRegistry(); print('Registry created successfully')"
-python -c "from app.models.mcp_config import MCPServerConfig; print('MCPServerConfig model available')"
+python -c "from tarsy.services.mcp_server_registry import MCPServerRegistry; registry = MCPServerRegistry(); print('Registry created successfully')"
+python -c "from tarsy.models.mcp_config import MCPServerConfig; print('MCPServerConfig model available')"
 pytest tests/unit/test_mcp_server_registry.py -v
 ```
 
@@ -171,8 +171,8 @@ pytest tests/unit/test_mcp_server_registry.py -v
 ```bash
 # Commands to verify this step
 cd backend
-python -c "from app.services.agent_registry import AgentRegistry; registry = AgentRegistry(); print('AgentRegistry created successfully')"
-python -c "from app.services.agent_factory import AgentFactory; print('AgentFactory imported successfully')"
+python -c "from tarsy.services.agent_registry import AgentRegistry; registry = AgentRegistry(); print('AgentRegistry created successfully')"
+python -c "from tarsy.services.agent_factory import AgentFactory; print('AgentFactory imported successfully')"
 pytest tests/unit/test_agent_registry.py -v
 pytest tests/unit/test_agent_factory.py -v
 ```
@@ -230,8 +230,8 @@ pytest tests/unit/test_agent_factory.py -v
 ```bash
 # Commands to verify this step
 cd backend
-python -c "from app.agents.kubernetes_agent import KubernetesAgent; from app.agents.base_agent import BaseAgent; print('KubernetesAgent inherits from BaseAgent:', issubclass(KubernetesAgent, BaseAgent))"
-python -c "from app.agents.kubernetes_agent import KubernetesAgent; agent = KubernetesAgent(None, None, None, None); print('MCP servers:', agent.mcp_servers()); print('Custom instructions empty:', agent.custom_instructions() == '')"
+python -c "from tarsy.agents.kubernetes_agent import KubernetesAgent; from tarsy.agents.base_agent import BaseAgent; print('KubernetesAgent inherits from BaseAgent:', issubclass(KubernetesAgent, BaseAgent))"
+python -c "from tarsy.agents.kubernetes_agent import KubernetesAgent; agent = KubernetesAgent(None, None, None, None); print('MCP servers:', agent.mcp_servers()); print('Custom instructions empty:', agent.custom_instructions() == '')"
 pytest tests/unit/test_kubernetes_agent.py -v
 ```
 
@@ -276,10 +276,10 @@ pytest tests/unit/test_kubernetes_agent.py -v
 ```bash
 # Commands to verify this step
 cd backend
-python -c "from app.config.settings import Settings; settings = Settings(); print('Agent registry loaded:', hasattr(settings, 'agent_registry'))"
-python -c "from app.config.settings import Settings; settings = Settings(); print('MCP server registry loaded:', hasattr(settings, 'mcp_server_registry'))"
-python -c "from app.config.settings import Settings; settings = Settings(); print('OLD mcp_servers REMOVED:', not hasattr(settings, 'mcp_servers'))"
-python -c "from app.config.settings import Settings; settings = Settings(); print('OLD get_mcp_config REMOVED:', not hasattr(settings, 'get_mcp_config'))"
+python -c "from tarsy.config.settings import Settings; settings = Settings(); print('Agent registry loaded:', hasattr(settings, 'agent_registry'))"
+python -c "from tarsy.config.settings import Settings; settings = Settings(); print('MCP server registry loaded:', hasattr(settings, 'mcp_server_registry'))"
+python -c "from tarsy.config.settings import Settings; settings = Settings(); print('OLD mcp_servers REMOVED:', not hasattr(settings, 'mcp_servers'))"
+python -c "from tarsy.config.settings import Settings; settings = Settings(); print('OLD get_mcp_config REMOVED:', not hasattr(settings, 'get_mcp_config'))"
 pytest tests/unit/test_settings.py -v
 ```
 
@@ -375,7 +375,7 @@ pytest tests/integration/test_agent_integration.py -v
 ```bash
 # Commands to verify this step
 cd backend
-python -c "from app.services.alert_orchestrator import AlertOrchestrator; orchestrator = AlertOrchestrator(); print('AlertOrchestrator created successfully')"
+python -c "from tarsy.services.alert_orchestrator import AlertOrchestrator; orchestrator = AlertOrchestrator(); print('AlertOrchestrator created successfully')"
 pytest tests/unit/test_alert_orchestrator.py -v
 ```
 
@@ -415,7 +415,7 @@ pytest tests/unit/test_alert_orchestrator.py -v
 ```bash
 # Commands to verify this step
 cd backend
-python -c "from app.main import app; print('FastAPI app updated successfully')"
+python -c "from tarsy.main import tarsy; print('FastAPI app updated successfully')"
 pytest tests/integration/test_api_integration.py -v
 ```
 
@@ -505,8 +505,8 @@ pytest tests/integration/test_e2e_processing.py -v
 ```bash
 # Commands to verify this step
 cd backend
-python -c "from app.agents.base_agent import BaseAgent; help(BaseAgent)" | head -20
-python -c "import pydoc; pydoc.help('app.agents.kubernetes_agent')" | head -20
+python -c "from tarsy.agents.base_agent import BaseAgent; help(BaseAgent)" | head -20
+python -c "import pydoc; pydoc.help('tarsy.agents.kubernetes_agent')" | head -20
 ```
 
 **Rollback Plan:**
@@ -583,7 +583,7 @@ grep -q "AlertOrchestrator" README.md
 # Commands to verify this step
 cd backend
 pytest tests/ -v --tb=short
-python -c "from app.services.alert_orchestrator import AlertOrchestrator; from app.agents.kubernetes_agent import KubernetesAgent; print('All components importable')"
+python -c "from tarsy.services.alert_orchestrator import AlertOrchestrator; from tarsy.agents.kubernetes_agent import KubernetesAgent; print('All components importable')"
 ```
 
 **Rollback Plan:**

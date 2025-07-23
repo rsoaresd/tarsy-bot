@@ -130,7 +130,7 @@ class AlertSession(SQLModel, table=True):
 **Success Check:**
 ```bash
 cd backend
-python -c "from app.models.history import AlertSession, LLMInteraction, MCPCommunication; print('SQLModel models imported successfully')"
+python -c "from tarsy.models.history import AlertSession, LLMInteraction, MCPCommunication; print('SQLModel models imported successfully')"
 ```
 
 #### Step 1.2: Database Repository Abstraction Layer
@@ -166,7 +166,7 @@ python -c "from app.models.history import AlertSession, LLMInteraction, MCPCommu
 **Success Check:**
 ```bash
 cd backend
-python -c "from app.repositories.history_repository import HistoryRepository; print('Repository imported successfully')"
+python -c "from tarsy.repositories.history_repository import HistoryRepository; print('Repository imported successfully')"
 ```
 
 #### Step 1.3: Core History Service Structure
@@ -200,7 +200,7 @@ python -c "from app.repositories.history_repository import HistoryRepository; pr
 **Success Check:**
 ```bash
 cd backend
-python -c "from app.services.history_service import HistoryService; print('History service imported successfully')"
+python -c "from tarsy.services.history_service import HistoryService; print('History service imported successfully')"
 ```
 
 ### Phase 1 Completion Criteria
@@ -247,7 +247,7 @@ python -c "from app.services.history_service import HistoryService; print('Histo
 **Success Check:**
 ```bash
 cd backend
-python -c "from app.hooks.history_hooks import LLMHooks, MCPHooks; print('Hooks imported successfully')"
+python -c "from tarsy.hooks.history_hooks import LLMHooks, MCPHooks; print('Hooks imported successfully')"
 ```
 
 #### Step 2.2: LLM Client Integration
@@ -280,7 +280,7 @@ python -c "from app.hooks.history_hooks import LLMHooks, MCPHooks; print('Hooks 
 **Success Check:**
 ```bash
 cd backend
-python -c "from app.integrations.llm.client import LLMClient; print('LLM client integration successful')"
+python -c "from tarsy.integrations.llm.client import LLMClient; print('LLM client integration successful')"
 # Test with mock LLM call to verify history capture
 ```
 
@@ -314,7 +314,7 @@ python -c "from app.integrations.llm.client import LLMClient; print('LLM client 
 **Success Check:**
 ```bash
 cd backend
-python -c "from app.integrations.mcp.client import MCPClient; print('MCP client integration successful')"
+python -c "from tarsy.integrations.mcp.client import MCPClient; print('MCP client integration successful')"
 # Test with mock MCP call to verify history capture
 ```
 
@@ -358,7 +358,7 @@ from typing import Optional
 from datetime import datetime
 
 # SQLModel can be used directly as API response model
-@app.get("/api/v1/history/sessions", response_model=dict)
+@tarsy.get("/api/v1/history/sessions", response_model=dict)
 def get_sessions(
     status: Optional[str] = None,
     agent_type: Optional[str] = None,
@@ -442,7 +442,7 @@ GET /api/v1/history/sessions?start_date=2024-12-18T00:00:00Z&end_date=2024-12-19
 **Success Check:**
 ```bash
 cd backend
-python -c "from app.controllers.history_controller import router; print('API controller imported successfully')"
+python -c "from tarsy.controllers.history_controller import router; print('API controller imported successfully')"
 
 # Test complex filtering combinations (after starting the server)
 # curl -f "http://localhost:8000/api/v1/history/sessions?alert_type=test&status=completed&start_date=2024-12-18T00:00:00Z"
@@ -516,7 +516,7 @@ python -m pytest tests/integration/test_alert_processing_e2e.py -k "history" -v
 **Success Check:**
 ```bash
 cd backend
-python -m app.main &
+python -m tarsy.main &
 sleep 2
 curl -f http://localhost:8000/api/v1/history/sessions || echo "API endpoint test failed"
 kill %1
@@ -608,8 +608,8 @@ python -m pytest tests/integration/test_history_integration.py -v
 **Success Check:**
 ```bash
 cd backend
-python -c "help(app.services.history_service.HistoryService)" | grep -q "class HistoryService"
-python -c "help(app.repositories.history_repository.HistoryRepository)" | grep -q "class HistoryRepository"
+python -c "help(tarsy.services.history_service.HistoryService)" | grep -q "class HistoryService"
+python -c "help(tarsy.repositories.history_repository.HistoryRepository)" | grep -q "class HistoryRepository"
 ```
 
 #### Step 4.3: Final Validation and Documentation Updates

@@ -55,7 +55,7 @@ class TestHistoryService:
     @pytest.fixture
     def history_service(self, mock_settings):
         """Create HistoryService instance with mocked dependencies."""
-        with patch('app.services.history_service.get_settings', return_value=mock_settings):
+        with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
             service = HistoryService()
             service._initialization_attempted = True
             service._is_healthy = True
@@ -72,7 +72,7 @@ class TestHistoryService:
         mock_settings = Mock(spec=Settings)
         mock_settings.history_enabled = False
         
-        with patch('app.services.history_service.get_settings', return_value=mock_settings):
+        with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
             service = HistoryService()
             assert service.is_enabled == False
     
@@ -83,7 +83,7 @@ class TestHistoryService:
         history_service.is_enabled = False
         assert history_service.enabled == False
     
-    @patch('app.services.history_service.HistoryRepository')
+    @patch('tarsy.services.history_service.HistoryRepository')
     def test_get_repository_context_manager(self, mock_repo_class, history_service, mock_db_manager):
         """Test the repository context manager."""
         history_service.db_manager = mock_db_manager
@@ -94,7 +94,7 @@ class TestHistoryService:
         with history_service.get_repository() as repo:
             assert repo == mock_repo_instance
     
-    @patch('app.services.history_service.HistoryRepository')
+    @patch('tarsy.services.history_service.HistoryRepository')
     def test_get_repository_disabled_service(self, mock_repo_class, history_service):
         """Test repository access when service is disabled."""
         history_service.is_enabled = False
@@ -341,10 +341,10 @@ class TestHistoryService:
 class TestHistoryServiceGlobalInstance:
     """Test suite for global history service instance management."""
     
-    @patch('app.services.history_service._history_service', None)
+    @patch('tarsy.services.history_service._history_service', None)
     def test_get_history_service_singleton(self):
         """Test that get_history_service returns a singleton instance."""
-        with patch('app.services.history_service.HistoryService') as mock_service_class:
+        with patch('tarsy.services.history_service.HistoryService') as mock_service_class:
             mock_instance = Mock()
             mock_service_class.return_value = mock_instance
             
@@ -357,10 +357,10 @@ class TestHistoryServiceGlobalInstance:
             assert service1 == service2
             mock_service_class.assert_called_once()
     
-    @patch('app.services.history_service._history_service', None)
+    @patch('tarsy.services.history_service._history_service', None)
     def test_get_history_service_initialization(self):
         """Test that get_history_service initializes the service."""
-        with patch('app.services.history_service.HistoryService') as mock_service_class:
+        with patch('tarsy.services.history_service.HistoryService') as mock_service_class:
             mock_instance = Mock()
             mock_service_class.return_value = mock_instance
             
@@ -381,7 +381,7 @@ class TestHistoryServiceErrorHandling:
         mock_settings.history_database_url = "sqlite:///test_history.db"
         mock_settings.history_retention_days = 90
         
-        with patch('app.services.history_service.get_settings', return_value=mock_settings):
+        with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
             service = HistoryService()
             service._initialization_attempted = True
             service._is_healthy = False  # Simulate unhealthy state

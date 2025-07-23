@@ -540,7 +540,7 @@ def history_service_with_test_db(history_test_database_engine):
     mock_settings.history_database_url = "sqlite:///:memory:"
     mock_settings.history_retention_days = 90
     
-    with patch('app.services.history_service.get_settings', return_value=mock_settings):
+    with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
         service = HistoryService()
         
         # Override database engine for testing

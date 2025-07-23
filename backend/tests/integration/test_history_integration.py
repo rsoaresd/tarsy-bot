@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import SQLModel, create_engine
 
-from tarsy.main import tarsy
+from tarsy.main import app
 from tarsy.models.alert import Alert
 
 # Import history models to ensure they're registered with SQLModel.metadata
@@ -48,7 +48,7 @@ class TestHistoryServiceIntegration:
         mock_settings.history_database_url = test_db_url  # Use the same database file
         mock_settings.history_retention_days = 90
         
-        with patch('app.services.history_service.get_settings', return_value=mock_settings):
+        with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
             service = HistoryService()
             # Initialize the service - it will now use the same database file
             service.initialize()
