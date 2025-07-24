@@ -36,7 +36,7 @@ LOGGING_CONFIG = {
             "class": "logging.handlers.RotatingFileHandler",
             "level": "DEBUG",
             "formatter": "detailed",
-            "filename": LOGS_DIR / "sre_agent.log",
+            "filename": LOGS_DIR / "tarsy.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
         },
@@ -44,7 +44,7 @@ LOGGING_CONFIG = {
             "class": "logging.handlers.RotatingFileHandler",
             "level": "ERROR",
             "formatter": "detailed",
-            "filename": LOGS_DIR / "sre_agent_errors.log",
+            "filename": LOGS_DIR / "tarsy_errors.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
         },
@@ -66,32 +66,32 @@ LOGGING_CONFIG = {
         },
     },
     "loggers": {
-        "sre_agent": {
+        "tarsy": {
             "level": "DEBUG",
             "handlers": ["console", "file", "error_file"],
             "propagate": False,
         },
-        "sre_agent.mcp": {
+        "tarsy.mcp": {
             "level": "DEBUG",
             "handlers": ["console", "file", "error_file"],
             "propagate": False,
         },
-        "sre_agent.llm": {
+        "tarsy.llm": {
             "level": "DEBUG",
             "handlers": ["console", "file", "error_file"],
             "propagate": False,
         },
-        "sre_agent.services": {
+        "tarsy.services": {
             "level": "DEBUG",
             "handlers": ["console", "file", "error_file"],
             "propagate": False,
         },
-        "sre_agent.llm.communications": {
+        "tarsy.llm.communications": {
             "level": "DEBUG",
             "handlers": ["llm_communications"],
             "propagate": False,
         },
-        "sre_agent.mcp.communications": {
+        "tarsy.mcp.communications": {
             "level": "DEBUG",
             "handlers": ["mcp_communications"],
             "propagate": False,
@@ -129,8 +129,8 @@ def get_logger(name: str) -> logging.Logger:
         logging.Logger: Configured logger instance
     """
     # Ensure the name starts with our application prefix
-    if not name.startswith("sre_agent"):
-        name = f"sre_agent.{name}"
+    if not name.startswith("tarsy"):
+        name = f"tarsy.{name}"
     
     return logging.getLogger(name)
 
@@ -145,7 +145,7 @@ def get_module_logger(module_name: str) -> logging.Logger:
     Returns:
         logging.Logger: Configured logger instance
     """
-    if module_name.startswith("app."):
-        module_name = module_name[4:]  # Remove 'app.' prefix
+    if module_name.startswith("tarsy."):
+        module_name = module_name[6:]  # Remove 'tarsy.' prefix (6 characters)
     
     return get_logger(module_name) 

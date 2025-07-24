@@ -413,7 +413,7 @@ curl http://localhost:8000/processing-status/{alert_id}
 
 ```bash
 # Backend logs
-tail -f backend/logs/app.log
+tail -f backend/logs/tarsy.log
 
 # Docker logs
 docker-compose logs -f backend

@@ -153,7 +153,7 @@ ci: quality test ## Run full CI pipeline (quality + all tests)
 .PHONY: logs
 logs: ## Show recent application logs
 	@echo "$(GREEN)Recent application logs:$(NC)"
-	@if [ -f logs/app.log ]; then tail -n 50 logs/app.log; else echo "No application logs found"; fi
+	@if [ -f logs/tarsy.log ]; then tail -n 50 logs/tarsy.log; else echo "No application logs found"; fi
 
 .PHONY: logs-llm
 logs-llm: ## Show recent LLM communication logs
