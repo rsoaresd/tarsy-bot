@@ -79,10 +79,11 @@ class MCPClient:
             await self.initialize()
         
         # Use HookContext to handle all hook lifecycle management
+        session_id = kwargs.pop('session_id', None)  # Remove session_id from kwargs to avoid duplicate
         async with HookContext(
             service_type="mcp",
             method_name="list_tools",
-            session_id=kwargs.get('session_id'),
+            session_id=session_id,
             server_name=server_name,
             **kwargs
         ) as hook_ctx:
@@ -155,10 +156,11 @@ class MCPClient:
             raise Exception(f"MCP server not found: {server_name}")
         
         # Use HookContext to handle all hook lifecycle management
+        session_id = kwargs.pop('session_id', None)  # Remove session_id from kwargs to avoid duplicate
         async with HookContext(
             service_type="mcp",
             method_name="call_tool",
-            session_id=kwargs.get('session_id'),
+            session_id=session_id,
             server_name=server_name,
             tool_name=tool_name,
             tool_arguments=parameters,
@@ -269,6 +271,9 @@ class MCPClient:
 
     async def close(self):
         """Close all MCP client connections."""
-        await self.exit_stack.aclose()
-        self.sessions.clear()
-        self._initialized = False 
+        try:
+            await self.exit_stack.aclose()
+        finally:
+            # Always clean up state even if exit stack fails
+            self.sessions.clear()
+            self._initialized = False 

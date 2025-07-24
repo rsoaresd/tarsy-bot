@@ -27,6 +27,7 @@ help: ## Show this help message
 .PHONY: install
 install: ## Install all dependencies (production + development + test)
 	@echo "$(GREEN)Installing dependencies...$(NC)"
+	$(UV) sync
 	$(UV) sync --extra dev --extra test
 
 .PHONY: install-prod
@@ -41,34 +42,34 @@ install-dev: ## Install development dependencies (includes test)
 
 # Testing
 .PHONY: test
-test: ## Run all tests (unit + integration)
+test: install ## Run all tests (unit + integration)
 	@echo "$(GREEN)Running all tests...$(NC)"
-	$(PYTHON) $(TEST_DIR)/run_all_tests.py
+	. .venv/bin/activate && $(PYTHON) $(TEST_DIR)/run_all_tests.py
 
 .PHONY: test-unit
-test-unit: ## Run unit tests only
+test-unit: install ## Run unit tests only
 	@echo "$(GREEN)Running unit tests...$(NC)"
-	$(PYTHON) $(TEST_DIR)/run_unit_tests.py
+	. .venv/bin/activate && $(PYTHON) $(TEST_DIR)/run_unit_tests.py
 
 .PHONY: test-integration
-test-integration: ## Run integration tests only
+test-integration: install ## Run integration tests only
 	@echo "$(GREEN)Running integration tests...$(NC)"
-	$(PYTHON) $(TEST_DIR)/run_integration_tests.py
+	. .venv/bin/activate && $(PYTHON) $(TEST_DIR)/run_integration_tests.py
 
 .PHONY: test-verbose
 test-verbose: ## Run all tests with verbose output
 	@echo "$(GREEN)Running all tests (verbose)...$(NC)"
-	$(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ -v
+	. .venv/bin/activate && $(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ -v
 
 .PHONY: test-coverage
 test-coverage: ## Run tests with coverage report
 	@echo "$(GREEN)Running tests with coverage...$(NC)"
-	$(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ --cov=$(APP_DIR) --cov-report=html --cov-report=term-missing
+	. .venv/bin/activate && $(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ --cov=$(APP_DIR) --cov-report=html --cov-report=term-missing
 
 .PHONY: test-quick
 test-quick: ## Run tests in parallel for faster execution
 	@echo "$(GREEN)Running tests in parallel...$(NC)"
-	$(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ -n auto
+	. .venv/bin/activate && $(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ -n auto
 
 # Code Quality
 .PHONY: lint

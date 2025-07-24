@@ -4,8 +4,10 @@ Main entry point for the tarsy backend service.
 """
 
 import asyncio
+import json
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Dict, List
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -54,6 +56,14 @@ async def lifespan(app: FastAPI):
     
     # Startup
     await alert_service.initialize()
+    
+    # Initialize dashboard broadcaster
+    await websocket_manager.initialize_dashboard_broadcaster()
+    
+    # Register integrated hook system (history + dashboard broadcasting)
+    from tarsy.hooks import register_integrated_hooks
+    register_integrated_hooks(websocket_manager)
+    
     logger.info("Tarsy started successfully!")
     
     # Log history service status
@@ -67,6 +77,10 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Tarsy shutting down...")
+    
+    # Shutdown dashboard broadcaster
+    await websocket_manager.shutdown_dashboard_broadcaster()
+    
     await alert_service.close()
     logger.info("Tarsy shutdown complete")
 
@@ -218,6 +232,47 @@ async def websocket_endpoint(websocket: WebSocket, alert_id: str):
         logger.error(f"WebSocket error for alert {alert_id}: {str(e)}")
     finally:
         websocket_manager.disconnect(websocket, alert_id)
+
+
+@app.websocket("/ws/dashboard/{user_id}")
+async def dashboard_websocket_endpoint(websocket: WebSocket, user_id: str):
+    """WebSocket endpoint for dashboard real-time updates."""
+    try:
+        await websocket_manager.connect_dashboard(websocket, user_id)
+        
+        # Send initial connection confirmation
+        from tarsy.models.websocket_models import ConnectionEstablished
+        connection_msg = ConnectionEstablished(user_id=user_id)
+        await websocket_manager.dashboard_manager.send_to_user(
+            user_id, 
+            connection_msg.model_dump()
+        )
+        
+        # Keep connection alive and handle messages
+        while True:
+            try:
+                # Wait for messages from client (subscription requests, etc.)
+                message_text = await websocket.receive_text()
+                try:
+                    message = json.loads(message_text)
+                    await websocket_manager.handle_dashboard_message(user_id, message)
+                except json.JSONDecodeError:
+                    # Send error response for invalid JSON
+                    from tarsy.models.websocket_models import ErrorMessage
+                    error_msg = ErrorMessage(message="Invalid JSON message format")
+                    await websocket_manager.dashboard_manager.send_to_user(
+                        user_id, 
+                        error_msg.model_dump()
+                    )
+            except WebSocketDisconnect:
+                break
+                
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"Dashboard WebSocket error for user {user_id}: {str(e)}")
+    finally:
+        websocket_manager.disconnect_dashboard(user_id)
 
 
 async def process_alert_background(alert_id: str, alert: Alert):

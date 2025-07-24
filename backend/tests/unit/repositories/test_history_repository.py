@@ -86,6 +86,7 @@ class TestHistoryRepository:
             success=True
         )
     
+    @pytest.mark.unit
     def test_create_alert_session_success(self, repository, sample_alert_session):
         """Test successful alert session creation."""
         created_session = repository.create_alert_session(sample_alert_session)
@@ -99,11 +100,13 @@ class TestHistoryRepository:
         assert retrieved_session.agent_type == sample_alert_session.agent_type
         assert retrieved_session.status == sample_alert_session.status
     
+    @pytest.mark.unit
     def test_get_alert_session_not_found(self, repository):
         """Test getting alert session that doesn't exist."""
         session = repository.get_alert_session("non-existent-session")
         assert session is None
     
+    @pytest.mark.unit
     def test_update_alert_session_success(self, repository, sample_alert_session):
         """Test successful alert session update."""
         # Create session first
@@ -121,6 +124,7 @@ class TestHistoryRepository:
         assert updated_session.status == "completed"
         assert updated_session.completed_at is not None
     
+    @pytest.mark.unit
     def test_create_llm_interaction_success(self, repository, sample_alert_session, sample_llm_interaction):
         """Test successful LLM interaction creation."""
         # Create session first
@@ -137,6 +141,7 @@ class TestHistoryRepository:
         assert interactions[0].prompt_text == sample_llm_interaction.prompt_text
         assert interactions[0].response_text == sample_llm_interaction.response_text
     
+    @pytest.mark.unit
     def test_create_mcp_communication_success(self, repository, sample_alert_session, sample_mcp_communication):
         """Test successful MCP communication creation."""
         # Create session first
@@ -153,6 +158,7 @@ class TestHistoryRepository:
         assert communications[0].server_name == sample_mcp_communication.server_name
         assert communications[0].tool_name == sample_mcp_communication.tool_name
     
+    @pytest.mark.unit
     def test_get_alert_sessions_with_filters(self, repository, sample_alert_session):
         """Test getting alert sessions with various filters."""
         # Create multiple sessions with different attributes
@@ -185,6 +191,7 @@ class TestHistoryRepository:
         assert len(result["sessions"]) == 1
         assert result["sessions"][0].session_id == session1.session_id
     
+    @pytest.mark.unit
     def test_get_alert_sessions_with_date_filters(self, repository):
         """Test getting alert sessions with date range filters."""
         # Create sessions with different timestamps
@@ -224,6 +231,7 @@ class TestHistoryRepository:
         assert len(result["sessions"]) == 1
         assert result["sessions"][0].session_id == old_session.session_id
     
+    @pytest.mark.unit
     def test_get_alert_sessions_with_pagination(self, repository):
         """Test getting alert sessions with pagination."""
         # Create multiple sessions
@@ -257,6 +265,7 @@ class TestHistoryRepository:
         assert len(result["sessions"]) == 1
         assert result["pagination"]["page"] == 3
     
+    @pytest.mark.unit
     def test_get_session_timeline_chronological_order(self, repository, sample_alert_session):
         """Test session timeline reconstruction with chronological ordering."""
         # Create session
@@ -320,6 +329,7 @@ class TestHistoryRepository:
         for i in range(len(events) - 1):
             assert events[i]["timestamp"] <= events[i + 1]["timestamp"]
     
+    @pytest.mark.unit
     def test_get_active_sessions(self, repository):
         """Test getting active sessions."""
         # Create active and completed sessions
@@ -354,6 +364,7 @@ class TestHistoryRepository:
         assert active_sessions[0].session_id == active_session.session_id
         assert active_sessions[0].status == "in_progress"
     
+    @pytest.mark.unit
     def test_cleanup_old_sessions(self, repository):
         """Test cleanup of old sessions."""
         # Create old and new sessions
@@ -393,6 +404,7 @@ class TestHistoryRepository:
         assert repository.get_alert_session("old-session") is None
         assert repository.get_alert_session("new-session") is not None
     
+    @pytest.mark.unit
     def test_complex_filter_combinations(self, repository):
         """Test complex filter combinations with AND logic."""
         # Create sessions with various attributes
@@ -478,11 +490,13 @@ class TestHistoryRepositoryErrorHandling:
         
         return HistoryRepository(mock_session)
     
+    @pytest.mark.unit
     def test_create_alert_session_database_error(self, repository_with_session_error, sample_alert_session):
         """Test alert session creation with database error."""
         result = repository_with_session_error.create_alert_session(sample_alert_session)
         assert result is None
     
+    @pytest.mark.unit
     def test_get_alert_sessions_database_error(self, repository_with_session_error):
         """Test getting alert sessions with database error."""
         result = repository_with_session_error.get_alert_sessions()
@@ -491,11 +505,13 @@ class TestHistoryRepositoryErrorHandling:
         assert result["sessions"] == []
         assert result["pagination"]["total_items"] == 0
     
+    @pytest.mark.unit
     def test_get_session_timeline_database_error(self, repository_with_session_error):
         """Test getting session timeline with database error."""
         result = repository_with_session_error.get_session_timeline("test-session")
         assert result is None
     
+    @pytest.mark.unit
     def test_cleanup_old_sessions_database_error(self, repository_with_session_error):
         """Test cleanup old sessions with database error."""
         result = repository_with_session_error.cleanup_old_sessions(90)
@@ -557,6 +573,7 @@ class TestHistoryRepositoryPerformance:
         
         return repository
     
+    @pytest.mark.unit
     def test_pagination_performance_large_dataset(self, repository_with_large_dataset):
         """Test pagination performance with large dataset."""
         # Test that pagination works efficiently with large dataset
@@ -571,6 +588,7 @@ class TestHistoryRepositoryPerformance:
         assert len(result["sessions"]) == 10
         assert result["pagination"]["page"] == 5
     
+    @pytest.mark.unit
     def test_filtering_performance_large_dataset(self, repository_with_large_dataset):
         """Test filtering performance with large dataset."""
         # Test status filter performance

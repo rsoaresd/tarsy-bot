@@ -61,12 +61,14 @@ class TestHistoryService:
             service._is_healthy = True
             return service
     
+    @pytest.mark.unit
     def test_initialization_enabled(self, history_service, mock_settings):
         """Test service initialization when history is enabled."""
         assert history_service.is_enabled == True
         assert history_service.settings.history_enabled == True
         assert history_service.settings.history_database_url == "sqlite:///test_history.db"
     
+    @pytest.mark.unit
     def test_initialization_disabled(self):
         """Test service initialization when history is disabled."""
         mock_settings = Mock(spec=Settings)
@@ -76,6 +78,7 @@ class TestHistoryService:
             service = HistoryService()
             assert service.is_enabled == False
     
+    @pytest.mark.unit
     def test_enabled_property(self, history_service):
         """Test the enabled property."""
         assert history_service.enabled == True
@@ -83,6 +86,69 @@ class TestHistoryService:
         history_service.is_enabled = False
         assert history_service.enabled == False
     
+    @pytest.mark.unit
+    @patch('tarsy.services.history_service.DatabaseManager')
+    def test_initialize_success(self, mock_db_manager_class, mock_settings):
+        """Test successful service initialization."""
+        mock_db_instance = Mock()
+        mock_db_manager_class.return_value = mock_db_instance
+        
+        with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
+            service = HistoryService()
+            result = service.initialize()
+            
+            assert result == True
+            assert service._initialization_attempted == True
+            assert service._is_healthy == True
+            mock_db_instance.initialize.assert_called_once()
+            mock_db_instance.create_tables.assert_called_once()
+    
+    @pytest.mark.unit
+    @patch('tarsy.services.history_service.DatabaseManager')
+    def test_initialize_database_failure(self, mock_db_manager_class, mock_settings):
+        """Test initialization with database connection failure."""
+        mock_db_manager_class.side_effect = Exception("Database connection failed")
+        
+        with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
+            service = HistoryService()
+            result = service.initialize()
+            
+            assert result == False
+            assert service._initialization_attempted == True
+            assert service._is_healthy == False
+    
+    @pytest.mark.unit
+    @patch('tarsy.services.history_service.DatabaseManager')
+    def test_initialize_schema_creation_failure(self, mock_db_manager_class, mock_settings):
+        """Test initialization with schema creation failure."""
+        mock_db_instance = Mock()
+        mock_db_instance.initialize.return_value = None
+        mock_db_instance.create_tables.side_effect = Exception("Schema creation failed")
+        mock_db_manager_class.return_value = mock_db_instance
+        
+        with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
+            service = HistoryService()
+            result = service.initialize()
+            
+            assert result == False
+            assert service._initialization_attempted == True
+            assert service._is_healthy == False
+    
+    @pytest.mark.unit
+    def test_initialize_disabled_service(self):
+        """Test initialization when history service is disabled."""
+        mock_settings = Mock(spec=Settings)
+        mock_settings.history_enabled = False
+        
+        with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
+            service = HistoryService()
+            result = service.initialize()
+            
+            assert result == False
+            assert service._initialization_attempted == False  # Should not attempt when disabled
+            assert service._is_healthy == False
+    
+    @pytest.mark.unit
     @patch('tarsy.services.history_service.HistoryRepository')
     def test_get_repository_context_manager(self, mock_repo_class, history_service, mock_db_manager):
         """Test the repository context manager."""
@@ -94,6 +160,7 @@ class TestHistoryService:
         with history_service.get_repository() as repo:
             assert repo == mock_repo_instance
     
+    @pytest.mark.unit
     @patch('tarsy.services.history_service.HistoryRepository')
     def test_get_repository_disabled_service(self, mock_repo_class, history_service):
         """Test repository access when service is disabled."""
@@ -102,6 +169,7 @@ class TestHistoryService:
         with history_service.get_repository() as repo:
             assert repo is None
     
+    @pytest.mark.unit
     def test_create_session_success(self, history_service, mock_repository):
         """Test successful session creation."""
         with patch.object(history_service, 'get_repository') as mock_get_repo:
@@ -118,6 +186,7 @@ class TestHistoryService:
             assert session_id == "test-session-id"
             mock_repository.create_alert_session.assert_called_once()
     
+    @pytest.mark.unit
     def test_create_session_disabled_service(self, history_service):
         """Test session creation when service is disabled."""
         history_service.is_enabled = False
@@ -131,6 +200,7 @@ class TestHistoryService:
         
         assert session_id is None
     
+    @pytest.mark.unit
     def test_create_session_exception_handling(self, history_service):
         """Test session creation with exception handling."""
         with patch.object(history_service, 'get_repository') as mock_get_repo:
@@ -145,6 +215,7 @@ class TestHistoryService:
             
             assert session_id is None
     
+    @pytest.mark.unit
     def test_update_session_status_success(self, history_service, mock_repository):
         """Test successful session status update."""
         mock_session = Mock(spec=AlertSession)
@@ -164,6 +235,7 @@ class TestHistoryService:
             assert mock_session.status == "completed"
             mock_repository.update_alert_session.assert_called_once_with(mock_session)
     
+    @pytest.mark.unit
     def test_update_session_status_with_completion(self, history_service, mock_repository):
         """Test session status update with completion timestamp."""
         mock_session = Mock(spec=AlertSession)
@@ -182,6 +254,7 @@ class TestHistoryService:
             assert mock_session.status == "completed"
             assert mock_session.completed_at is not None
     
+    @pytest.mark.unit
     def test_update_session_status_disabled_service(self, history_service):
         """Test session status update when service is disabled."""
         history_service.is_enabled = False
@@ -193,6 +266,7 @@ class TestHistoryService:
         
         assert result == False
     
+    @pytest.mark.unit
     def test_log_llm_interaction_success(self, history_service, mock_repository):
         """Test successful LLM interaction logging."""
         with patch.object(history_service, 'get_repository') as mock_get_repo:
@@ -210,6 +284,7 @@ class TestHistoryService:
             assert result == True
             mock_repository.create_llm_interaction.assert_called_once()
     
+    @pytest.mark.unit
     def test_log_mcp_communication_success(self, history_service, mock_repository):
         """Test successful MCP communication logging."""
         with patch.object(history_service, 'get_repository') as mock_get_repo:
@@ -228,6 +303,7 @@ class TestHistoryService:
             assert result == True
             mock_repository.create_mcp_communication.assert_called_once()
     
+    @pytest.mark.unit
     def test_get_sessions_list_success(self, history_service, mock_repository):
         """Test successful sessions list retrieval."""
         mock_sessions = [Mock(spec=AlertSession) for _ in range(3)]
@@ -250,6 +326,7 @@ class TestHistoryService:
             assert total_count == 3
             mock_repository.get_alert_sessions.assert_called_once()
     
+    @pytest.mark.unit
     def test_get_sessions_list_disabled_service(self, history_service):
         """Test sessions list retrieval when service is disabled."""
         history_service.is_enabled = False
@@ -259,6 +336,7 @@ class TestHistoryService:
         assert sessions == []
         assert total_count == 0
     
+    @pytest.mark.unit
     def test_get_session_timeline_success(self, history_service, mock_repository):
         """Test successful session timeline retrieval."""
         mock_timeline_data = {
@@ -281,6 +359,7 @@ class TestHistoryService:
             assert timeline["session_info"]["session_id"] == "test-session-id"
             assert len(timeline["chronological_timeline"]) == 2
     
+    @pytest.mark.unit
     def test_test_database_connection_success(self, history_service, mock_repository):
         """Test successful database connection test."""
         with patch.object(history_service, 'get_repository') as mock_get_repo:
@@ -292,6 +371,7 @@ class TestHistoryService:
             assert result == True
             mock_repository.get_alert_sessions.assert_called_once_with(page=1, page_size=1)
     
+    @pytest.mark.unit
     def test_test_database_connection_failure(self, history_service):
         """Test database connection test failure."""
         with patch.object(history_service, 'get_repository') as mock_get_repo:
@@ -301,6 +381,7 @@ class TestHistoryService:
             
             assert result == False
     
+    @pytest.mark.unit
     def test_health_check(self, history_service):
         """Test health check functionality."""
         health = history_service.health_check()
@@ -310,6 +391,7 @@ class TestHistoryService:
         assert "database_url" in health
         assert "retention_days" in health
     
+    @pytest.mark.unit
     def test_get_active_sessions(self, history_service, mock_repository):
         """Test active sessions retrieval."""
         mock_active_sessions = [Mock(spec=AlertSession) for _ in range(2)]
@@ -324,6 +406,7 @@ class TestHistoryService:
             assert len(active_sessions) == 2
             mock_repository.get_active_sessions.assert_called_once()
     
+    @pytest.mark.unit
     def test_cleanup_old_sessions(self, history_service, mock_repository):
         """Test cleanup of old sessions."""
         mock_repository.cleanup_old_sessions.return_value = 5
@@ -336,11 +419,110 @@ class TestHistoryService:
             
             assert cleaned_count == 5
             mock_repository.cleanup_old_sessions.assert_called_once()
+    
+    @pytest.mark.unit
+    @patch('time.sleep')
+    def test_retry_database_operation_success_after_retry(self, mock_sleep, history_service):
+        """Test operation succeeds after transient failure."""
+        call_count = 0
+        
+        def mock_operation():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("database is locked")
+            return "success"
+        
+        result = history_service._retry_database_operation("test_operation", mock_operation)
+        
+        assert result == "success"
+        assert call_count == 2
+        mock_sleep.assert_called_once()  # Should have slept once for retry
+    
+    @pytest.mark.unit
+    @patch('time.sleep')
+    def test_retry_database_operation_exhausts_retries(self, mock_sleep, history_service):
+        """Test operation fails after max retries."""
+        def mock_operation():
+            raise Exception("database is locked")
+        
+        result = history_service._retry_database_operation("test_operation", mock_operation)
+        
+        assert result is None
+        assert mock_sleep.call_count == history_service.max_retries  # Should retry max_retries times
+    
+    @pytest.mark.unit
+    @patch('time.sleep')
+    def test_retry_database_operation_non_retryable_error(self, mock_sleep, history_service):
+        """Test operation fails immediately on non-retryable error."""
+        def mock_operation():
+            raise Exception("syntax error")  # Non-retryable error
+        
+        result = history_service._retry_database_operation("test_operation", mock_operation)
+        
+        assert result is None
+        mock_sleep.assert_not_called()  # Should not retry for non-retryable errors
+    
+    @pytest.mark.unit
+    def test_get_sessions_dict_format(self, history_service, mock_repository):
+        """Test get_sessions method returns dict format (different from get_sessions_list)."""
+        mock_sessions = [Mock(spec=AlertSession) for _ in range(2)]
+        expected_result = {
+            "sessions": mock_sessions,
+            "pagination": {"page": 1, "page_size": 20, "total_pages": 1, "total_items": 2}
+        }
+        mock_repository.get_alert_sessions.return_value = expected_result
+        
+        with patch.object(history_service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = mock_repository
+            mock_get_repo.return_value.__exit__.return_value = None
+            
+            result = history_service.get_sessions(status="completed", page=1, page_size=20)
+            
+            assert result == expected_result
+            assert isinstance(result, dict)  # Different from get_sessions_list which returns tuple
+            mock_repository.get_alert_sessions.assert_called_once_with(
+                status="completed",
+                agent_type=None,
+                alert_type=None,
+                start_date=None,
+                end_date=None,
+                page=1,
+                page_size=20
+            )
+    
+    @pytest.mark.unit
+    @patch('tarsy.services.history_service.DatabaseManager')
+    def test_shutdown_cleanup(self, mock_db_manager_class, mock_settings):
+        """Test graceful service shutdown."""
+        mock_db_instance = Mock()
+        mock_db_manager_class.return_value = mock_db_instance
+        
+        with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
+            service = HistoryService()
+            service.db_manager = mock_db_instance
+            
+            service.shutdown()
+            
+            mock_db_instance.close.assert_called_once()
+    
+    @pytest.mark.unit
+    def test_shutdown_with_exception_handling(self, history_service):
+        """Test shutdown handles exceptions gracefully."""
+        mock_db_manager = Mock()
+        mock_db_manager.close.side_effect = Exception("Close failed")
+        history_service.db_manager = mock_db_manager
+        
+        # Should not raise exception
+        history_service.shutdown()
+        
+        mock_db_manager.close.assert_called_once()
 
 
 class TestHistoryServiceGlobalInstance:
     """Test suite for global history service instance management."""
     
+    @pytest.mark.unit
     @patch('tarsy.services.history_service._history_service', None)
     def test_get_history_service_singleton(self):
         """Test that get_history_service returns a singleton instance."""
@@ -357,6 +539,7 @@ class TestHistoryServiceGlobalInstance:
             assert service1 == service2
             mock_service_class.assert_called_once()
     
+    @pytest.mark.unit
     @patch('tarsy.services.history_service._history_service', None)
     def test_get_history_service_initialization(self):
         """Test that get_history_service initializes the service."""
@@ -387,6 +570,7 @@ class TestHistoryServiceErrorHandling:
             service._is_healthy = False  # Simulate unhealthy state
             return service
     
+    @pytest.mark.unit
     def test_graceful_degradation_repository_unavailable(self, history_service_with_errors):
         """Test graceful degradation when repository is unavailable."""
         with patch.object(history_service_with_errors, 'get_repository') as mock_get_repo:
@@ -404,6 +588,7 @@ class TestHistoryServiceErrorHandling:
             assert sessions == []
             assert count == 0
     
+    @pytest.mark.unit
     def test_exception_handling_in_operations(self, history_service_with_errors):
         """Test exception handling in various operations."""
         with patch.object(history_service_with_errors, 'get_repository') as mock_get_repo:

@@ -56,6 +56,7 @@ class TestHistoryControllerEndpoints:
         
         return service
     
+    @pytest.mark.unit
     def test_get_sessions_list_success(self, app, client, mock_history_service):
         """Test successful sessions list retrieval."""
         # Mock response data
@@ -115,6 +116,7 @@ class TestHistoryControllerEndpoints:
         assert "status" in session
         assert "started_at" in session
     
+    @pytest.mark.unit
     def test_get_sessions_list_with_filters(self, app, client, mock_history_service):
         """Test sessions list with query parameters."""
         mock_history_service.get_sessions_list.return_value = ([], 0)
@@ -149,6 +151,7 @@ class TestHistoryControllerEndpoints:
         assert call_args.kwargs["page"] == 2
         assert call_args.kwargs["page_size"] == 10
     
+    @pytest.mark.unit
     def test_get_sessions_list_with_date_filters(self, app, client, mock_history_service):
         """Test sessions list with date range filters."""
         mock_history_service.get_sessions_list.return_value = ([], 0)
@@ -181,6 +184,7 @@ class TestHistoryControllerEndpoints:
         assert isinstance(filters["start_date"], datetime)
         assert isinstance(filters["end_date"], datetime)
     
+    @pytest.mark.unit
     def test_get_sessions_list_invalid_date_format(self, app, client, mock_history_service):
         """Test sessions list with invalid date format."""
         # Override FastAPI dependency
@@ -202,6 +206,7 @@ class TestHistoryControllerEndpoints:
         assert isinstance(error_details, list)
         assert any("datetime" in error.get("type", "") for error in error_details)
     
+    @pytest.mark.unit
     def test_get_sessions_list_service_disabled(self, app, client, mock_history_service):
         """Test sessions list when history service is disabled."""
         mock_history_service.enabled = False
@@ -220,6 +225,7 @@ class TestHistoryControllerEndpoints:
         assert len(data["sessions"]) == 0
         assert data["pagination"]["total_items"] == 0
     
+    @pytest.mark.unit
     def test_get_sessions_list_service_error(self, app, client, mock_history_service):
         """Test sessions list with service error."""
         mock_history_service.get_sessions_list.side_effect = Exception("Service error")
@@ -236,6 +242,7 @@ class TestHistoryControllerEndpoints:
         # The actual error message varies, just check it's an error response
         assert "detail" in response.json()
     
+    @pytest.mark.unit
     def test_get_session_detail_success(self, app, client, mock_history_service):
         """Test successful session detail retrieval."""
         # Mock timeline data with correct structure (matches repository output)
@@ -314,6 +321,7 @@ class TestHistoryControllerEndpoints:
         assert "duration_ms" in data
         assert "summary" in data
     
+    @pytest.mark.unit
     def test_get_session_detail_not_found(self, app, client, mock_history_service):
         """Test session detail for non-existent session."""
         mock_history_service.get_session_timeline.return_value = None
@@ -330,6 +338,7 @@ class TestHistoryControllerEndpoints:
         # Check that the error message contains session reference
         assert "non-existent-session" in response.json()["detail"]
     
+    @pytest.mark.unit
     def test_get_session_detail_service_disabled(self, app, client, mock_history_service):
         """Test session detail when service is disabled."""
         mock_history_service.enabled = False
@@ -347,6 +356,7 @@ class TestHistoryControllerEndpoints:
         assert response.status_code == 404
         assert "test-session" in response.json()["detail"]
     
+    @pytest.mark.unit
     def test_get_session_detail_service_error(self, app, client, mock_history_service):
         """Test session detail with service error."""
         mock_history_service.get_session_timeline.side_effect = Exception("Service error")
@@ -362,6 +372,7 @@ class TestHistoryControllerEndpoints:
         assert response.status_code == 500
         assert "detail" in response.json()
     
+    @pytest.mark.unit
     def test_health_check_healthy_service(self, app, client, mock_history_service):
         """Test health check with healthy service."""
         mock_history_service.enabled = True
@@ -388,6 +399,7 @@ class TestHistoryControllerEndpoints:
         assert details["history_enabled"] == True
         assert "database_url" in details
     
+    @pytest.mark.unit
     def test_health_check_disabled_service(self, app, client, mock_history_service):
         """Test health check with disabled service."""
         mock_history_service.enabled = False
@@ -407,6 +419,7 @@ class TestHistoryControllerEndpoints:
         assert data["details"]["history_enabled"] == False
         assert "message" in data["details"]
     
+    @pytest.mark.unit
     def test_health_check_database_failure(self, app, client, mock_history_service):
         """Test health check with database connection failure."""
         mock_history_service.enabled = True
@@ -426,6 +439,7 @@ class TestHistoryControllerEndpoints:
         assert data["status"] == "unhealthy"
         assert data["details"]["database_connection"] == "failed"
     
+    @pytest.mark.unit
     def test_health_check_exception_handling(self, app, client, mock_history_service):
         """Test health check with exception."""
         mock_history_service.enabled = True
@@ -469,6 +483,7 @@ class TestHistoryControllerValidation:
         service.get_sessions_list.return_value = ([], 0)
         return service
     
+    @pytest.mark.unit
     def test_sessions_list_pagination_validation(self, client, mock_history_service):
         """Test pagination parameter validation."""
         with patch('tarsy.controllers.history_controller.get_history_service', return_value=mock_history_service):
@@ -488,6 +503,7 @@ class TestHistoryControllerValidation:
             response = client.get("/api/v1/history/sessions?page_size=1001")
             assert response.status_code == 422
     
+    @pytest.mark.unit
     def test_sessions_list_enum_validation(self, app, client, mock_history_service):
         """Test enum parameter validation."""
         mock_history_service.get_sessions_list.return_value = ([], 0)
@@ -508,6 +524,7 @@ class TestHistoryControllerValidation:
         # Clean up
         app.dependency_overrides.clear()
     
+    @pytest.mark.unit
     def test_session_id_validation(self, app, client, mock_history_service):
         """Test session ID parameter validation."""
         mock_history_service.get_session_timeline.return_value = None
@@ -526,6 +543,7 @@ class TestHistoryControllerValidation:
         # Clean up
         app.dependency_overrides.clear()
     
+    @pytest.mark.unit
     def test_date_format_validation_edge_cases(self, app, client, mock_history_service):
         """Test date format validation edge cases."""
         # Override FastAPI dependency
@@ -566,6 +584,7 @@ class TestHistoryControllerResponseFormat:
         """Create test client."""
         return TestClient(app)
     
+    @pytest.mark.unit
     def test_sessions_list_response_format(self, app, client):
         """Test that sessions list response matches expected format."""
         mock_service = Mock(spec=HistoryService)
@@ -631,6 +650,7 @@ class TestHistoryControllerResponseFormat:
         assert isinstance(pagination["page"], int)
         assert isinstance(pagination["total_items"], int)
     
+    @pytest.mark.unit
     def test_session_detail_response_format(self, app, client):
         """Test that session detail response matches expected format."""
         mock_service = Mock(spec=HistoryService)
@@ -702,6 +722,7 @@ class TestHistoryControllerResponseFormat:
         summary = data["summary"]
         assert isinstance(summary, dict)
     
+    @pytest.mark.unit
     def test_health_check_response_format(self, app, client):
         """Test that health check response matches expected format."""
         mock_service = Mock(spec=HistoryService)
@@ -758,6 +779,7 @@ class TestHistoryControllerIntegration:
         """Create test client."""
         return TestClient(app)
     
+    @pytest.mark.unit
     def test_complex_filtering_scenario(self, app, client):
         """Test complex filtering scenario with multiple parameters."""
         mock_service = Mock(spec=HistoryService)
@@ -795,6 +817,7 @@ class TestHistoryControllerIntegration:
         assert "start_date" in filters
         assert "end_date" in filters
     
+    @pytest.mark.unit
     def test_real_world_error_scenarios(self, app, client):
         """Test real-world error scenarios."""
         mock_service = Mock(spec=HistoryService)
@@ -814,6 +837,7 @@ class TestHistoryControllerIntegration:
         assert response.status_code == 500
         assert "detail" in response.json()
     
+    @pytest.mark.unit
     def test_concurrent_request_handling(self, app, client):
         """Test that controller handles concurrent requests properly."""
         mock_service = Mock(spec=HistoryService)
