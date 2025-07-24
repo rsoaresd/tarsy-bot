@@ -8,11 +8,9 @@ from datetime import datetime
 from tarsy.utils.logger import get_module_logger
 from tarsy.models.websocket_models import (
     ChannelType, 
-    IncomingMessage, 
     OutgoingMessage,
     SubscriptionMessage,
     SubscriptionResponse,
-    ErrorMessage
 )
 
 logger = get_module_logger(__name__)

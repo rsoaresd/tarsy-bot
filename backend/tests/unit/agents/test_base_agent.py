@@ -5,8 +5,6 @@ Tests the base agent functionality with mocked dependencies to ensure
 proper interface implementation and parameter handling.
 """
 
-import json
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -15,7 +13,6 @@ from tarsy.agents.base_agent import BaseAgent
 from tarsy.integrations.llm.client import LLMClient
 from tarsy.integrations.mcp.client import MCPClient
 from tarsy.models.alert import Alert
-from tarsy.models.llm import LLMMessage
 from tarsy.services.mcp_server_registry import MCPServerRegistry
 
 

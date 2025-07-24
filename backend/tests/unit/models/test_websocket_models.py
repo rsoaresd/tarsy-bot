@@ -2,23 +2,22 @@
 Unit tests for WebSocket models.
 """
 
-import pytest
 from datetime import datetime
+
+import pytest
 from pydantic import ValidationError
 
 from tarsy.models.websocket_models import (
-    WebSocketMessage,
-    SubscriptionMessage,
-    SubscriptionResponse,
-    ConnectionEstablished,
-    ErrorMessage,
-    DashboardUpdate,
-    SessionUpdate,
-    SystemHealthUpdate,
     AlertStatusUpdate,
     ChannelType,
-    IncomingMessage,
-    OutgoingMessage
+    ConnectionEstablished,
+    DashboardUpdate,
+    ErrorMessage,
+    SessionUpdate,
+    SubscriptionMessage,
+    SubscriptionResponse,
+    SystemHealthUpdate,
+    WebSocketMessage,
 )
 
 

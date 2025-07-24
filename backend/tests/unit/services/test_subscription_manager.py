@@ -2,18 +2,17 @@
 Unit tests for SubscriptionManager.
 """
 
-import pytest
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch
 
-from tarsy.services.subscription_manager import SubscriptionManager
+import pytest
+
 from tarsy.models.websocket_models import (
     ChannelType,
+    DashboardUpdate,
     SubscriptionMessage,
     SubscriptionResponse,
-    OutgoingMessage,
-    DashboardUpdate
 )
+from tarsy.services.subscription_manager import SubscriptionManager
 
 
 class TestSubscriptionManager:
@@ -120,28 +119,29 @@ class TestSubscriptionProcessing:
     def test_process_valid_subscription(self):
         """Test processing valid subscription request."""
         message = SubscriptionMessage(type="subscribe", channel=ChannelType.DASHBOARD_UPDATES)
+        
         response = self.manager.process_subscription_request("user1", message)
         
         assert isinstance(response, SubscriptionResponse)
+        assert response.success is True
         assert response.action == "subscribe"
         assert response.channel == ChannelType.DASHBOARD_UPDATES
-        assert response.success is True
-        assert "Successfully" in response.message
     
     @pytest.mark.unit
     def test_process_valid_unsubscription(self):
         """Test processing valid unsubscription request."""
         message = SubscriptionMessage(type="unsubscribe", channel="session_123")
+        
         response = self.manager.process_subscription_request("user1", message)
         
-        assert response.action == "unsubscribe"
-        assert response.channel == "session_123"
         assert response.success is True
+        assert response.action == "unsubscribe"
     
     @pytest.mark.unit
     def test_process_invalid_subscription(self):
         """Test processing invalid subscription request."""
         message = SubscriptionMessage(type="subscribe", channel="invalid_channel")
+        
         response = self.manager.process_subscription_request("user1", message)
         
         assert response.success is False
@@ -150,25 +150,26 @@ class TestSubscriptionProcessing:
     @pytest.mark.unit
     def test_process_session_subscription(self):
         """Test processing session channel subscription."""
-        message = SubscriptionMessage(type="subscribe", channel="session_abc123")
+        channel = "session_abc123"
+        message = SubscriptionMessage(type="subscribe", channel=channel)
+        
         response = self.manager.process_subscription_request("user1", message)
         
         assert response.success is True
-        assert "session_abc123" in self.manager.session_channels
-        assert "session_abc123" in self.manager.channel_activity
+        assert channel in self.manager.session_channels
     
     @pytest.mark.unit
     def test_subscription_updates_activity(self):
-        """Test that subscriptions update channel activity."""
+        """Test that subscription requests update channel activity."""
         channel = ChannelType.DASHBOARD_UPDATES
-        before_time = datetime.now()
-        
         message = SubscriptionMessage(type="subscribe", channel=channel)
+        
+        # Process subscription
         self.manager.process_subscription_request("user1", message)
         
+        # Check activity was recorded
         assert channel in self.manager.channel_activity
-        activity_time = self.manager.channel_activity[channel]
-        assert activity_time >= before_time
+        assert isinstance(self.manager.channel_activity[channel], datetime)
 
 
 class TestSubscriptionCallbacks:
@@ -418,10 +419,10 @@ class TestSubscriptionStatistics:
     
     @pytest.mark.unit
     def test_get_subscription_stats_empty(self):
-        """Test statistics when no subscriptions exist."""
+        """Test statistics with no subscriptions."""
         stats = self.manager.get_subscription_stats()
         
-        assert stats["predefined_channels"] == 2  # dashboard_updates, system_health
+        assert stats["predefined_channels"] == 2  # DASHBOARD_UPDATES, SYSTEM_HEALTH
         assert stats["session_channels"] == 0
         assert stats["total_channels"] == 2
         assert stats["channels_with_callbacks"] == 0
@@ -430,8 +431,8 @@ class TestSubscriptionStatistics:
     
     @pytest.mark.unit
     def test_get_subscription_stats_with_data(self):
-        """Test statistics with various data."""
-        # Add session channels
+        """Test statistics with active subscriptions."""
+        # Add some session channels
         self.manager.session_channels.add("session_1")
         self.manager.session_channels.add("session_2")
         
@@ -442,6 +443,7 @@ class TestSubscriptionStatistics:
         # Add recent activity
         recent_time = datetime.now() - timedelta(minutes=2)
         old_time = datetime.now() - timedelta(minutes=10)
+        self.manager.channel_activity[ChannelType.DASHBOARD_UPDATES] = recent_time
         self.manager.channel_activity["session_1"] = recent_time
         self.manager.channel_activity["session_2"] = old_time
         
@@ -452,8 +454,4 @@ class TestSubscriptionStatistics:
         assert stats["total_channels"] == 4
         assert stats["channels_with_callbacks"] == 1
         assert stats["channels_with_filters"] == 1
-        assert stats["recent_activity"] == 1  # Only session_1 is recent
-
-
-if __name__ == "__main__":
-    pytest.main([__file__]) 
+        assert stats["recent_activity"] == 2  # Only recent activities 

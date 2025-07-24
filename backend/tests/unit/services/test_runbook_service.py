@@ -5,13 +5,13 @@ Tests HTTP operations for GitHub runbook downloads, URL conversion,
 authentication handling, error scenarios, and resource cleanup.
 """
 
-import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
+import pytest
 
-from tarsy.services.runbook_service import RunbookService
 from tarsy.config.settings import Settings
+from tarsy.services.runbook_service import RunbookService
 
 
 @pytest.mark.unit

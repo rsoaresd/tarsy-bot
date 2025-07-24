@@ -5,12 +5,13 @@ Tests agent class registration, instantiation, dependency injection,
 error handling, and validation of created agent instances.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
-from tarsy.services.agent_factory import AgentFactory
+import pytest
+
 from tarsy.integrations.llm.client import LLMClient
 from tarsy.integrations.mcp.client import MCPClient
+from tarsy.services.agent_factory import AgentFactory
 from tarsy.services.mcp_server_registry import MCPServerRegistry
 
 

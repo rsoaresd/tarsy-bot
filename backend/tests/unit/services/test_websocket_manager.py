@@ -5,13 +5,14 @@ Tests basic WebSocket management for alerts, dashboard integration through
 delegation, advanced broadcasting features, error handling, and cleanup logic.
 """
 
-import pytest
 import json
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch, call
+from unittest.mock import AsyncMock, Mock, patch
 
-from tarsy.services.websocket_manager import WebSocketManager
+import pytest
+
 from tarsy.models.alert import ProcessingStatus
+from tarsy.services.websocket_manager import WebSocketManager
 
 
 @pytest.mark.unit

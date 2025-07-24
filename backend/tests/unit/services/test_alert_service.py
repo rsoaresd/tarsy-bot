@@ -5,13 +5,14 @@ Tests the complete alert processing workflow including agent selection,
 delegation, error handling, progress tracking, and history management.
 """
 
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, Mock, patch
 
-from tarsy.services.alert_service import AlertService
-from tarsy.models.alert import Alert
+import pytest
+
 from tarsy.config.settings import Settings
+from tarsy.models.alert import Alert
+from tarsy.services.alert_service import AlertService
 
 
 @pytest.mark.unit

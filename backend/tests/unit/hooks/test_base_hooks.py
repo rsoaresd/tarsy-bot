@@ -5,21 +5,20 @@ Tests the foundational hook infrastructure including utility functions,
 context management, hook execution, and registration management.
 """
 
-import asyncio
+from datetime import datetime
+from typing import Any, Dict
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-import time
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, AsyncMock, patch
 
 from tarsy.hooks.base_hooks import (
-    generate_step_description,
-    generate_microsecond_timestamp,
-    HookContext,
     BaseEventHook,
+    BaseLLMHook,
+    BaseMCPHook,
+    HookContext,
     HookManager,
+    generate_step_description,
     get_hook_manager,
-    create_sync_hook_wrapper,
-    hook_decorator
 )
 
 
@@ -112,48 +111,6 @@ class TestGenerateStepDescription:
         
         description = generate_step_description("", context)
         assert description == "Execute "
-
-
-class TestGenerateMicrosecondTimestamp:
-    """Test the generate_microsecond_timestamp utility function."""
-
-    @pytest.mark.unit
-    def test_returns_datetime_with_timezone(self):
-        """Test that function returns datetime with UTC timezone."""
-        timestamp = generate_microsecond_timestamp()
-        
-        assert isinstance(timestamp, datetime)
-        assert timestamp.tzinfo == timezone.utc
-
-    @pytest.mark.unit
-    def test_microsecond_precision(self):
-        """Test that timestamp has microsecond precision."""
-        timestamp = generate_microsecond_timestamp()
-        
-        # Should have microsecond component (non-zero most of the time)
-        assert hasattr(timestamp, 'microsecond')
-        assert 0 <= timestamp.microsecond <= 999999
-
-    @pytest.mark.unit
-    def test_consecutive_timestamps_different(self):
-        """Test that consecutive calls return different timestamps."""
-        timestamp1 = generate_microsecond_timestamp()
-        timestamp2 = generate_microsecond_timestamp()
-        
-        # They should be different (at least by microseconds)
-        assert timestamp1 != timestamp2
-        assert timestamp2 > timestamp1
-
-    @pytest.mark.unit
-    def test_timestamp_recent(self):
-        """Test that timestamp is recent (within last second)."""
-        before = datetime.now(timezone.utc)
-        timestamp = generate_microsecond_timestamp()
-        after = datetime.now(timezone.utc)
-        
-        assert before <= timestamp <= after
-        assert (timestamp - before).total_seconds() < 1
-
 
 class TestHookContext:
     """Test the HookContext class for lifecycle and timing management."""
@@ -261,23 +218,7 @@ class TestHookContext:
         assert len(request_id) == 8
         assert request_id == context.request_id
 
-    @pytest.mark.unit
-    def test_get_duration_ms_without_times(self):
-        """Test duration calculation without start/end times."""
-        context = HookContext("test", "method")
-        duration = context.get_duration_ms()
-        
-        assert duration == 0
 
-    @pytest.mark.unit
-    def test_get_duration_ms_with_times(self):
-        """Test duration calculation with start/end times."""
-        context = HookContext("test", "method")
-        context.start_time = datetime.now(timezone.utc)
-        context.end_time = context.start_time + timedelta(milliseconds=1500)
-        
-        duration = context.get_duration_ms()
-        assert duration == 1500
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -468,29 +409,6 @@ class TestHookManager:
         assert all(hook in hook_manager.hooks["test.event"] for hook in test_hooks)
 
     @pytest.mark.unit
-    def test_unregister_hook_success(self, hook_manager, test_hooks):
-        """Test successful hook unregistration."""
-        hook = test_hooks[0]
-        hook_manager.register_hook("test.event", hook)
-        
-        result = hook_manager.unregister_hook("test.event", "hook1")
-        
-        assert result is True
-        assert len(hook_manager.hooks["test.event"]) == 0
-
-    @pytest.mark.unit
-    def test_unregister_hook_not_found(self, hook_manager):
-        """Test unregistering non-existent hook."""
-        result = hook_manager.unregister_hook("test.event", "nonexistent")
-        assert result is False
-
-    @pytest.mark.unit
-    def test_unregister_hook_event_not_found(self, hook_manager):
-        """Test unregistering hook from non-existent event."""
-        result = hook_manager.unregister_hook("nonexistent.event", "hook1")
-        assert result is False
-
-    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_trigger_hooks_success(self, hook_manager, test_hooks):
         """Test successful hook triggering."""
@@ -584,71 +502,6 @@ class TestHookManager:
         assert stats["success"] == 1
         assert stats["failed"] == 1
 
-    @pytest.mark.unit
-    def test_get_hook_stats(self, hook_manager, test_hooks):
-        """Test getting hook statistics."""
-        for i, hook in enumerate(test_hooks):
-            hook_manager.register_hook(f"event{i}", hook)
-        
-        # Disable one hook
-        test_hooks[1].disable()
-        
-        stats = hook_manager.get_hook_stats()
-        
-        assert stats["event_types"] == 3
-        assert stats["total_hooks"] == 3
-        assert stats["enabled_hooks"] == 2
-        assert "hook_status" in stats
-        
-        # Check hook status details
-        hook_status = stats["hook_status"]
-        assert len(hook_status) == 3
-        for event, hooks in hook_status.items():
-            assert len(hooks) == 1
-            hook_info = hooks[0]
-            assert "name" in hook_info
-            assert "enabled" in hook_info
-            assert "error_count" in hook_info
-
-
-class TestUtilityFunctions:
-    """Test utility functions for hook infrastructure."""
-
-    @pytest.mark.unit
-    def test_create_sync_hook_wrapper_basic(self):
-        """Test creating a sync hook wrapper."""
-        def sync_function(x, y):
-            return x + y
-        
-        async_wrapper = create_sync_hook_wrapper(sync_function)
-        
-        # Should be an async function
-        assert asyncio.iscoroutinefunction(async_wrapper)
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_create_sync_hook_wrapper_execution(self):
-        """Test execution of wrapped sync function."""
-        def multiply(x, y):
-            return x * y
-        
-        async_wrapper = create_sync_hook_wrapper(multiply)
-        result = await async_wrapper(3, 4)
-        
-        assert result == 12
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_create_sync_hook_wrapper_with_exception(self):
-        """Test wrapped sync function that raises exception."""
-        def failing_function():
-            raise ValueError("Test error")
-        
-        async_wrapper = create_sync_hook_wrapper(failing_function)
-        
-        with pytest.raises(ValueError, match="Test error"):
-            await async_wrapper()
-
 
 class TestGlobalHookManager:
     """Test global hook manager functionality."""
@@ -670,58 +523,480 @@ class TestGlobalHookManager:
         assert isinstance(manager, HookManager)
         assert hasattr(manager, 'register_hook')
         assert hasattr(manager, 'trigger_hooks')
-        assert hasattr(manager, 'get_hook_stats')
 
 
-class TestHookDecorator:
-    """Test the hook_decorator functionality."""
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_hook_decorator_async_function(self):
-        """Test hook decorator with async function."""
-        mock_hook_manager = Mock()
-        mock_hook_manager.trigger_hooks = AsyncMock()
+class TestBaseLLMHookUtilityMethods:
+    """Test BaseLLMHook utility methods for data extraction and processing."""
+    
+    class ConcreteLLMHook(BaseLLMHook):
+        """Concrete implementation for testing."""
+        def __init__(self):
+            super().__init__("test_llm_hook")
         
-        @hook_decorator(mock_hook_manager, "test_service")
-        async def async_test_method(self, param1, param2="default"):
-            return f"result_{param1}_{param2}"
-        
-        # Create a mock self object
-        mock_self = Mock()
-        
-        result = await async_test_method(mock_self, "value1", param2="value2")
-        
-        assert result == "result_value1_value2"
-        assert mock_hook_manager.trigger_hooks.call_count == 2
-        
-        # Check pre-hook call
-        pre_call = mock_hook_manager.trigger_hooks.call_args_list[0]
-        assert pre_call[0][0] == "test_service.pre"
-        
-        # Check post-hook call
-        post_call = mock_hook_manager.trigger_hooks.call_args_list[1]
-        assert post_call[0][0] == "test_service.post"
-        post_context = post_call[1]
-        assert post_context["result"] == "result_value1_value2"
-        assert post_context["success"] is True
+        async def process_llm_interaction(self, session_id: str, interaction_data: Dict[str, Any]) -> None:
+            pass  # No-op for testing
+    
+    @pytest.fixture
+    def llm_hook(self):
+        """Create concrete LLM hook instance for utility method testing."""
+        return self.ConcreteLLMHook()
 
     @pytest.mark.unit
-    def test_hook_decorator_sync_function(self):
-        """Test hook decorator with sync function."""
-        mock_hook_manager = Mock()
-        mock_hook_manager.trigger_hooks = AsyncMock()
+    def test_extract_response_text_string_result(self, llm_hook):
+        """Test response text extraction from string result."""
+        result = "This is a simple string response"
+        extracted = llm_hook._extract_response_text(result)
+        assert extracted == "This is a simple string response"
+
+    @pytest.mark.unit
+    def test_extract_response_text_dict_with_content(self, llm_hook):
+        """Test response text extraction from dict with content field."""
+        result = {"content": "Response content", "metadata": {"tokens": 150}}
+        extracted = llm_hook._extract_response_text(result)
+        assert extracted == "Response content"
+
+    @pytest.mark.unit
+    def test_extract_response_text_dict_with_text(self, llm_hook):
+        """Test response text extraction from dict with text field."""
+        result = {"text": "Text response", "status": "success"}
+        extracted = llm_hook._extract_response_text(result)
+        assert extracted == "Text response"
+
+    @pytest.mark.unit
+    def test_extract_response_text_dict_with_message(self, llm_hook):
+        """Test response text extraction from dict with message field."""
+        result = {"message": "Message response", "id": "msg_123"}
+        extracted = llm_hook._extract_response_text(result)
+        assert extracted == "Message response"
+
+    @pytest.mark.unit
+    def test_extract_response_text_object_with_content_attr(self, llm_hook):
+        """Test response text extraction from object with content attribute."""
+        class MockResponse:
+            def __init__(self):
+                self.content = "Object content response"
+                self.status = "completed"
         
-        @hook_decorator(mock_hook_manager, "test_service")
-        def sync_test_method(self, param):
-            return f"sync_result_{param}"
+        result = MockResponse()
+        extracted = llm_hook._extract_response_text(result)
+        assert extracted == "Object content response"
+
+    @pytest.mark.unit
+    def test_extract_response_text_object_with_text_attr(self, llm_hook):
+        """Test response text extraction from object with text attribute."""
+        class MockResponse:
+            def __init__(self):
+                self.text = "Object text response"
+                self.other = "ignored"
         
-        # Note: The decorator converts sync functions to run in async context
-        # In a real scenario, this would be called in an async context
-        mock_self = Mock()
+        result = MockResponse()
+        extracted = llm_hook._extract_response_text(result)
+        assert extracted == "Object text response"
+
+    @pytest.mark.unit
+    def test_extract_response_text_fallback_str_conversion(self, llm_hook):
+        """Test response text extraction with fallback to string conversion."""
+        result = {"complex": "data", "no_text_fields": True}
+        extracted = llm_hook._extract_response_text(result)
+        assert "complex" in extracted
+        assert "data" in extracted
+
+    @pytest.mark.unit
+    def test_extract_tool_calls_from_result_tool_calls(self, llm_hook):
+        """Test tool calls extraction from result with tool_calls field."""
+        args = {}
+        result = {"tool_calls": [{"name": "test_tool", "args": {"param": "value"}}]}
+        extracted = llm_hook._extract_tool_calls(args, result)
+        assert extracted == [{"name": "test_tool", "args": {"param": "value"}}]
+
+    @pytest.mark.unit
+    def test_extract_tool_calls_from_result_function_calls(self, llm_hook):
+        """Test tool calls extraction from result with function_calls field."""
+        args = {}
+        result = {"function_calls": [{"function": "test_func", "parameters": {}}]}
+        extracted = llm_hook._extract_tool_calls(args, result)
+        assert extracted == [{"function": "test_func", "parameters": {}}]
+
+    @pytest.mark.unit
+    def test_extract_tool_calls_from_args_tools(self, llm_hook):
+        """Test tool calls extraction from args with tools available."""
+        args = {"tools": [{"name": "available_tool", "description": "Test tool"}]}
+        result = {}
+        extracted = llm_hook._extract_tool_calls(args, result)
+        assert extracted == {"available_tools": [{"name": "available_tool", "description": "Test tool"}]}
+
+    @pytest.mark.unit
+    def test_extract_tool_calls_none_when_missing(self, llm_hook):
+        """Test tool calls extraction returns None when no tools present."""
+        args = {}
+        result = {}
+        extracted = llm_hook._extract_tool_calls(args, result)
+        assert extracted is None
+
+    @pytest.mark.unit
+    def test_extract_tool_results_tool_results_field(self, llm_hook):
+        """Test tool results extraction from tool_results field."""
+        result = {"tool_results": [{"tool": "test", "result": "success"}]}
+        extracted = llm_hook._extract_tool_results(result)
+        assert extracted == [{"tool": "test", "result": "success"}]
+
+    @pytest.mark.unit
+    def test_extract_tool_results_function_results_field(self, llm_hook):
+        """Test tool results extraction from function_results field."""
+        result = {"function_results": [{"function": "test", "output": "data"}]}
+        extracted = llm_hook._extract_tool_results(result)
+        assert extracted == [{"function": "test", "output": "data"}]
+
+    @pytest.mark.unit
+    def test_extract_tool_results_tool_outputs_field(self, llm_hook):
+        """Test tool results extraction from tool_outputs field."""
+        result = {"tool_outputs": [{"id": "1", "content": "output"}]}
+        extracted = llm_hook._extract_tool_results(result)
+        assert extracted == [{"id": "1", "content": "output"}]
+
+    @pytest.mark.unit
+    def test_extract_tool_results_none_when_missing(self, llm_hook):
+        """Test tool results extraction returns None when no results present."""
+        result = {"other": "data"}
+        extracted = llm_hook._extract_tool_results(result)
+        assert extracted is None
+
+    @pytest.mark.unit
+    def test_extract_token_usage_usage_field(self, llm_hook):
+        """Test token usage extraction from usage field."""
+        result = {"usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}}
+        extracted = llm_hook._extract_token_usage(result)
+        assert extracted == {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
+
+    @pytest.mark.unit
+    def test_extract_token_usage_token_usage_field(self, llm_hook):
+        """Test token usage extraction from token_usage field."""
+        result = {"token_usage": {"input": 15, "output": 25}}
+        extracted = llm_hook._extract_token_usage(result)
+        assert extracted == {"input": 15, "output": 25}
+
+    @pytest.mark.unit
+    def test_extract_token_usage_object_with_usage_attr(self, llm_hook):
+        """Test token usage extraction from object with usage attribute."""
+        class MockUsage:
+            def __init__(self):
+                self.prompt_tokens = 10
+                self.completion_tokens = 20
+            
+            def dict(self):
+                return {"prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens}
         
-        # The sync wrapper uses asyncio.run, so we need to test differently
-        assert callable(sync_test_method)
+        class MockResult:
+            def __init__(self):
+                self.usage = MockUsage()
+        
+        result = MockResult()
+        extracted = llm_hook._extract_token_usage(result)
+        assert extracted == {"prompt_tokens": 10, "completion_tokens": 20}
+
+    @pytest.mark.unit
+    def test_extract_token_usage_object_without_dict_method(self, llm_hook):
+        """Test token usage extraction from object without dict method."""
+        class MockUsage:
+            def __init__(self):
+                self.prompt_tokens = 10
+        
+        class MockResult:
+            def __init__(self):
+                self.usage = MockUsage()
+        
+        result = MockResult()
+        extracted = llm_hook._extract_token_usage(result)
+        assert isinstance(extracted, str)
+
+    @pytest.mark.unit
+    def test_extract_token_usage_none_when_missing(self, llm_hook):
+        """Test token usage extraction returns None when no usage present."""
+        result = {"other": "data"}
+        extracted = llm_hook._extract_token_usage(result)
+        assert extracted is None
+
+    @pytest.mark.unit
+    def test_calculate_duration_with_valid_times(self, llm_hook):
+        """Test duration calculation with valid start and end times."""
+        start_time = datetime(2023, 1, 1, 12, 0, 0)
+        end_time = datetime(2023, 1, 1, 12, 0, 1, 500000)  # 1.5 seconds later
+        duration = llm_hook._calculate_duration(start_time, end_time)
+        assert duration == 1500  # 1500 milliseconds
+
+    @pytest.mark.unit
+    def test_calculate_duration_with_missing_times(self, llm_hook):
+        """Test duration calculation with missing times."""
+        assert llm_hook._calculate_duration(None, None) == 0
+        assert llm_hook._calculate_duration(datetime.now(), None) == 0
+        assert llm_hook._calculate_duration(None, datetime.now()) == 0
+
+    @pytest.mark.unit
+    def test_infer_purpose_analysis_keywords(self, llm_hook):
+        """Test purpose inference for analysis keywords."""
+        test_cases = [
+            "Please analyze this error log",
+            "Can you investigate what happened?",
+            "I need an analysis of the performance issue"
+        ]
+        for prompt in test_cases:
+            purpose = llm_hook._infer_purpose(prompt)
+            assert purpose == "analysis"
+
+    @pytest.mark.unit
+    def test_infer_purpose_resolution_keywords(self, llm_hook):
+        """Test purpose inference for resolution keywords."""
+        test_cases = [
+            "Please fix this bug",
+            "How can I resolve this issue?",
+            "Help me solve this problem",
+            "Can you repair the configuration?"
+        ]
+        for prompt in test_cases:
+            purpose = llm_hook._infer_purpose(prompt)
+            assert purpose == "resolution"
+
+    @pytest.mark.unit
+    def test_infer_purpose_inspection_keywords(self, llm_hook):
+        """Test purpose inference for inspection keywords."""
+        test_cases = [
+            "Check the system status",
+            "Please inspect the logs",
+            "Can you check if everything is working?"
+        ]
+        for prompt in test_cases:
+            purpose = llm_hook._infer_purpose(prompt)
+            assert purpose == "inspection"
+
+    @pytest.mark.unit
+    def test_infer_purpose_planning_keywords(self, llm_hook):
+        """Test purpose inference for planning keywords."""
+        test_cases = [
+            "Create a plan for deployment",
+            "What strategy should we use?",
+            "Help me approach this problem"
+        ]
+        for prompt in test_cases:
+            purpose = llm_hook._infer_purpose(prompt)
+            assert purpose == "planning"
+
+    @pytest.mark.unit
+    def test_infer_purpose_default_processing(self, llm_hook):
+        """Test purpose inference defaults to processing."""
+        test_cases = [
+            "Hello world",
+            "Random text without keywords",
+            "Just some content"
+        ]
+        for prompt in test_cases:
+            purpose = llm_hook._infer_purpose(prompt)
+            assert purpose == "processing"
+
+    @pytest.mark.unit
+    def test_infer_purpose_case_insensitive(self, llm_hook):
+        """Test purpose inference is case insensitive."""
+        test_cases = [
+            ("ANALYZE this data", "analysis"),
+            ("FIX the issue", "resolution"),
+            ("CHECK the status", "inspection"),
+            ("PLAN the approach", "planning")
+        ]
+        for prompt, expected in test_cases:
+            purpose = llm_hook._infer_purpose(prompt)
+            assert purpose == expected
+
+
+class TestBaseMCPHookUtilityMethods:
+    """Test BaseMCPHook utility methods for data extraction and processing."""
+    
+    class ConcreteMCPHook(BaseMCPHook):
+        """Concrete implementation for testing."""
+        def __init__(self):
+            super().__init__("test_mcp_hook")
+        
+        async def process_mcp_communication(self, session_id: str, communication_data: Dict[str, Any]) -> None:
+            pass  # No-op for testing
+    
+    @pytest.fixture
+    def mcp_hook(self):
+        """Create concrete MCP hook instance for utility method testing."""
+        return self.ConcreteMCPHook()
+
+    @pytest.mark.unit
+    def test_infer_communication_type_tool_list(self, mcp_hook):
+        """Test communication type inference for tool list operations."""
+        test_cases = [
+            ("list_tools", {}),
+            ("discover_tools", {}),
+            ("get_tools", {})
+        ]
+        for method, args in test_cases:
+            comm_type = mcp_hook._infer_communication_type(method, args)
+            assert comm_type == "tool_list"
+
+    @pytest.mark.unit
+    def test_infer_communication_type_tool_call_by_method(self, mcp_hook):
+        """Test communication type inference for tool calls by method name."""
+        test_cases = [
+            ("call_tool", {}),
+            ("execute_tool", {}),
+            ("invoke_tool", {})
+        ]
+        for method, args in test_cases:
+            comm_type = mcp_hook._infer_communication_type(method, args)
+            assert comm_type == "tool_call"
+
+    @pytest.mark.unit
+    def test_infer_communication_type_tool_call_by_args(self, mcp_hook):
+        """Test communication type inference for tool calls by arguments."""
+        args = {"tool_name": "kubectl_get_pods"}
+        comm_type = mcp_hook._infer_communication_type("some_method", args)
+        assert comm_type == "tool_call"
+
+    @pytest.mark.unit
+    def test_infer_communication_type_result(self, mcp_hook):
+        """Test communication type inference for result operations."""
+        test_cases = [
+            ("get_result", {}),
+            ("tool_response", {}),
+            ("fetch_response", {})
+        ]
+        for method, args in test_cases:
+            comm_type = mcp_hook._infer_communication_type(method, args)
+            assert comm_type == "result"
+
+    @pytest.mark.unit
+    def test_infer_communication_type_default(self, mcp_hook):
+        """Test communication type inference defaults to tool_call."""
+        comm_type = mcp_hook._infer_communication_type("unknown_method", {})
+        assert comm_type == "tool_call"
+
+    @pytest.mark.unit
+    def test_extract_tool_result_none_input(self, mcp_hook):
+        """Test tool result extraction with None input."""
+        result = mcp_hook._extract_tool_result(None)
+        assert result is None
+
+    @pytest.mark.unit
+    def test_extract_tool_result_dict_input(self, mcp_hook):
+        """Test tool result extraction with dict input."""
+        input_dict = {"status": "success", "data": {"key": "value"}}
+        result = mcp_hook._extract_tool_result(input_dict)
+        assert result == input_dict
+
+    @pytest.mark.unit
+    def test_extract_tool_result_primitive_types(self, mcp_hook):
+        """Test tool result extraction with primitive types."""
+        test_cases = [
+            ("string_result", {"result": "string_result"}),
+            (42, {"result": 42}),
+            (3.14, {"result": 3.14}),
+            (True, {"result": True})
+        ]
+        for input_val, expected in test_cases:
+            result = mcp_hook._extract_tool_result(input_val)
+            assert result == expected
+
+    @pytest.mark.unit
+    def test_extract_tool_result_complex_object(self, mcp_hook):
+        """Test tool result extraction with complex object."""
+        class ComplexObject:
+            def __init__(self):
+                self.attr = "value"
+        
+        obj = ComplexObject()
+        result = mcp_hook._extract_tool_result(obj)
+        assert result == {"result": str(obj)}
+
+    @pytest.mark.unit
+    def test_extract_available_tools_dict_with_tools(self, mcp_hook):
+        """Test available tools extraction from dict with tools field."""
+        result = {"tools": [{"name": "tool1"}, {"name": "tool2"}]}
+        extracted = mcp_hook._extract_available_tools(result)
+        assert extracted == result
+
+    @pytest.mark.unit
+    def test_extract_available_tools_dict_as_list(self, mcp_hook):
+        """Test available tools extraction from dict that is actually a list."""
+        result = [{"name": "tool1"}, {"name": "tool2"}]
+        extracted = mcp_hook._extract_available_tools(result)
+        assert extracted == {"tools": result}
+
+    @pytest.mark.unit
+    def test_extract_available_tools_direct_list(self, mcp_hook):
+        """Test available tools extraction from direct list."""
+        result = [{"name": "tool1"}, {"name": "tool2"}]
+        extracted = mcp_hook._extract_available_tools(result)
+        assert extracted == {"tools": result}
+
+    @pytest.mark.unit
+    def test_extract_available_tools_none_when_missing(self, mcp_hook):
+        """Test available tools extraction returns None when no tools present."""
+        result = {"other": "data"}
+        extracted = mcp_hook._extract_available_tools(result)
+        assert extracted is None
+
+    @pytest.mark.unit
+    def test_calculate_duration_with_valid_times(self, mcp_hook):
+        """Test duration calculation with valid start and end times."""
+        start_time = datetime(2023, 1, 1, 12, 0, 0)
+        end_time = datetime(2023, 1, 1, 12, 0, 0, 750000)  # 750ms later
+        duration = mcp_hook._calculate_duration(start_time, end_time)
+        assert duration == 750
+
+    @pytest.mark.unit
+    def test_calculate_duration_with_missing_times(self, mcp_hook):
+        """Test duration calculation with missing times."""
+        assert mcp_hook._calculate_duration(None, None) == 0
+        assert mcp_hook._calculate_duration(datetime.now(), None) == 0
+        assert mcp_hook._calculate_duration(None, datetime.now()) == 0
+
+    @pytest.mark.unit
+    def test_generate_step_description_tool_list(self, mcp_hook):
+        """Test step description generation for tool list operations."""
+        description = mcp_hook._generate_step_description("tool_list", "k8s-server", None, {})
+        assert description == "Discover available tools from k8s-server"
+
+    @pytest.mark.unit
+    def test_generate_step_description_kubectl_with_namespace(self, mcp_hook):
+        """Test step description generation for kubectl with namespace."""
+        args = {"tool_arguments": {"namespace": "production"}}
+        description = mcp_hook._generate_step_description("tool_call", "k8s-server", "kubectl_get_pods", args)
+        assert description == "Execute kubectl_get_pods in production namespace"
+
+    @pytest.mark.unit
+    def test_generate_step_description_kubectl_without_namespace(self, mcp_hook):
+        """Test step description generation for kubectl without namespace."""
+        args = {"tool_arguments": {}}
+        description = mcp_hook._generate_step_description("tool_call", "k8s-server", "kubectl_status", args)
+        assert description == "Execute Kubernetes command kubectl_status"
+
+    @pytest.mark.unit
+    def test_generate_step_description_file_operation_with_path(self, mcp_hook):
+        """Test step description generation for file operations with path."""
+        args = {"tool_arguments": {"path": "/etc/config.yaml"}}
+        description = mcp_hook._generate_step_description("tool_call", "fs-server", "file_read", args)
+        assert description == "File operation file_read on /etc/config.yaml"
+
+    @pytest.mark.unit
+    def test_generate_step_description_file_operation_without_path(self, mcp_hook):
+        """Test step description generation for file operations without path."""
+        args = {"tool_arguments": {}}
+        description = mcp_hook._generate_step_description("tool_call", "fs-server", "file_list", args)
+        assert description == "Execute file operation file_list"
+
+    @pytest.mark.unit
+    def test_generate_step_description_generic_tool(self, mcp_hook):
+        """Test step description generation for generic tools."""
+        args = {}
+        description = mcp_hook._generate_step_description("tool_call", "api-server", "weather_check", args)
+        assert description == "Execute weather_check via api-server"
+
+    @pytest.mark.unit
+    def test_generate_step_description_fallback(self, mcp_hook):
+        """Test step description generation fallback case."""
+        description = mcp_hook._generate_step_description("unknown", "test-server", None, {})
+        assert description == "Communicate with test-server"
 
 
 if __name__ == "__main__":

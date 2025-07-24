@@ -2,22 +2,17 @@
 Unit tests for DashboardConnectionManager.
 """
 
-import pytest
-import asyncio
 import json
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
-from pydantic import ValidationError
 
-from tarsy.services.dashboard_connection_manager import DashboardConnectionManager
+import pytest
+
 from tarsy.models.websocket_models import (
     ChannelType,
-    SubscriptionMessage,
     SubscriptionResponse,
-    ErrorMessage,
-    SystemHealthUpdate,
-    OutgoingMessage
 )
+from tarsy.services.dashboard_connection_manager import DashboardConnectionManager
 
 
 @pytest.fixture

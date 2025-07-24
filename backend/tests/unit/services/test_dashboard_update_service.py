@@ -2,19 +2,18 @@
 Unit tests for DashboardUpdateService.
 """
 
-import pytest
-import asyncio
-from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, Mock, patch
-from dataclasses import asdict
 from collections import deque
+from dataclasses import asdict
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock
+
+import pytest
 
 from tarsy.services.dashboard_update_service import (
+    DashboardMetrics,
     DashboardUpdateService,
     SessionSummary,
-    DashboardMetrics
 )
-from tarsy.models.websocket_models import ChannelType
 
 
 class TestSessionSummary:

@@ -5,21 +5,19 @@ Tests the complete dashboard system integration with correct API usage
 and real-world scenarios.
 """
 
-import pytest
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
-from tarsy.services.dashboard_connection_manager import DashboardConnectionManager
-from tarsy.services.dashboard_broadcaster import DashboardBroadcaster
-from tarsy.services.dashboard_update_service import DashboardUpdateService
+import pytest
+
 from tarsy.hooks.dashboard_hooks import DashboardLLMHooks, DashboardMCPHooks
 from tarsy.models.websocket_models import (
     ChannelType,
-    DashboardUpdate,
-    SessionUpdate,
-    SystemHealthUpdate
 )
+from tarsy.services.dashboard_broadcaster import DashboardBroadcaster
+from tarsy.services.dashboard_connection_manager import DashboardConnectionManager
+from tarsy.services.dashboard_update_service import DashboardUpdateService
 
 
 @pytest.mark.integration

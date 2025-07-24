@@ -2,23 +2,19 @@
 Unit tests for DashboardBroadcaster and related functionality.
 """
 
-import pytest
 import asyncio
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, Mock, patch
-from collections import defaultdict
+from unittest.mock import AsyncMock, Mock
 
-from tarsy.services.dashboard_broadcaster import (
-    DashboardBroadcaster, 
-    MessageBatch
-)
+import pytest
+
 from tarsy.models.websocket_models import (
+    ChannelType,
     DashboardUpdate,
     SessionUpdate,
     SystemHealthUpdate,
-    OutgoingMessage,
-    ChannelType
 )
+from tarsy.services.dashboard_broadcaster import DashboardBroadcaster, MessageBatch
 
 
 class TestMessageBatch:

@@ -6,14 +6,15 @@ logging, and error handling with proper mocking of MCP SDK components.
 """
 
 import json
-import pytest
-from unittest.mock import AsyncMock, Mock, patch, call
 from contextlib import AsyncExitStack
+from unittest.mock import AsyncMock, Mock, call, patch
 
-from tarsy.integrations.mcp.client import MCPClient
+import pytest
+
 from tarsy.config.settings import Settings
-from tarsy.services.mcp_server_registry import MCPServerRegistry
+from tarsy.integrations.mcp.client import MCPClient
 from tarsy.models.mcp_config import MCPServerConfig
+from tarsy.services.mcp_server_registry import MCPServerRegistry
 
 
 @pytest.mark.unit

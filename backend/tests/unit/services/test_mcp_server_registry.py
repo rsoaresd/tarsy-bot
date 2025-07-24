@@ -5,11 +5,12 @@ Tests server configuration management, registry initialization, lookups,
 default configurations, and edge case handling.
 """
 
-import pytest
 from unittest.mock import Mock, patch
 
-from tarsy.services.mcp_server_registry import MCPServerRegistry
+import pytest
+
 from tarsy.models.mcp_config import MCPServerConfig
+from tarsy.services.mcp_server_registry import MCPServerRegistry
 
 
 @pytest.mark.unit

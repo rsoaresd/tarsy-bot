@@ -6,10 +6,10 @@ This script runs unit and integration tests with optional coverage reporting.
 It can run all tests or filter by test type (unit/integration).
 """
 
-import os
-import sys
-import subprocess
 import argparse
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -151,7 +151,7 @@ Examples:
     
     args = parser.parse_args()
     
-    print(f"🔬 Tarsy Backend Test Runner")
+    print("🔬 Tarsy Backend Test Runner")
     print(f"📁 Backend directory: {Path(__file__).parent.parent.absolute()}")
     print("-" * 80)
     

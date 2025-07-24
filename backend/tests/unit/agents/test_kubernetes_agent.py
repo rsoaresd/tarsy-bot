@@ -6,7 +6,6 @@ implementations, Kubernetes-specific functionality, and integration with BaseAge
 """
 
 import json
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -15,7 +14,6 @@ from tarsy.agents.kubernetes_agent import KubernetesAgent
 from tarsy.integrations.llm.client import LLMClient
 from tarsy.integrations.mcp.client import MCPClient
 from tarsy.models.alert import Alert
-from tarsy.models.llm import LLMMessage
 from tarsy.models.mcp_config import MCPServerConfig
 from tarsy.services.mcp_server_registry import MCPServerRegistry
 

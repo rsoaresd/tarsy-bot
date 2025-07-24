@@ -5,8 +5,8 @@ Tests alert type to agent class mapping, registry initialization,
 lookups, supported types, and edge case handling.
 """
 
+
 import pytest
-from unittest.mock import Mock
 
 from tarsy.services.agent_registry import AgentRegistry
 

@@ -5,14 +5,14 @@ Tests LLM provider communication, message conversion, hook integration,
 error handling, availability management, and multi-provider orchestration.
 """
 
-import pytest
-from unittest.mock import AsyncMock, Mock, patch, call
+from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from tarsy.integrations.llm.client import LLMClient, LLMManager, LLM_PROVIDERS
-from tarsy.models.llm import LLMMessage
 from tarsy.config.settings import Settings
+from tarsy.integrations.llm.client import LLM_PROVIDERS, LLMClient, LLMManager
+from tarsy.models.llm import LLMMessage
 
 
 @pytest.mark.unit
