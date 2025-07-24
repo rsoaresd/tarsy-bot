@@ -38,11 +38,6 @@
 - [ ] [Usability requirement with specific measures]
 - [ ] [Reliability requirement with specific targets]
 
-### Business Success Criteria
-- [ ] [Business metric that will improve]
-- [ ] [User experience improvement that will be achieved]
-- [ ] [Operational efficiency gain that will be realized]
-
 ## Functional Requirements
 
 ### Core Functionality
@@ -96,12 +91,6 @@
 - [Technical constraint 1]
 - [Technical constraint 2]
 - [Technical constraint 3]
-
-### Business Constraints
-<!-- AI: List business constraints -->
-- [Business constraint 1]
-- [Business constraint 2]
-- [Business constraint 3]
 
 ### Assumptions
 <!-- AI: List key assumptions -->
@@ -179,12 +168,10 @@
 - [ ] Requirements are testable and verifiable
 - [ ] Requirements are realistic and achievable
 - [ ] Requirements are prioritized appropriately
-- [ ] Requirements align with business objectives
 
 ### Stakeholder Check
 - [ ] All stakeholders have been identified
 - [ ] User needs are clearly captured
-- [ ] Business requirements are addressed
 - [ ] Technical requirements are feasible
 
 ---

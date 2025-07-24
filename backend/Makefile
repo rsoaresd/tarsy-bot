@@ -108,12 +108,17 @@ fix: lint-fix format ## Auto-fix linting issues and format code
 .PHONY: dev
 dev: ## Start development server with auto-reload
 	@echo "$(GREEN)Starting development server...$(NC)"
-	$(UV) run uvicorn tarsy.main:app --reload --port 8000 --log-level info
+	. .venv/bin/activate && uvicorn tarsy.main:app --reload --port 8000 --log-level info
 
 .PHONY: dev-debug
 dev-debug: ## Start development server with debug logging
 	@echo "$(GREEN)Starting development server (debug mode)...$(NC)"
-	$(UV) run uvicorn tarsy.main:app --reload --port 8000 --log-level debug
+	. .venv/bin/activate && uvicorn tarsy.main:app --reload --port 8000 --log-level debug
+
+.PHONY: run
+run: ## Start development server with manual venv activation
+	@echo "$(GREEN)Starting development server (manual venv)...$(NC)"
+	. .venv/bin/activate && uvicorn tarsy.main:app --reload --port 8000
 
 # Database and Cleanup
 .PHONY: clean

@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-Create a standalone SRE dashboard (`sre-dashboard/`) for SRE engineers to monitor and analyze alert processing history. This dashboard will be an independent React application separate from the existing alert dev UI (`alert-dev-ui/`), providing comprehensive visibility into historical alert processing workflows, ongoing operations, and detailed timing information for each processing step.
+Create a standalone Tarsy dashboard (`dashboard/`) for SRE engineers to monitor and analyze alert processing history. This dashboard will be an independent React application separate from the existing alert dev UI (`alert-dev-ui/`), providing comprehensive visibility into historical alert processing workflows, ongoing operations, and detailed timing information for each processing step.
 
 ## Problem Statement
 
@@ -96,54 +96,54 @@ The existing alert dev UI serves only as a development/testing interface for sub
 - **REQ-4.9**: Search and filter controls shall be intuitive and easily accessible
 - **REQ-4.10**: Error states and loading indicators shall provide clear user feedback
 
+### Real-Time Communication Requirements
+- **REQ-4.11**: System shall provide dashboard-wide WebSocket endpoint for monitoring all active alert processing sessions
+- **REQ-4.12**: Dashboard shall establish individual WebSocket connections for detailed session monitoring when viewing specific sessions
+- **REQ-4.13**: Real-time updates shall include session status changes, completion notifications, and error alerts across all active sessions
+
 ### Integration Requirements
-- **REQ-4.11**: Dashboard shall integrate with EP-0003 history service REST API endpoints
-- **REQ-4.12**: System shall establish WebSocket connection for real-time updates
-- **REQ-4.13**: Application shall handle API authentication and error responses gracefully
-- **REQ-4.14**: Dashboard shall maintain separation from existing alert dev UI
+- **REQ-4.14**: Dashboard shall integrate with EP-0003 history service REST API endpoints
+- **REQ-4.15**: System shall establish WebSocket connections for both dashboard-wide and session-specific real-time updates
+- **REQ-4.16**: Application shall handle API authentication and error responses gracefully
+- **REQ-4.17**: Dashboard shall maintain separation from existing alert dev UI
 
 ## Non-Functional Requirements
 
 ### Performance Requirements
-- **REQ-4.15**: Initial dashboard load shall complete at reasonable speed to maintain user productivity
-- **REQ-4.16**: Session list pagination shall support 1000+ historical sessions efficiently
-- **REQ-4.17**: Filter operations shall complete quickly enough to support interactive exploration of data
-- **REQ-4.18**: Real-time updates shall display promptly to provide current operational status
+- **REQ-4.18**: Initial dashboard load shall complete at reasonable speed to maintain user productivity
+- **REQ-4.19**: Session list pagination shall support 1000+ historical sessions efficiently
+- **REQ-4.20**: Filter operations shall complete quickly enough to support interactive exploration of data
+- **REQ-4.21**: Real-time updates shall display promptly to provide current operational status
 
 ### Security Requirements
-- **REQ-4.19**: Dashboard shall implement secure communication with backend API services
-- **REQ-4.20**: Sensitive alert data shall be protected against unauthorized access
-- **REQ-4.21**: WebSocket connections shall use secure protocols where applicable
+- **REQ-4.22**: Dashboard shall implement secure communication with backend API services
+- **REQ-4.23**: Sensitive alert data shall be protected against unauthorized access
+- **REQ-4.24**: WebSocket connections shall use secure protocols where applicable
 
 ### Reliability Requirements
-- **REQ-4.22**: Application shall gracefully handle backend API unavailability 
-- **REQ-4.23**: Network connection failures shall not crash the application
-- **REQ-4.24**: Invalid or corrupted data shall be handled with appropriate error messages
+- **REQ-4.25**: Application shall gracefully handle backend API unavailability 
+- **REQ-4.26**: Network connection failures shall not crash the application
+- **REQ-4.27**: Invalid or corrupted data shall be handled with appropriate error messages
 
 ### Usability Requirements
-- **REQ-4.25**: Interface shall be intuitive for SRE engineers with minimal training required
-- **REQ-4.26**: Dashboard shall provide contextual help and tooltips for complex features
-- **REQ-4.27**: Application shall maintain consistent navigation and interaction patterns
+- **REQ-4.28**: Interface shall be intuitive for SRE engineers with minimal training required
+- **REQ-4.29**: Dashboard shall provide contextual help and tooltips for complex features
+- **REQ-4.30**: Application shall maintain consistent navigation and interaction patterns
 
 ## Constraints and Assumptions
 
 ### Technical Constraints
 - Must use the same technical stack as existing alert dev UI (React, TypeScript, Material-UI)
-- Must be developed as completely independent application in `sre-dashboard/` directory (separate repository/deployment possible)
+- Must be developed as completely independent application in `dashboard/` directory (separate repository/deployment possible)
 - Must integrate with existing EP-0003 history service API without modifications
 - Must work within current backend API architecture and authentication
-
-### Business Constraints
-- Development should not interfere with existing alert dev UI functionality
-- Must be completed within reasonable timeframe for SRE team operational needs
-- Resource usage must remain within acceptable limits for production environment
 
 ### Assumptions
 - EP-0003 history service API will remain stable and backwards compatible
 - Material-UI v5 components will provide sufficient functionality for dashboard requirements
 - SRE team will have access to dashboard through same network/infrastructure as existing alert dev UI
 - WebSocket integration patterns from existing alert dev UI can be reused
-- Dashboard will be implemented in `sre-dashboard/` directory alongside existing `alert-dev-ui/`
+- Dashboard will be implemented in `dashboard/` directory alongside existing `alert-dev-ui/`
 
 ## Out of Scope
 - Modifications to existing alert dev UI application
@@ -157,7 +157,8 @@ The existing alert dev UI serves only as a development/testing interface for sub
 - **Internal Dependencies**: 
   - EP-0003 Alert Processing History Service (implemented)
   - Existing backend API infrastructure
-  - WebSocket services for real-time updates
+  - WebSocket services for real-time updates (individual alert tracking - implemented)
+  - **NEW**: Dashboard-wide WebSocket endpoint for monitoring all active sessions (requires backend implementation)
 - **External Dependencies**: 
   - React 18.2.0 framework and ecosystem
   - Material-UI v5.15.0 component library
@@ -187,7 +188,7 @@ The existing alert dev UI serves only as a development/testing interface for sub
 ### Low-Risk Items
 - **Risk**: Learning curve for SRE team adoption
   - **Impact**: Slower than expected user adoption
-  - **Mitigation**: Provide user training, documentation, and intuitive interface design
+  - **Mitigation**: Provide intuitive interface design
 
 ## Acceptance Criteria
 
@@ -211,9 +212,17 @@ The existing alert dev UI serves only as a development/testing interface for sub
 
 ### Integration Acceptance Criteria
 - [ ] All EP-0003 API endpoints integrate correctly with proper error handling
-- [ ] WebSocket connection establishes and maintains real-time updates
+- [ ] Dashboard-wide WebSocket connection establishes and provides real-time updates for all active sessions
+- [ ] Individual session WebSocket connections work correctly for detailed session monitoring
 - [ ] Application gracefully handles backend service unavailability
 - [ ] Dashboard operates independently without affecting alert dev UI
+
+### Real-Time Communication Acceptance Criteria
+- [ ] Dashboard-wide WebSocket shows live status updates when new alerts start processing
+- [ ] Dashboard-wide WebSocket shows completion notifications when alerts finish processing
+- [ ] Session-specific WebSocket connections provide detailed progress updates during processing
+- [ ] WebSocket connections handle disconnections and reconnections gracefully
+- [ ] Multiple concurrent WebSocket connections (dashboard + session views) work without interference
 
 ## Future Considerations
 - Advanced analytics and trend analysis capabilities
@@ -258,5 +267,5 @@ After requirements approval:
 
 **AI Prompt for Next Phase:**
 ```
-Create a design document using the template at docs/templates/ep-design-template.md for EP-0004 based on the approved requirements in this document. The SRE dashboard should be implemented in the `sre-dashboard/` directory.
+Create a design document using the template at docs/templates/ep-design-template.md for EP-0004 based on the approved requirements in this document. The Tarsy dashboard should be implemented in the `dashboard/` directory.
 ``` 
