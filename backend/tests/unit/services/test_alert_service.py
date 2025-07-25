@@ -5,6 +5,9 @@ Tests the complete alert processing workflow including agent selection,
 delegation, error handling, progress tracking, and history management.
 """
 
+import asyncio
+import re
+import time
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -606,3 +609,260 @@ class TestCleanup:
         # Only the first cleanup method should be attempted due to exception handling
         service.runbook_service.close.assert_called_once()
         service.mcp_client.close.assert_not_called() 
+
+
+@pytest.mark.unit
+class TestAlertServiceDuplicatePrevention:
+    """Test AlertService duplicate session prevention fixes."""
+    
+    @pytest.fixture
+    def mock_settings(self):
+        """Mock settings for testing."""
+        settings = Mock(spec=Settings)
+        settings.github_token = "test_token"
+        settings.history_enabled = True
+        return settings
+    
+    @pytest.fixture
+    def sample_alert(self):
+        """Sample alert for testing."""
+        return Alert(
+            alert_type="PodCrashLoopBackOff",
+            severity="high",
+            environment="production",
+            cluster="https://api.cluster.com",
+            namespace="default",
+            message="Pod is crash looping",
+            runbook="https://github.com/test/runbook.md"
+        )
+    
+    @pytest.fixture
+    def mock_dependencies(self):
+        """Mock all AlertService dependencies."""
+        with patch('tarsy.services.alert_service.RunbookService') as mock_runbook, \
+             patch('tarsy.services.alert_service.get_history_service') as mock_history, \
+             patch('tarsy.services.alert_service.AgentRegistry') as mock_registry, \
+             patch('tarsy.services.alert_service.MCPServerRegistry') as mock_mcp_registry, \
+             patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
+             patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager:
+            
+            yield {
+                'runbook': mock_runbook.return_value,
+                'history': mock_history.return_value,
+                'registry': mock_registry.return_value,
+                'mcp_registry': mock_mcp_registry.return_value,
+                'mcp_client': mock_mcp_client.return_value,
+                'llm_manager': mock_llm_manager.return_value
+            }
+    
+    def test_alert_id_generation_uniqueness(self, mock_settings, mock_dependencies, sample_alert):
+        """Test that alert ID generation prevents timestamp collisions."""
+        service = AlertService(mock_settings)
+        service.history_service = mock_dependencies['history']
+        service.agent_registry = mock_dependencies['registry']
+        
+        # Configure mocks
+        mock_dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
+        mock_dependencies['history'].enabled = True
+        mock_dependencies['history'].create_session.return_value = "session_123"
+        
+        # Generate multiple alert IDs in rapid succession
+        alert_ids = []
+        for _ in range(10):
+            session_id = service._create_history_session(sample_alert, "KubernetesAgent")
+            # Extract alert_id from the create_session call
+            call_args = mock_dependencies['history'].create_session.call_args[1]
+            alert_ids.append(call_args['alert_id'])
+        
+        # All alert IDs should be unique
+        assert len(set(alert_ids)) == len(alert_ids), "Alert IDs should be unique"
+        
+        # Each alert ID should contain timestamp and random component
+        for alert_id in alert_ids:
+            # Should match pattern: alert_type_environment_namespace_timestamp_random
+            pattern = r'^PodCrashLoopBackOff_production_default_\d+_[a-f0-9]{8}$'
+            assert re.match(pattern, alert_id), f"Alert ID {alert_id} doesn't match expected pattern"
+    
+    def test_alert_id_generation_with_existing_id(self, mock_settings, mock_dependencies, sample_alert):
+        """Test that existing alert ID is preserved."""
+        service = AlertService(mock_settings)
+        service.history_service = mock_dependencies['history']
+        service.agent_registry = mock_dependencies['registry']
+        
+        # Set existing alert ID
+        sample_alert.id = "existing_alert_123"
+        
+        # Configure mocks
+        mock_dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
+        mock_dependencies['history'].enabled = True
+        mock_dependencies['history'].create_session.return_value = "session_123"
+        
+        service._create_history_session(sample_alert, "KubernetesAgent")
+        
+        # Should use existing alert ID
+        call_args = mock_dependencies['history'].create_session.call_args[1]
+        assert call_args['alert_id'] == "existing_alert_123"
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_alert_processing_prevention(self, mock_settings, mock_dependencies, sample_alert):
+        """Test that concurrent processing of identical alerts is prevented."""
+        service = AlertService(mock_settings)
+        service.history_service = mock_dependencies['history']
+        service.agent_registry = mock_dependencies['registry']
+        service.agent_factory = Mock()
+        service.runbook_service = mock_dependencies['runbook']
+        service.llm_manager = mock_dependencies['llm_manager']
+        
+        # Configure mocks
+        mock_dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
+        mock_dependencies['llm_manager'].is_available.return_value = True
+        
+        # Mock runbook service as async
+        async def mock_download_runbook(url):
+            return "runbook content"
+        mock_dependencies['runbook'].download_runbook = mock_download_runbook
+        
+        mock_dependencies['history'].enabled = True
+        mock_dependencies['history'].create_session.return_value = "session_123"
+        
+        # Mock agent processing with delay
+        mock_agent = Mock()
+        mock_agent.process_alert = AsyncMock()
+        
+        async def slow_process(*args, **kwargs):
+            await asyncio.sleep(0.1)  # Simulate processing time
+            return {"status": "success", "analysis": "test analysis", "iterations": 1}
+        
+        mock_agent.process_alert.side_effect = slow_process
+        service.agent_factory.create_agent.return_value = mock_agent
+        
+        # Start two concurrent processing tasks for the same alert
+        start_time = time.time()
+        tasks = [
+            asyncio.create_task(service.process_alert(sample_alert)),
+            asyncio.create_task(service.process_alert(sample_alert))
+        ]
+        
+        results = await asyncio.gather(*tasks)
+        end_time = time.time()
+        
+        # Both should succeed
+        assert len(results) == 2
+        for result in results:
+            assert "test analysis" in result
+        
+        # Processing should be serialized (taking longer than parallel execution)
+        # With 0.1s delay each, concurrent would be ~0.1s, serial would be ~0.2s
+        processing_time = end_time - start_time
+        assert processing_time >= 0.15, f"Processing took {processing_time}s, expected serial execution"
+        
+        # Agent should be called exactly twice (serialized, not concurrent)
+        assert mock_agent.process_alert.call_count == 2
+    
+    def test_alert_key_generation(self, mock_settings, mock_dependencies, sample_alert):
+        """Test alert key generation for concurrency control."""
+        service = AlertService(mock_settings)
+        
+        alert_key = service._generate_alert_key(sample_alert)
+        expected_key = "PodCrashLoopBackOff_production_default_Pod is crash looping"
+        
+        assert alert_key == expected_key
+    
+    def test_alert_key_truncation(self, mock_settings, mock_dependencies):
+        """Test alert key message truncation."""
+        service = AlertService(mock_settings)
+        
+        long_message_alert = Alert(
+            alert_type="PodCrashLoopBackOff",
+            severity="high",
+            environment="production", 
+            cluster="https://api.cluster.com",
+            namespace="default",
+            message="This is a very long error message that should be truncated at 50 characters to prevent extremely long keys",
+            runbook="https://github.com/test/runbook.md"
+        )
+        
+        alert_key = service._generate_alert_key(long_message_alert)
+        # The message should be truncated to 50 characters
+        expected_message_part = "This is a very long error message that should be t"
+        expected_key = f"PodCrashLoopBackOff_production_default_{expected_message_part}"
+        
+        assert alert_key == expected_key
+        # Verify the message part is exactly 50 characters
+        message_part = alert_key.split('_', 3)[-1]  # Get everything after the third underscore
+        assert len(message_part) == 50
+    
+    @pytest.mark.asyncio
+    async def test_alert_lock_cleanup(self, mock_settings, mock_dependencies, sample_alert):
+        """Test that alert locks are properly cleaned up after processing."""
+        service = AlertService(mock_settings)
+        
+        # Ensure clean state for this test instance
+        service._processing_locks = {}
+        
+        # Get initial lock count (should be 0)
+        initial_lock_count = len(service._processing_locks)
+        assert initial_lock_count == 0
+        
+        # Get a lock for an alert
+        alert_key = service._generate_alert_key(sample_alert)
+        lock = await service._get_alert_lock(alert_key)
+        
+        # Lock should be created
+        assert len(service._processing_locks) == 1
+        assert alert_key in service._processing_locks
+        
+        # Clean up the lock
+        await service._cleanup_alert_lock(alert_key)
+        
+        # Lock should be removed (since it's not locked)
+        assert len(service._processing_locks) == 0
+        assert alert_key not in service._processing_locks
+    
+    @pytest.mark.asyncio
+    async def test_alert_lock_not_cleaned_when_locked(self, mock_settings, mock_dependencies, sample_alert):
+        """Test that locked alert locks are not cleaned up."""
+        service = AlertService(mock_settings)
+        
+        # Ensure clean state for this test instance
+        service._processing_locks = {}
+        
+        alert_key = service._generate_alert_key(sample_alert)
+        lock = await service._get_alert_lock(alert_key)
+        
+        # Acquire the lock
+        await lock.acquire()
+        
+        try:
+            # Try to clean up while locked
+            await service._cleanup_alert_lock(alert_key)
+            
+            # Lock should still exist since it's locked
+            assert alert_key in service._processing_locks
+        finally:
+            # Release the lock
+            lock.release()
+    
+    def test_history_session_disabled(self, mock_settings, mock_dependencies, sample_alert):
+        """Test behavior when history service is disabled."""
+        service = AlertService(mock_settings)
+        service.history_service = None
+        
+        session_id = service._create_history_session(sample_alert)
+        
+        assert session_id is None
+    
+    def test_history_session_not_enabled(self, mock_settings, mock_dependencies, sample_alert):
+        """Test behavior when history service is not enabled."""
+        service = AlertService(mock_settings)
+        service.history_service = mock_dependencies['history']
+        service.agent_registry = mock_dependencies['registry']
+        
+        # Configure mocks
+        mock_dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
+        mock_dependencies['history'].enabled = False
+        
+        session_id = service._create_history_session(sample_alert, "KubernetesAgent")
+        
+        assert session_id is None
+        mock_dependencies['history'].create_session.assert_not_called() 

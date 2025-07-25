@@ -17,6 +17,7 @@ from tarsy.config.settings import get_settings
 from tarsy.controllers.history_controller import router as history_router
 from tarsy.database.init_db import get_database_info, initialize_database
 from tarsy.models.alert import Alert, AlertResponse, ProcessingStatus
+from tarsy.models.constants import AlertSessionStatus
 from tarsy.services.alert_service import AlertService
 from tarsy.services.websocket_manager import WebSocketManager
 from tarsy.utils.logger import get_module_logger, setup_logging
@@ -50,6 +51,18 @@ async def lifespan(app: FastAPI):
     db_init_success = initialize_database()
     if not db_init_success and settings.history_enabled:
         logger.warning("History database initialization failed - continuing with history service disabled")
+    
+    # Clean up any orphaned sessions from previous backend crashes
+    # This should happen after database initialization but before processing new alerts
+    if settings.history_enabled and db_init_success:
+        try:
+            from tarsy.services.history_service import get_history_service
+            history_service = get_history_service()
+            cleaned_sessions = history_service.cleanup_orphaned_sessions()
+            if cleaned_sessions > 0:
+                logger.info(f"Startup cleanup: marked {cleaned_sessions} orphaned sessions as failed")
+        except Exception as e:
+            logger.error(f"Failed to cleanup orphaned sessions during startup: {str(e)}")
     
     alert_service = AlertService(settings)
     websocket_manager = WebSocketManager()
@@ -311,7 +324,7 @@ async def process_alert_background(alert_id: str, alert: Alert):
             
             # Update status: completed
             await update_processing_status(
-                alert_id, "completed", 100, "Processing completed", result
+                alert_id, AlertSessionStatus.COMPLETED, 100, "Processing completed", result
             )
             
         except Exception as e:

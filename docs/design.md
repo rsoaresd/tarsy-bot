@@ -651,7 +651,7 @@ REST API endpoints for accessing alert processing history:
 ```
 Interface Pattern:
 @router.get("/api/v1/history/sessions")
-async def list_sessions(status: str = None, agent_type: str = None, alert_type: str = None,
+async def list_sessions(status: List[str] = None, agent_type: str = None, alert_type: str = None,
                        start_date: datetime = None, end_date: datetime = None,
                        page: int = 1, page_size: int = 20) -> SessionsListResponse
 
@@ -664,10 +664,27 @@ async def health_check() -> HealthCheckResponse
 
 **Core Features:**
 - **Advanced Filtering**: Multiple filter combinations with AND logic for precise queries
+  - **Multiple Status Support**: `status` parameter accepts multiple values (e.g., `status=completed&status=failed` for historical alerts)
+  - **Common Use Cases**: Historical alerts (`completed,failed`), Active alerts (`pending,in_progress`)
 - **Pagination**: Efficient handling of large result sets with metadata
 - **Chronological Timeline**: Complete session details with merged interaction timeline
 - **Health Monitoring**: Database connectivity and service status checking
 - **Type Safety**: Pydantic response models for consistent API contracts
+
+**Multiple Status Filtering Examples:**
+```bash
+# Historical alerts (completed and failed sessions)
+GET /api/v1/history/sessions?status=completed&status=failed
+
+# Active alerts (pending and in_progress sessions)
+GET /api/v1/history/sessions?status=pending&status=in_progress
+
+# Single status (backward compatible)
+GET /api/v1/history/sessions?status=completed
+
+# Combined with other filters
+GET /api/v1/history/sessions?status=completed&status=failed&agent_type=kubernetes&start_date=2024-12-18T00:00:00Z
+```
 
 ### 17. Hook Context System
 

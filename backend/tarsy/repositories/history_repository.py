@@ -8,11 +8,12 @@ reconstruction capabilities.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy import asc, desc, func
 from sqlmodel import Session, and_, or_, select
 
+from ..models.constants import AlertSessionStatus
 from ..models.history import AlertSession, LLMInteraction, MCPCommunication
 from .base_repository import BaseRepository
 
@@ -51,6 +52,15 @@ class HistoryRepository:
             The created AlertSession with database-generated fields, or None if creation failed
         """
         try:
+            # Check for existing session with the same alert_id to prevent duplicates
+            existing_session = self.session.exec(
+                select(AlertSession).where(AlertSession.alert_id == alert_session.alert_id)
+            ).first()
+            
+            if existing_session:
+                logger.warning(f"Alert session already exists for alert_id {alert_session.alert_id}, skipping duplicate creation")
+                return existing_session
+            
             return self.alert_session_repo.create(alert_session)
         except Exception as e:
             logger.error(f"Failed to create alert session {alert_session.session_id}: {str(e)}")
@@ -87,7 +97,7 @@ class HistoryRepository:
     
     def get_alert_sessions(
         self,
-        status: Optional[str] = None,
+        status: Optional[Union[str, List[str]]] = None,
         agent_type: Optional[str] = None,
         alert_type: Optional[str] = None,
         start_date: Optional[datetime] = None,
@@ -102,7 +112,7 @@ class HistoryRepository:
         in the design document.
         
         Args:
-            status: Filter by processing status
+            status: Filter by processing status (single value or list of values)
             agent_type: Filter by agent type
             alert_type: Filter by alert type
             start_date: Filter sessions after this date
@@ -120,7 +130,10 @@ class HistoryRepository:
             
             # Apply filters using AND logic (multiple filters narrow results)
             if status:
-                conditions.append(AlertSession.status == status)
+                if isinstance(status, list):
+                    conditions.append(AlertSession.status.in_(status))
+                else:
+                    conditions.append(AlertSession.status == status)
             if agent_type:
                 conditions.append(AlertSession.agent_type == agent_type)
             if alert_type:
@@ -369,10 +382,7 @@ class HistoryRepository:
         """
         try:
             statement = select(AlertSession).where(
-                or_(
-                    AlertSession.status == "in_progress",
-                    AlertSession.status == "pending"
-                )
+                AlertSession.status.in_(AlertSessionStatus.ACTIVE_STATUSES)
             ).order_by(desc(AlertSession.started_at))
             
             return self.session.exec(statement).all()
@@ -391,25 +401,19 @@ class HistoryRepository:
             # Get session counts by status
             active_count = self.session.exec(
                 select(func.count(AlertSession.session_id)).where(
-                    or_(
-                        AlertSession.status == "in_progress",
-                        AlertSession.status == "pending"
-                    )
+                    AlertSession.status.in_(AlertSessionStatus.ACTIVE_STATUSES)
                 )
             ).first() or 0
             
             completed_count = self.session.exec(
                 select(func.count(AlertSession.session_id)).where(
-                    AlertSession.status == "completed"
+                    AlertSession.status == AlertSessionStatus.COMPLETED
                 )
             ).first() or 0
             
             failed_count = self.session.exec(
                 select(func.count(AlertSession.session_id)).where(
-                    or_(
-                        AlertSession.status == "failed",
-                        AlertSession.status == "error"
-                    )
+                    AlertSession.status == AlertSessionStatus.FAILED
                 )
             ).first() or 0
             
@@ -434,7 +438,7 @@ class HistoryRepository:
             completed_sessions_with_duration = self.session.exec(
                 select(AlertSession).where(
                     and_(
-                        AlertSession.status == "completed",
+                        AlertSession.status == AlertSessionStatus.COMPLETED,
                         AlertSession.completed_at.is_not(None)
                     )
                 )
@@ -647,7 +651,7 @@ class HistoryRepository:
             statement = select(AlertSession).where(
                 and_(
                     AlertSession.completed_at < cutoff_date,
-                    AlertSession.status.in_(["completed", "failed"])
+                    AlertSession.status.in_(AlertSessionStatus.TERMINAL_STATUSES)
                 )
             )
             sessions_to_delete = self.session.exec(statement).all()

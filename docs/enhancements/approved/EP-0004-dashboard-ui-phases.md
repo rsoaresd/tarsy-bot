@@ -238,7 +238,7 @@ const formatDuration = (durationMs: number | null): string => {
 
 ### API Integration
 - `GET /api/v1/history/active-sessions` - Fetch active alerts
-- `GET /api/v1/history/sessions?status=completed` - Fetch historical alerts
+- `GET /api/v1/history/sessions?status=completed&status=failed` - Fetch historical alerts (supports multiple status values)
 - WebSocket connection for active alert updates
 - Basic subscription to `dashboard_updates` channel
 

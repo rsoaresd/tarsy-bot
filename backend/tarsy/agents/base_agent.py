@@ -15,6 +15,7 @@ from tarsy.config.settings import get_settings
 from tarsy.integrations.llm.client import LLMClient
 from tarsy.integrations.mcp.client import MCPClient
 from tarsy.models.alert import Alert
+from tarsy.models.constants import AlertSessionStatus
 from tarsy.models.llm import LLMMessage
 from tarsy.services.mcp_server_registry import MCPServerRegistry
 from tarsy.utils.logger import get_module_logger
@@ -441,7 +442,7 @@ class BaseAgent(ABC):
             # Final result
             await self._update_progress(
                 progress_callback,
-                status="completed",
+                status=AlertSessionStatus.COMPLETED,
                 message="Analysis completed successfully"
             )
             

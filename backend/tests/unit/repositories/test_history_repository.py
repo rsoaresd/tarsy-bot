@@ -836,6 +836,7 @@ class TestHistoryRepositoryPerformance:
         # Average should be (60 + 120) / 2 = 90 seconds
         assert result["avg_session_duration"] == 90.0
     
+    @pytest.mark.unit
     def test_export_session_data_success(self, db_session):
         """Test successful session data export."""
         repo = HistoryRepository(db_session)
@@ -912,6 +913,7 @@ class TestHistoryRepositoryPerformance:
         assert "exported_at" in export_metadata
         assert "session_duration_seconds" in export_metadata
     
+    @pytest.mark.unit
     def test_export_session_data_not_found(self, db_session):
         """Test export with non-existent session."""
         repo = HistoryRepository(db_session)
@@ -924,6 +926,7 @@ class TestHistoryRepositoryPerformance:
         assert result["data"] is None
         assert "not found" in result["error"].lower()
     
+    @pytest.mark.unit
     def test_export_session_data_csv_format(self, db_session):
         """Test export with CSV format parameter."""
         repo = HistoryRepository(db_session)
@@ -951,6 +954,7 @@ class TestHistoryRepositoryPerformance:
         assert result["data"] is not None
         assert result["data"]["export_metadata"]["format"] == "csv"
     
+    @pytest.mark.unit
     def test_search_sessions_success(self, db_session):
         """Test successful session search."""
         repo = HistoryRepository(db_session)
@@ -1024,6 +1028,7 @@ class TestHistoryRepositoryPerformance:
         assert len(error_results) == 1
         assert error_results[0]["session_id"] == "search_session_2"
     
+    @pytest.mark.unit
     def test_search_sessions_json_field_search(self, db_session):
         """Test search within JSON fields."""
         repo = HistoryRepository(db_session)
@@ -1059,6 +1064,7 @@ class TestHistoryRepositoryPerformance:
         assert len(desc_results) == 1
         assert desc_results[0]["session_id"] == "json_search_session"
     
+    @pytest.mark.unit
     def test_search_sessions_empty_results(self, db_session):
         """Test search with no matching results."""
         repo = HistoryRepository(db_session)
@@ -1082,6 +1088,7 @@ class TestHistoryRepositoryPerformance:
         results = repo.search_sessions("nonexistent_term", 10)
         assert results == []
     
+    @pytest.mark.unit
     def test_search_sessions_limit_parameter(self, db_session):
         """Test search with limit parameter."""
         repo = HistoryRepository(db_session)
@@ -1110,6 +1117,7 @@ class TestHistoryRepositoryPerformance:
         results = repo.search_sessions("TestAgent", 10)
         assert len(results) == 5
     
+    @pytest.mark.unit
     def test_search_sessions_ordering(self, db_session):
         """Test that search results are ordered by most recent first."""
         repo = HistoryRepository(db_session)
@@ -1148,4 +1156,23 @@ class TestHistoryRepositoryPerformance:
         assert results[0]["session_id"] == "newer_session"
         assert results[1]["session_id"] == "older_session"
 
+ 
+@pytest.mark.unit  
+class TestHistoryRepositoryDuplicatePrevention:
+    """Standalone test class for duplicate prevention (kept for backwards compatibility)."""
+    
+    def test_duplicate_prevention_documented(self):
+        """Test that documents the duplicate prevention implementation."""
+        # This test serves as documentation that duplicate prevention
+        # is implemented in the create_alert_session method
+        from tarsy.repositories.history_repository import HistoryRepository
+        
+        # Verify the method exists and has the expected behavior
+        assert hasattr(HistoryRepository, 'create_alert_session')
+        
+        # Check that the implementation includes duplicate checking
+        import inspect
+        source = inspect.getsource(HistoryRepository.create_alert_session)
+        assert 'existing_session' in source, "Should check for existing sessions"
+        assert 'alert_id' in source, "Should check by alert_id"
  

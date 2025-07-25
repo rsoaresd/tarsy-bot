@@ -360,7 +360,7 @@ from datetime import datetime
 # SQLModel can be used directly as API response model
 @tarsy.get("/api/v1/history/sessions", response_model=dict)
 def get_sessions(
-    status: Optional[str] = None,
+    status: Optional[List[str]] = None,
     agent_type: Optional[str] = None,
     alert_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
@@ -373,7 +373,10 @@ def get_sessions(
     
     # Apply filters using AND logic - multiple filters can be combined
     if status:
-        statement = statement.where(AlertSession.status == status)
+        if isinstance(status, list):
+            statement = statement.where(AlertSession.status.in_(status))
+        else:
+            statement = statement.where(AlertSession.status == status)
     if agent_type:
         statement = statement.where(AlertSession.agent_type == agent_type)
     if alert_type:
@@ -384,9 +387,10 @@ def get_sessions(
         statement = statement.where(AlertSession.started_at <= end_date)
     
     # Example combinations supported:
-    # 1. alert_type="NamespaceTerminating" + status="completed" + time_range
-    # 2. agent_type="kubernetes" + status="completed" + time_range
-    # 3. Any combination of available filters
+    # 1. alert_type="NamespaceTerminating" + status=["completed"] + time_range
+    # 2. agent_type="kubernetes" + status=["completed", "failed"] + time_range (multiple status values)
+    # 3. status=["pending", "in_progress"] for active alerts
+    # 4. Any combination of available filters
     
     # Apply pagination
     offset = (page - 1) * page_size
@@ -413,11 +417,17 @@ def get_sessions(
 The API supports combining multiple filters using AND logic. Examples:
 
 ```bash
-# Use Case 1: Alert type + Status + Time Range
+# Use Case 1: Alert type + Single Status + Time Range (backward compatible)
 GET /api/v1/history/sessions?alert_type=Namespace%20is%20stuck%20in%20Terminating&status=completed&start_date=2024-12-18T00:00:00Z&end_date=2024-12-19T23:59:59Z
 
-# Use Case 2: Agent type + Status + Time Range  
-GET /api/v1/history/sessions?agent_type=kubernetes&status=completed&start_date=2024-12-18T00:00:00Z&end_date=2024-12-19T23:59:59Z
+# Use Case 2: Agent type + Multiple Status + Time Range (NEW: multiple status support)
+GET /api/v1/history/sessions?agent_type=kubernetes&status=completed&status=failed&start_date=2024-12-18T00:00:00Z&end_date=2024-12-19T23:59:59Z
+
+# Use Case 3: Historical alerts (completed + failed sessions)
+GET /api/v1/history/sessions?status=completed&status=failed
+
+# Use Case 4: Active alerts (pending + in_progress sessions) 
+GET /api/v1/history/sessions?status=pending&status=in_progress
 
 # Use Case 3: All filters combined
 GET /api/v1/history/sessions?alert_type=high_cpu&agent_type=kubernetes&status=completed&start_date=2024-12-18T00:00:00Z&page=1&page_size=10

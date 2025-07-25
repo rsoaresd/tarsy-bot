@@ -7,6 +7,7 @@ to ensure proper request/response handling and API contract compliance.
 
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -151,11 +152,196 @@ class TestHistoryControllerEndpoints:
         call_args = mock_history_service.get_sessions_list.call_args
         filters = call_args.kwargs["filters"]
         
-        assert filters["status"] == "completed"
+        assert filters["status"] == ["completed"]  # Now expects list due to multiple status support
         assert filters["agent_type"] == "KubernetesAgent"
         assert filters["alert_type"] == "NamespaceTerminating"
         assert call_args.kwargs["page"] == 2
         assert call_args.kwargs["page_size"] == 10
+
+    @pytest.mark.unit
+    def test_get_sessions_list_with_single_status_filter(self, app, client, mock_history_service):
+        """Test that single status filtering still works (backward compatibility)."""
+        # Arrange
+        mock_history_service.get_sessions_list.return_value = ([], 0)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params={"status": "completed"}
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        
+        # Verify that single status is converted to list
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert filters["status"] == ["completed"]  # Single status becomes list
+
+    @pytest.mark.unit
+    def test_get_sessions_list_with_multiple_status_filter(self, app, client, mock_history_service):
+        """Test multiple status filtering (the new feature)."""
+        # Arrange
+        mock_history_service.get_sessions_list.return_value = ([], 0)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params=[
+                ("status", "completed"),
+                ("status", "failed"),
+                ("agent_type", "KubernetesAgent")
+            ]
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        
+        # Verify that multiple status values are passed correctly
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert set(filters["status"]) == {"completed", "failed"}  # Multiple status values
+        assert filters["agent_type"] == "KubernetesAgent"
+
+    @pytest.mark.unit 
+    def test_get_sessions_list_multiple_status_historical_use_case(self, app, client, mock_history_service):
+        """Test the specific use case for historical alerts (completed + failed)."""
+        # Arrange
+        mock_sessions = [
+            create_mock_session("session-1", "completed"),
+            create_mock_session("session-2", "failed"),
+        ]
+        mock_history_service.get_sessions_list.return_value = (mock_sessions, 2)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params=[("status", "completed"), ("status", "failed")]
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Verify response structure
+        assert "sessions" in data
+        assert "pagination" in data
+        assert len(data["sessions"]) == 2
+        
+        # Verify that service was called with correct multiple status filter
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert set(filters["status"]) == {"completed", "failed"}
+
+    @pytest.mark.unit
+    def test_get_sessions_list_multiple_status_active_use_case(self, app, client, mock_history_service):
+        """Test filtering for active alerts (pending + in_progress)."""
+        # Arrange
+        mock_sessions = [
+            create_mock_session("session-1", "pending"),
+            create_mock_session("session-2", "in_progress"),
+        ]
+        mock_history_service.get_sessions_list.return_value = (mock_sessions, 2)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params=[("status", "pending"), ("status", "in_progress")]
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Verify response structure
+        assert "sessions" in data
+        assert len(data["sessions"]) == 2
+        
+        # Verify that service was called with correct multiple status filter
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert set(filters["status"]) == {"pending", "in_progress"}
+
+    @pytest.mark.unit
+    def test_get_sessions_list_three_status_values(self, app, client, mock_history_service):
+        """Test filtering with three status values."""
+        # Arrange
+        mock_history_service.get_sessions_list.return_value = ([], 0)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params=[
+                ("status", "completed"),
+                ("status", "failed"), 
+                ("status", "in_progress")
+            ]
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        
+        # Verify all three status values are passed
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert set(filters["status"]) == {"completed", "failed", "in_progress"}
+
+    @pytest.mark.unit
+    def test_get_sessions_list_no_status_filter(self, app, client, mock_history_service):
+        """Test that endpoint works without status filter (gets all sessions)."""
+        # Arrange
+        mock_history_service.get_sessions_list.return_value = ([], 0)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params={"agent_type": "KubernetesAgent"}  # Other filters but no status
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        
+        # Verify that status filter is not included when not specified
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert "status" not in filters  # No status filter when not provided
+        assert filters["agent_type"] == "KubernetesAgent"
     
     @pytest.mark.unit
     def test_get_sessions_list_with_date_filters(self, app, client, mock_history_service):
@@ -820,7 +1006,7 @@ class TestHistoryControllerIntegration:
         call_args = mock_service.get_sessions_list.call_args
         filters = call_args.kwargs["filters"]
         
-        assert filters["status"] == "completed"
+        assert filters["status"] == ["completed"]  # Now expects list due to multiple status support
         assert filters["agent_type"] == "KubernetesAgent"
         assert filters["alert_type"] == "NamespaceTerminating"
         assert "start_date" in filters
@@ -1353,3 +1539,21 @@ class TestExportAndSearchEndpoints:
         # Assert error response
         assert response.status_code == 500
         assert "Failed to search sessions" in response.json()["detail"] 
+
+
+def create_mock_session(session_id: str, status: str) -> Mock:
+    """Helper to create a mock session object with a specific status."""
+    mock_session = Mock()
+    mock_session.session_id = session_id
+    mock_session.alert_id = f"alert-{session_id}"
+    mock_session.agent_type = "KubernetesAgent"
+    mock_session.alert_type = "NamespaceTerminating"
+    mock_session.status = status
+    mock_session.started_at = datetime.now(timezone.utc)
+    mock_session.completed_at = datetime.now(timezone.utc) if status == "completed" else None
+    mock_session.error_message = None
+    mock_session.llm_interactions = []
+    mock_session.mcp_communications = []
+    mock_session.llm_interaction_count = 0
+    mock_session.mcp_communication_count = 0
+    return mock_session 

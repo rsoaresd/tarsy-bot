@@ -532,9 +532,13 @@ def datetime_now_utc():
 
 @pytest.fixture
 def history_service_with_test_db(history_test_database_engine):
-    """Create HistoryService with test database for integration testing."""
+    """Create HistoryService with test database engine."""
+    from tarsy.services.history_service import HistoryService
+    from tarsy.repositories.base_repository import DatabaseManager
     from unittest.mock import patch
+    from sqlmodel import Session
     
+    # Mock settings for history service
     mock_settings = Mock()
     mock_settings.history_enabled = True
     mock_settings.history_database_url = "sqlite:///:memory:"
@@ -543,9 +547,14 @@ def history_service_with_test_db(history_test_database_engine):
     with patch('tarsy.services.history_service.get_settings', return_value=mock_settings):
         service = HistoryService()
         
-        # Override database engine for testing
-        service.db_manager.engine = history_test_database_engine
-        service.db_manager.SessionLocal = lambda: Session(history_test_database_engine)
+        # Initialize the service properly
+        service.initialize()
+        
+        # Override database engine for testing if db_manager exists
+        if service.db_manager:
+            service.db_manager.engine = history_test_database_engine
+            service.db_manager.SessionLocal = lambda: Session(history_test_database_engine)
+        
         service._is_healthy = True
         service._initialization_attempted = True
         

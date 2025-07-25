@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from tarsy.config.settings import get_settings
+from tarsy.models.constants import AlertSessionStatus
 from tarsy.models.history import AlertSession, LLMInteraction, MCPCommunication
 from tarsy.repositories.base_repository import DatabaseManager
 from tarsy.repositories.history_repository import HistoryRepository
@@ -54,10 +55,18 @@ class HistoryService:
         Returns:
             Result of the operation, or None if all retries failed
         """
+        last_exception = None
+        
         for attempt in range(self.max_retries + 1):
             try:
-                return operation_func()
+                result = operation_func()
+                if result is not None:
+                    return result
+                # If result is None, log and continue to retry
+                logger.warning(f"Database operation '{operation_name}' returned None on attempt {attempt + 1}")
+                
             except Exception as e:
+                last_exception = e
                 error_msg = str(e).lower()
                 
                 # Check if this is a retryable database error
@@ -66,8 +75,16 @@ class HistoryService:
                     'database disk image is malformed', 
                     'sqlite3.operationalerror',
                     'connection timeout',
-                    'database table is locked'
+                    'database table is locked',
+                    'connection pool',
+                    'connection closed'
                 ])
+                
+                # For session creation, check if it might have succeeded despite the error
+                if operation_name == "create_session" and attempt > 0:
+                    # Don't retry if we might have created a duplicate
+                    logger.warning(f"Not retrying session creation after database error to prevent duplicates: {str(e)}")
+                    return None
                 
                 if not is_retryable or attempt == self.max_retries:
                     logger.error(f"Database operation '{operation_name}' failed after {attempt + 1} attempts: {str(e)}")
@@ -81,6 +98,7 @@ class HistoryService:
                 logger.warning(f"Database operation '{operation_name}' failed on attempt {attempt + 1}, retrying in {total_delay:.2f}s: {str(e)}")
                 time.sleep(total_delay)
         
+        logger.error(f"Database operation '{operation_name}' failed after all retries. Last error: {str(last_exception)}")
         return None
     
     def initialize(self) -> bool:
@@ -186,7 +204,7 @@ class HistoryService:
                     alert_data=alert_data,
                     agent_type=agent_type,
                     alert_type=alert_type,
-                    status="pending"
+                    status=AlertSessionStatus.PENDING
                 )
                 
                 created_session = repo.create_alert_session(session)
@@ -235,12 +253,44 @@ class HistoryService:
                     session.error_message = error_message
                 if final_analysis:
                     session.final_analysis = final_analysis
-                if status in ["completed", "failed"]:
+                if status in AlertSessionStatus.TERMINAL_STATUSES:
                     session.completed_at = datetime.now(timezone.utc)
                 
                 success = repo.update_alert_session(session)
                 if success:
                     logger.debug(f"Updated session {session_id} status to {status}")
+                    
+                    # Notify dashboard update service of session status change
+                    try:
+                        # Import here to avoid circular imports
+                        from tarsy.main import websocket_manager
+                        if websocket_manager and websocket_manager.dashboard_manager and websocket_manager.dashboard_manager.update_service:
+                            # Prepare details for dashboard update
+                            details = {}
+                            if error_message:
+                                details['error_message'] = error_message
+                            if final_analysis:
+                                details['final_analysis'] = final_analysis
+                                
+                            # Process session status change for dashboard updates
+                            import asyncio
+                            if asyncio.get_event_loop().is_running():
+                                # If we're in an async context, create a task
+                                asyncio.create_task(
+                                    websocket_manager.dashboard_manager.update_service.process_session_status_change(
+                                        session_id, status, details
+                                    )
+                                )
+                            else:
+                                # If not in async context, run directly
+                                asyncio.run(
+                                    websocket_manager.dashboard_manager.update_service.process_session_status_change(
+                                        session_id, status, details
+                                    )
+                                )
+                    except Exception as e:
+                        logger.warning(f"Failed to notify dashboard update service: {e}")
+                        
                 return success
         
         result = self._retry_database_operation("update_session_status", _update_status_operation)
@@ -580,7 +630,7 @@ class HistoryService:
                     return {
                         "agent_types": [],
                         "alert_types": [],
-                        "status_options": ["pending", "in_progress", "completed", "failed"],
+                        "status_options": AlertSessionStatus.ALL_STATUSES,
                         "time_ranges": [
                             {"label": "Last Hour", "value": "1h"},
                             {"label": "Last 4 Hours", "value": "4h"},
@@ -596,7 +646,7 @@ class HistoryService:
             return {
                 "agent_types": [],
                 "alert_types": [],
-                "status_options": ["pending", "in_progress", "completed", "failed"],
+                "status_options": AlertSessionStatus.ALL_STATUSES,
                 "time_ranges": [
                     {"label": "Last Hour", "value": "1h"},
                     {"label": "Last 4 Hours", "value": "4h"},
@@ -676,6 +726,70 @@ class HistoryService:
                 
         except Exception as e:
             logger.error(f"Failed to cleanup old sessions: {str(e)}")
+            return 0
+    
+    def cleanup_orphaned_sessions(self) -> int:
+        """
+        Clean up sessions that were left in active states due to unexpected backend shutdown.
+        
+        This method finds all sessions in "pending" or "in_progress" status and marks them
+        as "failed" since they were clearly interrupted and cannot continue processing.
+        
+        Should be called during backend startup to handle crash recovery.
+        
+        Returns:
+            Number of orphaned sessions cleaned up
+        """
+        if not self.is_enabled:
+            logger.debug("History service disabled - skipping orphaned session cleanup")
+            return 0
+            
+        try:
+            with self.get_repository() as repo:
+                if not repo:
+                    logger.warning("History repository unavailable - cannot cleanup orphaned sessions")
+                    return 0
+                
+                # Find all sessions in active states (pending or in_progress)
+                active_sessions_result = repo.get_alert_sessions(
+                    status=AlertSessionStatus.ACTIVE_STATUSES,
+                    page_size=1000  # Get a large batch to handle all orphaned sessions
+                )
+                
+                if not active_sessions_result or not active_sessions_result.get("sessions"):
+                    logger.info("No orphaned sessions found during startup cleanup")
+                    return 0
+                
+                active_sessions = active_sessions_result["sessions"]
+                cleanup_count = 0
+                
+                for session in active_sessions:
+                    try:
+                        # Mark session as failed with appropriate error message
+                        session.status = AlertSessionStatus.FAILED
+                        session.error_message = "Backend was restarted - session terminated unexpectedly"
+                        session.completed_at = datetime.now(timezone.utc)
+                        
+                        success = repo.update_alert_session(session)
+                        if success:
+                            cleanup_count += 1
+                            logger.debug(f"Marked orphaned session {session.session_id} as failed")
+                        else:
+                            logger.warning(f"Failed to update orphaned session {session.session_id}")
+                            
+                    except Exception as session_error:
+                        logger.error(f"Error cleaning up session {session.session_id}: {str(session_error)}")
+                        continue
+                
+                if cleanup_count > 0:
+                    logger.info(f"Cleaned up {cleanup_count} orphaned sessions during startup")
+                else:
+                    logger.info("No orphaned sessions required cleanup during startup")
+                    
+                return cleanup_count
+                
+        except Exception as e:
+            logger.error(f"Failed to cleanup orphaned sessions: {str(e)}")
             return 0
     
     def health_check(self) -> Dict[str, Any]:

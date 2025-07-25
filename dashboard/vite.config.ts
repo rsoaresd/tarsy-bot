@@ -13,6 +13,19 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // Proxy alerts endpoint to the backend server
+      '/alerts': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+      },
+      // Proxy WebSocket requests to the backend server
+      '/ws': {
+        target: 'ws://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+        ws: true, // Enable WebSocket proxying
+      },
     },
   },
   test: {

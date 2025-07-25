@@ -11,7 +11,9 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlmodel import JSON, Column, Field, Relationship, SQLModel
+from sqlmodel import JSON, Column, Field, Relationship, SQLModel, Index
+
+from tarsy.models.constants import AlertSessionStatus
 
 if TYPE_CHECKING:
     # Import for type hints only to avoid circular imports
@@ -35,6 +37,8 @@ class AlertSession(SQLModel, table=True):
     )
     
     alert_id: str = Field(
+        unique=True,
+        index=True,
         description="External alert identifier from the alert system"
     )
     
@@ -54,7 +58,7 @@ class AlertSession(SQLModel, table=True):
     )
     
     status: str = Field(
-        description="Current processing status (pending, in_progress, completed, failed)"
+        description=f"Current processing status ({', '.join(AlertSessionStatus.ALL_STATUSES)})"
     )
     
     started_at: datetime = Field(

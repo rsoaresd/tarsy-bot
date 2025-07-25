@@ -143,15 +143,18 @@ clean: ## Clean up generated files and caches
 .PHONY: clean-db
 clean-db: ## Clean up database files (USE WITH CAUTION)
 	@echo "$(RED)WARNING: This will delete database files!$(NC)"
-	@read -p "Are you sure? [y/N] " -n 1 -r; \
-	echo; \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		echo "$(YELLOW)Removing database files...$(NC)"; \
-		rm -f history.db history.db-shm history.db-wal; \
-		echo "$(GREEN)Database files removed$(NC)"; \
-	else \
-		echo "$(GREEN)Cancelled$(NC)"; \
-	fi
+	@printf "Are you sure? [y/N] "; \
+	read REPLY; \
+	case "$$REPLY" in \
+		[Yy]|[Yy][Ee][Ss]) \
+			echo "$(YELLOW)Removing database files...$(NC)"; \
+			rm -f history.db history.db-shm history.db-wal; \
+			echo "$(GREEN)Database files removed$(NC)"; \
+			;; \
+		*) \
+			echo "$(GREEN)Cancelled$(NC)"; \
+			;; \
+	esac
 
 # Utility targets
 .PHONY: check

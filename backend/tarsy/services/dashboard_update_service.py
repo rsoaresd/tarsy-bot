@@ -77,6 +77,9 @@ class DashboardUpdateService:
         # Metrics tracking
         self.metrics = DashboardMetrics(last_updated=datetime.now())
         self.metrics_update_interval = 30  # Update metrics every 30 seconds
+        self.heartbeat_interval = 120  # Send heartbeat every 2 minutes even if no changes
+        self.last_heartbeat = datetime.now()
+        self.first_metrics_sent = False  # Ensure first metrics update is always sent
         
         # Update batching and filtering
         self.pending_session_updates: Dict[str, List[Dict]] = defaultdict(list)
@@ -412,7 +415,7 @@ class DashboardUpdateService:
                 error_rate = (failed_count / total_sessions * 100) if total_sessions > 0 else 0.0
                 
                 # Update metrics
-                self.metrics = DashboardMetrics(
+                new_metrics = DashboardMetrics(
                     active_sessions=active_count,
                     completed_sessions=completed_count,
                     failed_sessions=failed_count,
@@ -422,8 +425,38 @@ class DashboardUpdateService:
                     last_updated=datetime.now()
                 )
                 
-                # Broadcast metrics update
-                await self.broadcast_system_metrics()
+                # Only broadcast if metrics changed significantly
+                should_broadcast = (
+                    not self.first_metrics_sent or  # Always send first metrics update
+                    self.metrics.active_sessions != new_metrics.active_sessions or
+                    self.metrics.completed_sessions != new_metrics.completed_sessions or
+                    self.metrics.failed_sessions != new_metrics.failed_sessions or
+                    abs(self.metrics.error_rate - new_metrics.error_rate) > 0.1  # Threshold for error rate changes
+                )
+                
+                # Also broadcast if it's been too long since last heartbeat (keep WebSocket alive)
+                time_since_heartbeat = (datetime.now() - self.last_heartbeat).total_seconds()
+                if time_since_heartbeat >= self.heartbeat_interval:
+                    should_broadcast = True
+                    logger.debug(f"Heartbeat broadcast after {time_since_heartbeat:.0f}s")
+                
+                # Update stored metrics
+                self.metrics = new_metrics
+                
+                # Broadcast metrics update only if changed or heartbeat needed
+                if should_broadcast:
+                    if not self.first_metrics_sent:
+                        logger.info(f"Broadcasting initial metrics: active={active_count}, completed={completed_count}, failed={failed_count}")
+                        self.first_metrics_sent = True
+                    elif time_since_heartbeat >= self.heartbeat_interval:
+                        logger.info(f"Broadcasting heartbeat to keep WebSocket connections alive")
+                    else:
+                        logger.info(f"Broadcasting metrics update: active={active_count}, completed={completed_count}, failed={failed_count}")
+                    
+                    await self.broadcast_system_metrics()
+                    self.last_heartbeat = datetime.now()
+                else:
+                    logger.debug("Metrics unchanged, skipping broadcast")
                 
                 # Wait for next update
                 await asyncio.sleep(self.metrics_update_interval)

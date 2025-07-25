@@ -201,14 +201,19 @@ MCPCommunication:
 - **Path**: `/api/v1/history/sessions`
 - **Purpose**: Retrieve alert processing sessions (active or completed) with filtering and pagination
 - **Query Parameters**:
-  - `status`: Filter by processing status (pending, in_progress, completed, failed)
+  - `status`: Filter by processing status(es) - supports multiple values (pending, in_progress, completed, failed)
   - `agent_type`: Filter by agent type
   - `alert_type`: Filter by alert type (e.g., 'pod_crash', 'high_cpu', 'disk_full')
   - `start_date`: Filter sessions after date
   - `end_date`: Filter sessions before date
   - `page`: Page number for pagination
   - `page_size`: Number of results per page
-- **Filter Logic**: Multiple query parameters use AND logic (e.g., `alert_type=X&status=Y&start_date=Z` returns sessions matching ALL three criteria)
+- **Filter Logic**: 
+  - Multiple query parameters use AND logic (e.g., `alert_type=X&status=Y&start_date=Z` returns sessions matching ALL three criteria)
+  - **Multiple Status Support**: `status` parameter can be repeated for multiple values (e.g., `status=completed&status=failed` for historical alerts)
+  - **Common Use Cases**: 
+    - Historical alerts: `status=completed&status=failed`
+    - Active alerts: `status=pending&status=in_progress`
 - **Response Format**:
   ```json
   {

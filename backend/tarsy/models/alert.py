@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 class Alert(BaseModel):
     """Alert model representing an incoming alert."""
     
+    id: Optional[str] = Field(None, description="Optional alert identifier from external system")
     alert_type: str = Field(..., description="Alert type")
     severity: str = Field(..., description="Alert severity level")
     environment: str = Field(..., description="Environment (production/staging)")

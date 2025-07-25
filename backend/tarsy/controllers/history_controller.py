@@ -8,8 +8,8 @@ and chronological timeline reconstruction.
 
 import csv
 import io
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime, timezone
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
@@ -50,7 +50,7 @@ router = APIRouter(prefix="/api/v1/history", tags=["history"])
     """
 )
 async def list_sessions(
-    status: Optional[str] = Query(None, description="Filter by session status"),
+    status: Optional[List[str]] = Query(None, description="Filter by session status(es) - supports multiple values"),
     agent_type: Optional[str] = Query(None, description="Filter by agent type"),
     alert_type: Optional[str] = Query(None, description="Filter by alert type"),
     start_date: Optional[datetime] = Query(None, description="Filter sessions started after this date"),
@@ -63,7 +63,7 @@ async def list_sessions(
     List alert processing sessions with filtering and pagination.
     
     Args:
-        status: Optional status filter (e.g., 'in_progress', 'completed', 'error')
+        status: Optional status filter(s) (e.g., ['completed', 'failed'] or ['in_progress'])
         agent_type: Optional agent type filter (e.g., 'kubernetes')
         alert_type: Optional alert type filter (e.g., 'NamespaceTerminating')
         start_date: Optional start date filter (inclusive)
@@ -371,7 +371,7 @@ async def get_active_sessions(
                 "duration_seconds": (
                     (session.completed_at - session.started_at).total_seconds() 
                     if session.completed_at else 
-                    (datetime.now(timezone.utc) - session.started_at).total_seconds()
+                    (datetime.now(UTC) - (session.started_at.replace(tzinfo=UTC) if session.started_at.tzinfo is None else session.started_at)).total_seconds()
                 )
             }
             for session in active_sessions

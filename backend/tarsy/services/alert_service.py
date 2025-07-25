@@ -6,6 +6,9 @@ specialized agents based on alert type. It implements the multi-layer
 agent architecture for alert processing.
 """
 
+import asyncio
+import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -13,6 +16,7 @@ from tarsy.config.settings import Settings
 from tarsy.integrations.llm.client import LLMManager
 from tarsy.integrations.mcp.client import MCPClient
 from tarsy.models.alert import Alert
+from tarsy.models.constants import AlertSessionStatus
 from tarsy.services.agent_factory import AgentFactory
 from tarsy.services.agent_registry import AgentRegistry
 from tarsy.services.history_service import get_history_service
@@ -30,6 +34,10 @@ class AlertService:
     This class implements a multi-layer architecture that delegates 
     processing to specialized agents based on alert type.
     """
+    
+    # Class-level dictionary to track processing locks for alerts
+    _processing_locks = {}
+    _locks_lock = asyncio.Lock()
     
     def __init__(self, settings: Settings):
         """
@@ -56,7 +64,27 @@ class AlertService:
         self.agent_factory = None  # Will be initialized in initialize()
         
         logger.info("AlertService initialized with agent delegation support")
+
+    async def _get_alert_lock(self, alert_key: str) -> asyncio.Lock:
+        """Get or create a lock for a specific alert to prevent concurrent processing."""
+        async with self._locks_lock:
+            if alert_key not in self._processing_locks:
+                self._processing_locks[alert_key] = asyncio.Lock()
+            return self._processing_locks[alert_key]
     
+    async def _cleanup_alert_lock(self, alert_key: str):
+        """Clean up the lock for an alert after processing is complete."""
+        async with self._locks_lock:
+            # Only remove if no one is waiting on the lock
+            if alert_key in self._processing_locks:
+                lock = self._processing_locks[alert_key]
+                if not lock.locked():
+                    del self._processing_locks[alert_key]
+    
+    def _generate_alert_key(self, alert: Alert) -> str:
+        """Generate a unique key for an alert to use for concurrency control."""
+        return f"{alert.alert_type}_{alert.environment}_{alert.namespace}_{alert.message[:50]}"
+
     async def initialize(self):
         """
         Initialize the service and all dependencies.
@@ -104,6 +132,34 @@ class AlertService:
         Returns:
             Analysis result as a string
         """
+        # Generate alert key for concurrency control
+        alert_key = self._generate_alert_key(alert)
+        
+        # Get alert-specific lock to prevent concurrent processing
+        alert_lock = await self._get_alert_lock(alert_key)
+        
+        async with alert_lock:
+            try:
+                return await self._process_alert_internal(alert, progress_callback)
+            finally:
+                # Clean up the lock after processing
+                await self._cleanup_alert_lock(alert_key)
+    
+    async def _process_alert_internal(
+        self, 
+        alert: Alert, 
+        progress_callback: Optional[Callable] = None
+    ) -> str:
+        """
+        Internal alert processing logic with all the actual processing steps.
+        
+        Args:
+            alert: The alert to process
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            Analysis result as a string
+        """
         session_id = None
         try:
             # Will create history session after determining agent type
@@ -142,7 +198,7 @@ class AlertService:
             session_id = self._create_history_session(alert, agent_class_name)
             
             # Update history session with agent selection
-            self._update_session_status(session_id, "in_progress", f"Selected agent: {agent_class_name}")
+            self._update_session_status(session_id, AlertSessionStatus.IN_PROGRESS, f"Selected agent: {agent_class_name}")
             
             # Step 3: Download runbook
             if progress_callback:
@@ -208,7 +264,7 @@ class AlertService:
                 )
                 
                 # Mark history session as completed successfully
-                self._update_session_completed(session_id, "completed", final_result)
+                self._update_session_completed(session_id, AlertSessionStatus.COMPLETED, final_analysis=final_result)
                 
                 if progress_callback:
                     await progress_callback(100, "Analysis completed successfully")
@@ -346,7 +402,13 @@ class AlertService:
             agent_type = agent_class_name or 'unknown'
             
             # Generate alert ID from alert data if not present
-            alert_id = getattr(alert, 'id', f"{alert.alert_type}_{alert.environment}_{alert.namespace}_{int(datetime.now(timezone.utc).timestamp())}")
+            if hasattr(alert, 'id') and alert.id:
+                alert_id = alert.id
+            else:
+                # Use nanosecond timestamp and random component to prevent collisions
+                timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1000000)  # microseconds
+                random_suffix = uuid.uuid4().hex[:8]  # 8 chars of randomness
+                alert_id = f"{alert.alert_type}_{alert.environment}_{alert.namespace}_{timestamp_ns}_{random_suffix}"
             
             session_id = self.history_service.create_session(
                 alert_id=alert_id,

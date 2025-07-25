@@ -1,8 +1,9 @@
 """
-Unit tests for HistoryService.
+Unit tests for History Service.
 
-Tests the history service functionality with mocked dependencies to ensure
-proper business logic implementation without external dependencies.
+Comprehensive test coverage for session management, LLM interaction logging,
+MCP communication tracking, and timeline reconstruction with graceful
+degradation when database operations fail.
 """
 
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from tarsy.config.settings import Settings
+from tarsy.models.constants import AlertSessionStatus
 from tarsy.models.history import AlertSession
 from tarsy.services.history_service import HistoryService, get_history_service
 
@@ -299,6 +301,79 @@ class TestHistoryService:
             # final_analysis should remain unchanged when not provided
             assert mock_session.final_analysis == existing_analysis
             mock_repository.update_alert_session.assert_called_once_with(mock_session)
+    
+    @pytest.mark.unit 
+    @patch('tarsy.main.websocket_manager')
+    @patch('asyncio.run')
+    @patch('asyncio.get_event_loop')
+    def test_update_session_status_calls_dashboard_service(self, mock_get_loop, mock_asyncio_run, mock_websocket_manager, history_service, mock_repository):
+        """Test that session status update actually calls dashboard service."""
+        # Setup mock session
+        mock_session = Mock(spec=AlertSession)
+        mock_repository.get_alert_session.return_value = mock_session
+        
+        # Setup mock dashboard update service
+        mock_update_service = Mock()
+        mock_dashboard_manager = Mock()
+        mock_dashboard_manager.update_service = mock_update_service  
+        mock_websocket_manager.dashboard_manager = mock_dashboard_manager
+        
+        # Mock asyncio to simulate non-async context (so it uses asyncio.run)
+        mock_loop = Mock()
+        mock_loop.is_running.return_value = False  # Not in async context
+        mock_get_loop.return_value = mock_loop
+        
+        with patch.object(history_service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = mock_repository
+            mock_get_repo.return_value.__exit__.return_value = None
+            
+            # Call update_session_status
+            result = history_service.update_session_status(
+                session_id="test-session-id",
+                status="completed",
+                error_message="Test error",
+                final_analysis="Test analysis"
+            )
+            
+            # Verify basic functionality
+            assert result == True
+            assert mock_session.status == "completed" 
+            mock_repository.update_alert_session.assert_called_once_with(mock_session)
+            
+            # THE CORE FIX: Verify dashboard service is called via asyncio.run
+            mock_asyncio_run.assert_called_once()
+            # Verify the call was made to process_session_status_change with correct parameters
+            called_coro = mock_asyncio_run.call_args[0][0]
+            # This verifies the dashboard integration is working - the method gets called
+            
+            # Additional verification: Check that the coroutine is calling the right method
+            # The coroutine should be calling process_session_status_change with session details
+            assert str(called_coro).find('process_session_status_change') != -1, \
+                f"Expected process_session_status_change call, got: {called_coro}"
+    
+    @pytest.mark.unit 
+    @patch('tarsy.main.websocket_manager', None)  # Simulate websocket_manager not available
+    def test_update_session_status_without_dashboard_service(self, history_service, mock_repository):
+        """Test that session status update works gracefully without dashboard service."""
+        # Setup mock session
+        mock_session = Mock(spec=AlertSession)
+        mock_repository.get_alert_session.return_value = mock_session
+        
+        with patch.object(history_service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = mock_repository
+            mock_get_repo.return_value.__exit__.return_value = None
+            
+            # Call update_session_status - should work even without dashboard service
+            result = history_service.update_session_status(
+                session_id="test-session-id", 
+                status="completed"
+            )
+            
+            # Verify the basic functionality still works
+            assert result == True
+            assert mock_session.status == "completed"
+            mock_repository.update_alert_session.assert_called_once_with(mock_session)
+            # The test passes if no exceptions are raised (graceful degradation)
     
     @pytest.mark.unit
     def test_log_llm_interaction_success(self, history_service, mock_repository):
@@ -1011,3 +1086,379 @@ class TestExportAndSearchMethods:
         
         # Verify empty result on exception
         assert result == [] 
+
+
+@pytest.mark.unit
+class TestHistoryServiceRetryLogicDuplicatePrevention:
+    """Test HistoryService retry logic improvements for duplicate prevention."""
+    
+    @pytest.fixture
+    def history_service(self):
+        """Create HistoryService instance for testing."""
+        with patch('tarsy.services.history_service.get_settings') as mock_settings:
+            mock_settings.return_value.history_enabled = True
+            mock_settings.return_value.history_database_url = "sqlite:///test.db"
+            mock_settings.return_value.history_retention_days = 90
+            
+            service = HistoryService()
+            return service
+    
+    def test_retry_operation_success_on_first_attempt(self, history_service):
+        """Test that successful operations on first attempt don't retry."""
+        call_count = 0
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            return "success"
+        
+        result = history_service._retry_database_operation("test_operation", operation)
+        
+        assert result == "success"
+        assert call_count == 1  # Should only be called once
+    
+    def test_retry_operation_success_after_retries(self, history_service):
+        """Test that operations succeed after transient failures."""
+        call_count = 0
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise Exception("database is locked")
+            return "success"
+        
+        result = history_service._retry_database_operation("test_operation", operation)
+        
+        assert result == "success"
+        assert call_count == 3  # Should retry twice, succeed on third
+    
+    def test_retry_operation_exhausts_retries(self, history_service):
+        """Test that operations fail after exhausting all retries."""
+        call_count = 0
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            raise Exception("database is locked")
+        
+        result = history_service._retry_database_operation("test_operation", operation)
+        
+        assert result is None
+        assert call_count == 4  # Initial attempt + 3 retries
+    
+    def test_retry_operation_non_retryable_error(self, history_service):
+        """Test that non-retryable errors don't trigger retries."""
+        call_count = 0
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("Invalid data")  # Not a retryable error
+        
+        result = history_service._retry_database_operation("test_operation", operation)
+        
+        assert result is None
+        assert call_count == 1  # Should not retry
+    
+    def test_retry_operation_create_session_no_retry_after_first_attempt(self, history_service):
+        """Test that create_session operations don't retry after first failure to prevent duplicates."""
+        call_count = 0
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return "session_123"  # First attempt succeeds
+            raise Exception("database is locked")  # Shouldn't reach here
+        
+        result = history_service._retry_database_operation("create_session", operation)
+        
+        assert result == "session_123"
+        assert call_count == 1
+    
+    def test_retry_operation_create_session_prevents_duplicate_retry(self, history_service):
+        """Test that create_session doesn't retry after database errors to prevent duplicates."""
+        call_count = 0
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            raise Exception("connection timeout")  # Always fails
+        
+        result = history_service._retry_database_operation("create_session", operation)
+        
+        assert result is None  # Should return None after first failure
+        assert call_count == 2   # First attempt + one retry, then stops to prevent duplicates
+    
+    def test_retry_operation_non_create_session_retries_normally(self, history_service):
+        """Test that non-create_session operations retry normally."""
+        call_count = 0
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise Exception("database is locked")
+            return "success"
+        
+        result = history_service._retry_database_operation("update_session", operation)
+        
+        assert result == "success"
+        assert call_count == 3  # Should retry normally
+    
+    def test_retry_operation_returns_none_for_failed_results(self, history_service):
+        """Test that operations returning None trigger retries."""
+        call_count = 0
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                return None  # Failed operation
+            return "success"
+        
+        with patch.object(history_service, 'max_retries', 3):
+            result = history_service._retry_database_operation("test_operation", operation)
+        
+        assert result == "success"
+        assert call_count == 3  # Should retry on None results
+    
+    def test_retry_operation_logs_appropriately(self, history_service, caplog):
+        """Test that retry operations log warnings and errors appropriately."""
+        import logging
+        caplog.set_level(logging.WARNING)
+        
+        call_count = 0
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise Exception("database is locked")
+            return "success"
+        
+        result = history_service._retry_database_operation("test_operation", operation)
+        
+        assert result == "success"
+        
+        # Should log warnings for retries
+        warning_logs = [record for record in caplog.records if record.levelno == logging.WARNING]
+        assert len(warning_logs) >= 2  # At least 2 retry warnings
+        
+        # Should contain retry information
+        assert any("retrying in" in record.message for record in warning_logs)
+    
+    def test_retry_operation_exponential_backoff_timing(self, history_service):
+        """Test that retry operations use exponential backoff with jitter."""
+        import time
+        
+        call_count = 0
+        retry_times = []
+        
+        def operation():
+            nonlocal call_count
+            call_count += 1
+            retry_times.append(time.time())
+            if call_count < 3:
+                raise Exception("database is locked")
+            return "success"
+        
+        # Reduce delays for testing
+        history_service.base_delay = 0.01  # 10ms base delay
+        history_service.max_delay = 0.1    # 100ms max delay
+        
+        start_time = time.time()
+        result = history_service._retry_database_operation("test_operation", operation)
+        end_time = time.time()
+        
+        assert result == "success"
+        assert call_count == 3
+        
+        # Should have taken some time due to backoff
+        total_time = end_time - start_time
+        assert total_time >= 0.01, f"Should have delayed for backoff, took {total_time}s"
+        
+        # Verify exponential backoff (second retry should take longer than first)
+        if len(retry_times) >= 3:
+            first_gap = retry_times[1] - retry_times[0]
+            second_gap = retry_times[2] - retry_times[1]
+            assert second_gap > first_gap, "Second retry should have longer delay than first"
+    
+    def test_retry_operation_handles_all_retryable_errors(self, history_service):
+        """Test that all configured retryable errors trigger retries."""
+        retryable_errors = [
+            "database is locked",
+            "database disk image is malformed",
+            "sqlite3.operationalerror",
+            "connection timeout",
+            "database table is locked",
+            "connection pool",
+            "connection closed"
+        ]
+        
+        for error_msg in retryable_errors:
+            call_count = 0
+            
+            def operation():
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise Exception(error_msg)
+                return "success"
+            
+            result = history_service._retry_database_operation("test_operation", operation)
+            
+            assert result == "success", f"Should retry for error: {error_msg}"
+            assert call_count == 2, f"Should have retried once for error: {error_msg}"
+    
+    def test_retry_operation_preserves_last_exception(self, history_service, caplog):
+        """Test that the last exception is preserved and logged when all retries fail."""
+        import logging
+        caplog.set_level(logging.ERROR)
+        
+        def operation():
+            raise Exception("Final error message")
+        
+        result = history_service._retry_database_operation("test_operation", operation)
+        
+        assert result is None
+        
+        # Should log the final error
+        error_logs = [record for record in caplog.records if record.levelno == logging.ERROR]
+        assert len(error_logs) >= 1
+        assert "Final error message" in error_logs[-1].message 
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_cleanup_orphaned_sessions():
+    """Test that orphaned sessions are properly cleaned up on startup."""
+    # Create test data: sessions in different states
+    test_sessions = [
+        # These should be cleaned up (orphaned)
+        {
+            "session_id": "orphaned-pending-1",
+            "alert_id": "alert-pending-1",
+            "status": AlertSessionStatus.PENDING, 
+            "agent_type": "KubernetesAgent"
+        },
+        {
+            "session_id": "orphaned-progress-1", 
+            "alert_id": "alert-progress-1",
+            "status": AlertSessionStatus.IN_PROGRESS,
+            "agent_type": "KubernetesAgent"
+        },
+        # These should NOT be cleaned up (already terminal states)
+        {
+            "session_id": "completed-1",
+            "alert_id": "alert-completed-1", 
+            "status": AlertSessionStatus.COMPLETED,
+            "agent_type": "KubernetesAgent"
+        },
+        {
+            "session_id": "failed-1",
+            "alert_id": "alert-failed-1",
+            "status": AlertSessionStatus.FAILED, 
+            "agent_type": "KubernetesAgent"
+        }
+    ]
+    
+    # Create a mock history service
+    history_service = HistoryService()
+    history_service.is_enabled = True
+    
+    # Mock the repository
+    mock_repo = Mock()
+    
+    # Create mock sessions
+    mock_active_sessions = []
+    mock_all_sessions = []
+    
+    for session_data in test_sessions:
+        mock_session = Mock()
+        for key, value in session_data.items():
+            setattr(mock_session, key, value)
+        mock_all_sessions.append(mock_session)
+        
+        # Only pending and in_progress should be returned by the active query
+        if session_data["status"] in AlertSessionStatus.ACTIVE_STATUSES:
+            mock_active_sessions.append(mock_session)
+    
+    # Mock repository responses
+    mock_repo.get_alert_sessions.return_value = {
+        "sessions": mock_active_sessions,
+        "total": len(mock_active_sessions)
+    }
+    mock_repo.update_alert_session.return_value = True
+    
+    # Mock the context manager
+    history_service.get_repository = Mock(return_value=Mock(__enter__=Mock(return_value=mock_repo), __exit__=Mock(return_value=None)))
+    
+    # Call cleanup method
+    cleaned_count = history_service.cleanup_orphaned_sessions()
+    
+    # Verify correct number of sessions were cleaned up
+    assert cleaned_count == 2, f"Expected 2 sessions to be cleaned up, got {cleaned_count}"
+    
+    # Verify get_alert_sessions was called with correct parameters
+    mock_repo.get_alert_sessions.assert_called_once_with(
+        status=AlertSessionStatus.ACTIVE_STATUSES,
+        page_size=1000
+    )
+    
+    # Verify each orphaned session was updated correctly
+    assert mock_repo.update_alert_session.call_count == 2
+    
+    # Check that orphaned sessions had their status updated
+    for session in mock_active_sessions:
+        assert session.status == AlertSessionStatus.FAILED
+        assert session.error_message == "Backend was restarted - session terminated unexpectedly"
+        assert hasattr(session, 'completed_at')
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_cleanup_orphaned_sessions_disabled_service():
+    """Test that cleanup does nothing when history service is disabled."""
+    history_service = HistoryService()
+    history_service.is_enabled = False
+    
+    cleaned_count = history_service.cleanup_orphaned_sessions()
+    
+    assert cleaned_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_cleanup_orphaned_sessions_no_repository():
+    """Test cleanup handles gracefully when repository is unavailable."""
+    history_service = HistoryService()
+    history_service.is_enabled = True
+    history_service.get_repository = Mock(return_value=Mock(__enter__=Mock(return_value=None), __exit__=Mock(return_value=None)))
+    
+    cleaned_count = history_service.cleanup_orphaned_sessions()
+    
+    assert cleaned_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_cleanup_orphaned_sessions_no_active_sessions():
+    """Test cleanup when there are no orphaned sessions."""
+    history_service = HistoryService()
+    history_service.is_enabled = True
+    
+    mock_repo = Mock()
+    mock_repo.get_alert_sessions.return_value = {"sessions": [], "total": 0}
+    
+    history_service.get_repository = Mock(return_value=Mock(__enter__=Mock(return_value=mock_repo), __exit__=Mock(return_value=None)))
+    
+    cleaned_count = history_service.cleanup_orphaned_sessions()
+    
+    assert cleaned_count == 0
+    mock_repo.get_alert_sessions.assert_called_once_with(
+        status=["pending", "in_progress"],
+        page_size=1000
+    )
+    mock_repo.update_alert_session.assert_not_called() 
