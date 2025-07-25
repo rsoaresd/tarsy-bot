@@ -86,6 +86,33 @@ The integrated approach provides significant advantages over separate event syst
                                                    └─────────────────┘
 ```
 
+## Document Relationship & Phase Structure
+
+This implementation plan works in conjunction with the **UI Phases Document** (`EP-0004-dashboard-ui-phases.md`) to provide complete implementation guidance:
+
+### Implementation Document (This Document)
+- **Backend Infrastructure Phases** (1, 2, 2.5): Detailed WebSocket, Hook System, and API implementation
+- **Frontend Integration Phases** (3, 4): High-level frontend implementation strategy with references to UI phases
+- **Overall Strategy**: Architecture, constraints, and system integration approach
+
+### UI Phases Document (`EP-0004-dashboard-ui-phases.md`)
+- **Frontend UI Phases** (1-7): Detailed progressive UI enhancement with Material-UI components
+- **Component Specifications**: Complete UI layouts, component code, and implementation details
+- **User Experience**: Detailed UX flows, accessibility requirements, and design specifications
+
+### Phase Execution Order
+```
+Backend Implementation (This Document):
+├── Phase 1: WebSocket Infrastructure
+├── Phase 2: Hook System Integration  
+├── Phase 2.5: API Endpoints
+└── Frontend Integration:
+    ├── Phase 3: Dashboard Application → References UI Phases 1-3
+    └── Phase 4: Advanced Features → References UI Phases 4-7
+```
+
+**Key Principle**: Backend phases must complete first, then frontend development follows the 7-phase UI progression for incremental value delivery.
+
 ## UI/UX Design Requirements
 
 ### User Interface Specifications
@@ -649,283 +676,125 @@ echo "All dashboard API tests should pass"
 ## Phase 3: Frontend Dashboard Application
 
 ### Phase 3 Overview
-**Dependencies:** Phase 2.5 completion
-**Goal:** Create standalone React dashboard application with real-time capabilities
+**Dependencies:** Phase 2.5 completion  
+**Goal:** Create standalone React dashboard application with progressive UI enhancement
 
-#### Step 3.1: Dashboard Application Structure
-**Goal:** Initialize React dashboard application with routing and basic layout
-**Files to Create/Modify:**
-- `dashboard/package.json` (new)
-- `dashboard/tsconfig.json` (new)
-- `dashboard/src/App.tsx` (new)
-- `dashboard/src/index.tsx` (new)
-- `dashboard/src/components/DashboardLayout.tsx` (new)
-- `dashboard/public/index.html` (new)
+**📋 Detailed UI Implementation**: This phase implements **UI Phases 1-3** from `EP-0004-dashboard-ui-phases.md`:
+- **UI Phase 1**: Basic Alert List - Simple session display with Material-UI Table
+- **UI Phase 2**: Active/Historical Split - Distinct panels for operational awareness  
+- **UI Phase 3**: Navigation & Detail - Session detail pages with timeline visualization
 
-**AI Prompt:** `Implement Step 3.1 of EP-0004: Initialize React dashboard application structure with routing, Material-UI theme, and basic layout components following the UI/UX specifications in the implementation plan UI section`
+### Implementation Strategy
 
-**Tasks:**
-- [ ] Create dashboard directory structure as sibling to alert-dev-ui
-- [ ] Initialize React application with TypeScript and Material-UI
-- [ ] Set up routing for dashboard view and session detail pages
-- [ ] Create basic dashboard layout with navigation following responsive design requirements
-- [ ] Configure Material-UI theme with specified color palette (primary blue, status colors)
-- [ ] Implement typography scale (Roboto font family with specified sizes)
-- [ ] Set up 8px grid spacing system and component padding standards
+#### Technology Stack
+- **React 18.2.0**: Latest stable with concurrent features
+- **TypeScript**: Full type safety and enhanced developer experience
+- **Material-UI v5.15.0**: Complete Material Design system  
+- **@mui/icons-material**: Comprehensive icon library
+- **React Router v6**: Client-side routing and navigation
+- **Axios**: HTTP client for API communication
+- **Vite**: Fast build tool for superior development experience
 
-**Dependencies:**
-- Phase 2 completion
-- Node.js and npm/yarn environment
+#### Key Implementation Areas
 
-**Validation Criteria:**
-- [ ] Dashboard application starts successfully on development server
-- [ ] Routing navigates between dashboard and session detail views
-- [ ] Material-UI theme renders correctly across components
-- [ ] Application structure follows React best practices
-- [ ] Dashboard operates independently from alert-dev-ui
+**Application Foundation (UI Phase 1)**
+- Dashboard directory structure as sibling to `alert-dev-ui/`
+- React application with TypeScript and Material-UI setup
+- Basic routing for dashboard and session detail views
+- Material-UI theme with specified color palette and typography
 
-**Success Check:**
-```bash
-# Initialize and start dashboard
-cd dashboard
-npm install
-npm start
+**Core UI Components (UI Phase 2)**  
+- Split-panel dashboard layout (active alerts top, historical bottom)
+- ActiveAlertsPanel with real-time status indicators
+- HistoricalSessionsList with efficient data display
+- Material-UI theme integration and responsive design
 
-# Verify application loads
-curl http://localhost:3001
+**Navigation & Detail Views (UI Phase 3)**
+- SessionDetailPage with timeline visualization
+- Navigation between list and detail views  
+- Original alert data and final AI analysis display
+- Breadcrumb navigation and session actions
 
-# Check routing
-open http://localhost:3001/dashboard
-open http://localhost:3001/sessions/test
-```
-
-#### Step 3.2: WebSocket Client Implementation
-**Goal:** Create multiplexed WebSocket client for dashboard real-time communications
-**Files to Create/Modify:**
-- `dashboard/src/services/WebSocketManager.ts` (new)
-- `dashboard/src/hooks/useWebSocket.ts` (new)
-- `dashboard/src/types/websocket.ts` (new)
-- `dashboard/src/services/api.ts` (new)
-
-**AI Prompt:** `Implement Step 3.2 of EP-0004: Create multiplexed WebSocket client with subscription management, auto-reconnection, and message routing for dashboard communications`
-
-**Tasks:**
-- [ ] Create MultiplexedWebSocketManager class
-- [ ] Implement subscription-based message routing
-- [ ] Add auto-reconnection with exponential backoff
-- [ ] Create React hooks for WebSocket state management
-- [ ] Implement subscription state persistence across reconnections
-
-**Dependencies:**
-- Step 3.1 must be complete
-- Backend WebSocket endpoint operational
-
-**Validation Criteria:**
-- [ ] WebSocket client connects to dashboard endpoint successfully
-- [ ] Subscription management works for multiple channels
-- [ ] Auto-reconnection restores subscriptions after connection loss
-- [ ] Message routing delivers updates to correct React components
-- [ ] WebSocket connection status visible in dashboard UI
-
-**Success Check:**
-```bash
-# Start dashboard and verify WebSocket connection
-cd dashboard && npm start
-
-# Check browser console for WebSocket connection
-# Open browser dev tools and verify:
-# - WebSocket connection established
-# - Subscription messages sent
-# - Reconnection works after network interruption
-```
-
-#### Step 3.3: Dashboard Core Components
-**Goal:** Implement main dashboard view with active alerts panel and historical sessions list
-**Files to Create/Modify:**
-- `dashboard/src/components/DashboardView.tsx` (new)
-- `dashboard/src/components/ActiveAlertsPanel.tsx` (new)
-- `dashboard/src/components/HistoricalSessionsList.tsx` (new)
-- `dashboard/src/components/FilterPanel.tsx` (new)
-- `dashboard/src/components/RealTimeMonitor.tsx` (new)
-
-**AI Prompt:** `Implement Step 3.3 of EP-0004: Create main dashboard components following the detailed UI/UX specifications including split-panel layout, status color coding, virtual scrolling, and accessibility requirements`
-
-**Tasks:**
-- [ ] Create DashboardView with split-panel design (active alerts top, historical bottom)
-- [ ] Implement ActiveAlertsPanel with status color coding (🔴🟡🟢), progress indicators, and expandable cards
-- [ ] Create HistoricalSessionsList with react-window virtual scrolling, quick filter buttons with badge counts
-- [ ] Build FilterPanel with debounced search, autocomplete suggestions, and sortable table columns
-- [ ] Add RealTimeMonitor with auto-refresh indicator and live status counters
-- [ ] Implement ARIA labels and keyboard navigation for accessibility (WCAG 2.1 AA)
-- [ ] Add responsive breakpoints (desktop 1200px+, tablet 768px+, mobile 320px+)
-
-**Dependencies:**
-- Step 3.2 must be complete
-- WebSocket client functionality
-
-**Validation Criteria:**
-- [ ] Dashboard view displays both active and historical sections
-- [ ] Active alerts panel shows real-time processing status
-- [ ] Historical sessions list handles large datasets efficiently
-- [ ] Filter panel applies filters and updates results
-- [ ] Real-time monitor displays current operational metrics
-
-**Success Check:**
-```bash
-# Verify dashboard components render
-cd dashboard && npm start
-open http://localhost:3001/dashboard
-
-# Check component functionality:
-# - Active alerts panel shows processing status
-# - Historical list displays sessions with pagination
-# - Filters apply and update results
-# - Real-time updates appear automatically
-```
+#### WebSocket Integration
+- MultiplexedWebSocketManager for real-time communications
+- Subscription-based message routing for dashboard updates
+- Auto-reconnection with subscription state persistence
+- React hooks for WebSocket state management
 
 ### Phase 3 Completion Criteria
+- [ ] **UI Phases 1-3 successfully implemented** following specifications in `EP-0004-dashboard-ui-phases.md`
 - [ ] Dashboard application runs independently with proper routing
-- [ ] WebSocket client provides reliable real-time communication
-- [ ] Core dashboard components display active and historical alerts
-- [ ] Filtering and pagination work efficiently for large datasets
+- [ ] WebSocket client provides reliable real-time communication  
+- [ ] Material-UI theme and components render correctly across all views
+- [ ] Session detail navigation works for both active and historical alerts
 - [ ] Real-time updates appear promptly in dashboard interface
 
 ## Phase 4: Advanced Features & Integration
 
 ### Phase 4 Overview
-**Dependencies:** Phase 3 completion
-**Goal:** Complete dashboard implementation with session details, timeline visualization, and performance optimization
+**Dependencies:** Phase 3 completion  
+**Goal:** Complete dashboard implementation with advanced UI features and production readiness
 
-#### Step 4.1: Session Detail Implementation
-**Goal:** Create unified session detail page for both active and historical alerts
-**Files to Create/Modify:**
-- `dashboard/src/components/SessionDetailPage.tsx` (new)
-- `dashboard/src/components/SessionHeader.tsx` (new)
-- `dashboard/src/components/TimelineVisualization.tsx` (new)
-- `dashboard/src/components/InteractionDetails.tsx` (new)
-- `dashboard/src/components/SessionActions.tsx` (new)
+**📋 Detailed UI Implementation**: This phase implements **UI Phases 4-7** from `EP-0004-dashboard-ui-phases.md`:
+- **UI Phase 4**: Search & Filtering - Enhanced data exploration capabilities
+- **UI Phase 5**: Real-time Updates - Live monitoring with WebSocket integration  
+- **UI Phase 6**: Advanced Features - Pagination, export, performance optimization
+- **UI Phase 7**: Polish & Performance - Final optimizations and production readiness
 
-**AI Prompt:** `Implement Step 4.1 of EP-0004: Create session detail page following UI/UX specifications with SVG-based timeline visualization, interactive elements, and accessibility requirements`
+### Implementation Strategy
 
-**Tasks:**
-- [ ] Create SessionDetailPage with routing parameter handling and breadcrumb navigation
-- [ ] Implement SessionHeader showing active/historical status with clear visual indicators
-- [ ] Build TimelineVisualization with SVG-based timeline, chronological markers, and clickable interaction points
-- [ ] Create InteractionDetails with copy functionality for individual interactions and full timeline
-- [ ] Add SessionActions with consistent button styling and keyboard navigation support
-- [ ] Implement smooth animations for real-time timeline updates (active sessions only)
-- [ ] Add focus management and ARIA live regions for screen reader support
+#### Advanced UI Features (UI Phases 4-7)
 
-**Dependencies:**
-- Step 3.3 must be complete
-- Session detail routing infrastructure
+**Enhanced Data Exploration (UI Phase 4)**
+- Advanced filtering interface with multi-criteria support
+- Debounced search with autocomplete suggestions
+- Filter persistence and dynamic filter options
+- Enhanced user experience with interactive components
 
-**Validation Criteria:**
-- [ ] Session detail page loads for both active and historical sessions
-- [ ] Timeline visualization displays chronological interactions clearly
-- [ ] Real-time updates appear for active sessions automatically
-- [ ] Interaction details show comprehensive LLM and MCP information
-- [ ] Session actions provide copy and export functionality
+**Real-time Updates (UI Phase 5)**
+- Enhanced timeline visualization with @mui/lab Timeline components
+- Live session monitoring with WebSocket integration
+- Real-time progress indicators and status updates
+- Interactive timeline with expandable details
 
-**Success Check:**
-```bash
-# Test session detail navigation
-open http://localhost:3001/sessions/active_session_id
-open http://localhost:3001/sessions/historical_session_id
+**Performance & Scalability (UI Phase 6)**
+- Virtual scrolling implementation using react-window
+- Advanced pagination for large datasets
+- Session data export functionality (JSON/CSV)
+- Performance optimizations and caching strategies
 
-# Verify functionality:
-# - Timeline renders with interactions
-# - Real-time updates for active sessions
-# - Copy/export actions work
-# - Navigation back to dashboard works
-```
+**Production Polish (UI Phase 7)**
+- Final UI optimizations and animations
+- Comprehensive error handling and resilience
+- Performance monitoring and metrics
+- Production deployment readiness
 
-#### Step 4.2: Performance Optimization
-**Goal:** Implement virtualization, caching, and performance optimizations for large datasets
-**Files to Create/Modify:**
-- `dashboard/src/components/VirtualizedSessionGrid.tsx` (new)
-- `dashboard/src/hooks/useSessionCache.ts` (new)
-- `dashboard/src/services/cacheManager.ts` (new)
-- `dashboard/src/hooks/useVirtualization.ts` (new)
+#### Technical Implementation Areas
 
-**AI Prompt:** `Implement Step 4.2 of EP-0004: Add performance optimizations including virtual scrolling, session data caching, and React optimization patterns for handling 1000+ sessions`
+**Performance Optimization**
+- Virtual scrolling for handling 1000+ sessions efficiently
+- React optimization patterns (memo, useMemo, useCallback)
+- Session data caching with TTL and invalidation
+- Lazy loading for timeline data
 
-**Tasks:**
-- [ ] Implement virtualized scrolling for session lists using react-window
-- [ ] Create session data caching with TTL and invalidation
-- [ ] Add React optimization patterns (memo, useMemo, useCallback)
-- [ ] Implement lazy loading for session timeline data
-- [ ] Create performance monitoring and metrics collection
+**Error Handling & Resilience**
+- Application-wide error boundaries  
+- WebSocket connection status monitoring
+- Retry mechanisms with exponential backoff
+- Graceful degradation for offline scenarios
 
-**Dependencies:**
-- Step 4.1 must be complete
-- react-window library integration
-
-**Validation Criteria:**
-- [ ] Session list handles 1000+ items with constant memory usage
-- [ ] Data caching reduces API calls and improves response times
-- [ ] React optimizations prevent unnecessary re-renders
-- [ ] Lazy loading provides smooth user experience
-- [ ] Performance metrics meet requirements specifications
-
-**Success Check:**
-```bash
-# Test performance with large dataset
-cd dashboard && npm start
-
-# Verify performance:
-# - Smooth scrolling through 1000+ sessions
-# - Fast filter application
-# - Memory usage remains stable
-# - No performance warnings in React DevTools
-```
-
-#### Step 4.3: Error Handling & Resilience
-**Goal:** Implement comprehensive error handling, retry mechanisms, and graceful degradation
-**Files to Create/Modify:**
-- `dashboard/src/components/ErrorBoundary.tsx` (new)
-- `dashboard/src/components/ConnectionStatus.tsx` (new)
-- `dashboard/src/hooks/useErrorHandling.ts` (new)
-- `dashboard/src/services/retryManager.ts` (new)
-
-**AI Prompt:** `Implement Step 4.3 of EP-0004: Create comprehensive error handling system with error boundaries, connection status monitoring, retry mechanisms, and graceful degradation`
-
-**Tasks:**
-- [ ] Create ErrorBoundary for application-wide error handling
-- [ ] Implement ConnectionStatus component for WebSocket monitoring
-- [ ] Add retry mechanisms with exponential backoff for API calls
-- [ ] Create graceful degradation for offline/limited connectivity
-- [ ] Implement user-friendly error messages and recovery actions
-
-**Dependencies:**
-- Step 4.2 must be complete
-- Error handling infrastructure
-
-**Validation Criteria:**
-- [ ] Error boundaries catch and display component errors gracefully
-- [ ] Connection status accurately reflects WebSocket state
-- [ ] Retry mechanisms recover from temporary failures
-- [ ] Offline mode provides basic functionality without real-time updates
-- [ ] Error messages guide users toward resolution actions
-
-**Success Check:**
-```bash
-# Test error scenarios
-cd dashboard && npm start
-
-# Verify error handling:
-# - Disconnect network and verify graceful degradation
-# - Force component errors and verify error boundaries
-# - Test API failure scenarios with retry behavior
-# - Verify connection status updates correctly
-```
+**Advanced Dependencies**
+- **@mui/lab**: Timeline components for enhanced session visualization
+- **react-window**: Virtual scrolling for performance optimization  
+- **react-markdown**: Markdown rendering for AI analysis content
 
 ### Phase 4 Completion Criteria
-- [ ] Session detail pages provide comprehensive timeline visualization
-- [ ] Performance optimizations handle large datasets efficiently
-- [ ] Error handling provides robust user experience
-- [ ] All dashboard features work reliably with real-time updates
-- [ ] Application meets all requirements specifications
+- [ ] **UI Phases 4-7 successfully implemented** following specifications in `EP-0004-dashboard-ui-phases.md`
+- [ ] Advanced filtering and search functionality working efficiently
+- [ ] Real-time updates integrated with enhanced timeline visualization
+- [ ] Performance optimizations handle 1000+ sessions without performance degradation
+- [ ] Comprehensive error handling provides robust user experience
+- [ ] Application ready for production deployment with all requirements met
 
 ## Phase 5: Testing & Documentation
 
@@ -1157,14 +1026,27 @@ npm run test:performance
 ### Technical Resources
 - **Development Environment**: Node.js 18+, npm/yarn, React development tools
 - **Testing Tools**: Jest, React Testing Library, WebSocket mocking capabilities
-- **Build Tools**: Webpack, TypeScript compiler, ESLint/Prettier configuration
+- **Build Tools**: Vite (recommended), TypeScript compiler, ESLint/Prettier configuration
 - **Deployment Infrastructure**: Static hosting for React SPA, CDN capabilities
 
-### External Dependencies
+### Core Frontend Dependencies
+- **React 18.2.0**: Latest stable with concurrent features and improved performance
+- **TypeScript**: Full type safety and enhanced developer experience
+- **Material-UI v5.15.0**: Complete Material Design system with 50+ components
+- **@mui/icons-material**: Comprehensive icon library for consistent iconography
+- **@mui/lab**: Timeline components for session visualization (Phase 5+)
+- **@emotion/react**: CSS-in-JS solution bundled with Material-UI
+
+### Functionality Dependencies
+- **React Router v6**: Client-side routing and navigation
+- **Axios**: HTTP client for API communication
+- **react-markdown**: Markdown rendering for AI analysis content
+- **react-window**: Virtual scrolling for performance optimization (Phase 6+)
+
+### Backend Integration
 - **Backend WebSocket Support**: Requires Phase 1-2 backend implementation completion
 - **EP-0003 History Service**: Must remain operational during dashboard development
-- **Material-UI v5.15.0**: Component library for consistent UI design
-- **React-Window**: Virtual scrolling library for performance optimization
+- **History Service API**: Existing REST endpoints for session data
 
 ## Documentation Updates Required
 

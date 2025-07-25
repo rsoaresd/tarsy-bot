@@ -94,22 +94,33 @@ The dashboard follows a modern React SPA architecture with Material-UI component
 
 ### Component Architecture
 
-#### New Components
+**📋 Detailed Component Specifications**: For comprehensive component hierarchies, Material-UI implementations, and phase-specific component details, see **`EP-0004-dashboard-ui-phases.md`**.
 
-- **DashboardApp**: Main application component with routing and layout
-- **DashboardView**: Main dashboard page displaying active and historical alert summaries
-- **SessionDetailPage**: Dedicated page for detailed session timeline (unified for both active & historical)
-- **ActiveAlertsPanel**: Panel displaying currently processing alerts with summary information
-- **HistoricalSessionsList**: Paginated list of completed alert sessions with filtering
-- **FilterPanel**: Advanced filtering interface for historical sessions
-- **TimelineVisualization**: Interactive timeline showing LLM and MCP interactions (real-time for active sessions)
-- **RealTimeMonitor**: Live status display and counters for currently processing alerts
-- **ActiveAlertCard**: Summary card for active alerts (click → navigate to detail page)
-- **HistoricalSessionCard**: Summary card for historical sessions (click → navigate to detail page)
-- **SessionHeader**: Session metadata and status display (shows active/historical status)
-- **InteractionDetails**: Detailed view of individual LLM/MCP interactions
-- **SessionActions**: Action buttons for copying, exporting, and navigation
-- **ErrorBoundary**: Application-wide error handling component
+#### Core Application Components
+
+**Main Layout Components:**
+- **DashboardApp**: Main application with routing, theme provider, and error boundaries
+- **DashboardView**: Primary dashboard layout with active/historical split
+- **SessionDetailPage**: Unified detail view for both active and historical sessions
+
+**Data Display Components:**
+- **ActiveAlertsPanel**: Real-time panel for currently processing alerts
+- **HistoricalSessionsList**: Paginated list with filtering for completed sessions  
+- **TimelineVisualization**: Interactive session timeline with real-time updates
+- **SessionHeader**: Metadata display with active/historical status indicators
+
+**Interactive & Utility Components:**
+- **FilterPanel**: Advanced filtering interface with multi-criteria support
+- **InteractionDetails**: Expandable detailed view of LLM/MCP interactions
+- **SessionActions**: Action buttons for copy, export, and navigation
+- **RealTimeMonitor**: Live counters and status indicators
+
+#### Phased Component Introduction
+
+**Phase 1-2**: Core layout and basic data display components  
+**Phase 3**: Navigation and detail page components  
+**Phase 4**: Advanced filtering and search components  
+**Phase 5-7**: Real-time features, timeline visualization, and performance components
 
 #### New Service Components (Dashboard-Specific)
 
@@ -521,139 +532,109 @@ Dashboard requires new dashboard-specific endpoints in addition to existing EP-0
 
 ### UI Components
 
-#### New UI Components
+The dashboard UI will be implemented through a **phased approach** with incremental functionality delivery. This allows for early value delivery and iterative refinement based on user feedback.
 
-**Core Dashboard Components:**
-- **SessionGrid**: Virtualized grid component for large session lists
-- **ActiveAlertsPanel**: Expandable panel showing currently processing alerts with progress indicators
-- **FilterChip**: Interactive filter tag components
-- **StatusIndicator**: Color-coded status indicators with icons
-- **SearchBar**: Debounced search input with suggestions
+#### Implementation Strategy
 
-**Timeline & Detail Components:**
-- **TimelineChart**: SVG-based timeline visualization
+**📋 Detailed Component Specifications**: For comprehensive component layouts, Material-UI implementations, and detailed UI specifications, see **`EP-0004-dashboard-ui-phases.md`**.
 
-- **ProgressIndicator**: Real-time progress bars and status displays
-- **ErrorExpansionPanel**: Expandable error details with copy functionality
+#### Phased Component Development
 
-**Utility Components:**
-- **DurationBadge**: Human-readable duration display component
-- **LoadingSkeletons**: Placeholder components during data loading
-- **QuickFilterBar**: Preset filter buttons for common queries (Failed, Timeout, Success)
-- **CopyButton**: Reusable copy-to-clipboard button component
+**Phase 1 (Basic Alert List)**: 
+- Simple list component with core session information
+- Basic status indicators and navigation
+- Material-UI Table with essential columns
 
-#### Adapted UI Components (From alert-dev-ui patterns)
+**Phase 2 (Active/Historical Split)**:
+- ActiveAlertsPanel for currently processing alerts
+- HistoricalSessionsList for completed alerts  
+- Clear visual separation and status grouping
 
-- **DashboardLayout**: Adapted from alert dev UI layout with dashboard-specific navigation
-- **DashboardErrorDisplay**: Enhanced error component with retry mechanisms and dashboard context
-- **WebSocketConnectionStatus**: Connection status indicator specifically for dashboard WebSocket
+**Phase 3-7 (Progressive Enhancement)**:
+- Advanced filtering and search components
+- Interactive timeline visualizations
+- Real-time update mechanisms
+- Performance optimizations with virtual scrolling
+
+#### Core Component Categories
+
+**Dashboard Layout Components:**
+- **DashboardApp**: Main application with routing
+- **DashboardView**: Primary dashboard layout
+- **SessionDetailPage**: Unified detail view for active/historical sessions
+
+**Data Display Components:**
+- **SessionGrid**: Virtualized session list (Phase 6+)
+- **ActiveAlertsPanel**: Real-time active session display
+- **TimelineVisualization**: Interactive session timeline
+- **StatusIndicator**: Consistent status display across phases
+
+**Interactive Components:**
+- **FilterPanel**: Advanced filtering interface
+- **SearchBar**: Debounced search with suggestions  
+- **CopyButton**: Reusable copy-to-clipboard functionality
+
+#### Technology Integration
+
+**Material-UI v5.15.0**: All components built with Material-UI for design consistency
+**React 18.2.0**: Modern React patterns with hooks and concurrent features
+**@mui/lab**: Timeline components for enhanced session visualization
 
 ### User Experience Flow
 
-#### User Journey
+#### Core User Journey
 
-1. **Dashboard Load**: User navigates to dashboard, sees active alerts at top and historical list below  
-2. **Active Monitoring**: User monitors real-time processing status with live progress indicators and status summaries
-3. **Active Alert Detail**: User clicks active alert → navigates to dedicated detail page with real-time timeline updates
-4. **Historical Analysis**: User applies quick filters to historical data for pattern analysis
-5. **Historical Detail**: User clicks historical session → navigates to dedicated detail page with complete timeline
-6. **Timeline Exploration**: User reviews chronological interactions and final resolution (with live updates for active sessions)
-7. **Data Export**: User copies timeline details or exports data for reporting
-8. **Consistent Navigation**: Same interaction pattern for both active and historical alerts
+The dashboard follows a **progressive enhancement approach** where functionality expands across implementation phases:
 
-#### User Interface Mockups
+1. **Dashboard Entry**: User navigates to dashboard and sees session list (Phase 1)
+2. **Active/Historical Split**: Clear separation between processing and completed alerts (Phase 2)  
+3. **Session Detail Navigation**: Click any session → dedicated detail page with timeline (Phase 3)
+4. **Enhanced Filtering**: Apply advanced filters and search for targeted analysis (Phase 4)
+5. **Real-time Monitoring**: Live updates for active sessions with timeline visualization (Phase 5)
+6. **Advanced Operations**: Pagination, export, and performance optimizations (Phase 6-7)
 
-**Main Dashboard - Active/Historical Split:**
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Tarsy SRE Dashboard                      [🔄 Auto-refresh: ●●●] │
-├─────────────────────────────────────────────────────────────────┤
-│ ┌─ ACTIVE ALERTS ────────────────────────────────────────────┐  │
-│ │ [3 Processing] [2 Failed] [0 Pending]                      │  │
-│ │                                                            │  │
-│ │ 🔴 FAILED │ kubernetes-prod │ PodCrashLooping │ 00:34      │  │
-│ │ ┌────────────────────────────────────────────────────────┐ │  │
-│ │ │ ❌ Processing Failed │ Error: MCP timeout after 15s    │ │  │
-│ │ │ Last step: kubectl get pods --namespace=prod-app       │ │  │
-│ │ │ Duration: 15.3s │ [👁 View Details] [📋 Copy Error]    │ │  │
-│ │ └────────────────────────────────────────────────────────┘ │  │
-│ │                                                            │  │
-│ │ 🟡 PROCESSING │ network-core │ LatencySpike │ 02:45        │  │
-│ │ ┌────────────────────────────────────────────────────────┐ │  │
-│ │ │ 🔄 In Progress │ LLM: Analyzing network metrics...     │ │  │
-│ │ │ ████████████▓▓▓░░░░░ 67% │ Step 3 of 5 │ [👁 Watch]    │ │   │
-│ │ │ Current: Checking bandwidth utilization                │ │   │
-│ │ └────────────────────────────────────────────────────────┘ │   │
-│ │                                                            │   │
-│ │ 🟢 COMPLETING │ database-cluster │ ConnPoolLow │ 00:12     │   │
-│ │ ┌────────────────────────────────────────────────────────┐ │   │
-│ │ │ ✅ Analysis Complete │ Finalizing response...          │ │   │
-│ │ │ ████████████████████░ 95% │ ETA: 8s │ [👁 View Details]│ │   │
-│ │ │ Resolution: Connection pool automatically scaled       │ │   │
-│ │ └────────────────────────────────────────────────────────┘ │   │
-│ └──────────────────────────────────────────────────────────┘ │
-├─────────────────────────────────────────────────────────────────┤
-│ ┌─ ALERT HISTORY ────────────────────────────────────────────┐   │
-│ │ Quick Filters: [🔴Failed][🟡Timeout][🟢Success] │ [All Agents▼] │   │
-│ │ Time: [1h][4h][Today][Week] │ 🔍[Search: ____________]      │   │
-│ │                                                           │   │
-│ │ Status │Agent│Alert Type      │Time │Dur │Actions         │   │
-│ │ ──────┼─────┼───────────────┼─────┼────┼──────────────── │   │
-│ │ 🟢 ✓  │ k8s │ServiceRestart  │12:34│0.8s│[👁 Details]    │   │
-│ │ 🔴 ✗  │ net │PacketLoss      │12:28│15s │[👁 Details]    │   │
-│ │ 🟢 ✓  │ db  │BackupComplete  │12:25│2.1s│[👁 Details]    │   │
-│ │ 🟡 ⚠  │ k8s │MemoryPressure  │12:22│45s │[👁 Details]    │   │
-│ │ 🟢 ✓  │ net │BandwidthCheck  │12:18│1.2s│[👁 Details]    │   │
-│ │                                                           │   │
-│ │ [◀ Prev] Page 1 of 47 [Next ▶] │ Show: [25▼] per page    │   │
-│ └───────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
+#### Phased User Experience Evolution
 
-**Active Alert Detail Expansion:**
-```
-│ 🔴 FAILED │ kubernetes-prod │ PodCrashLooping │ 00:34    │ [▼]
-│ ┌───────────────────────────────────────────────────────────────┐
-│ │ Processing Timeline (Read-Only):                             │
-│ │ ──────────────────────────────────────────────────────────── │
-│ │ 00:00 🚨 Alert received: Pod crash-loop in prod-app-ns      │
-│ │ 00:03 🧠 LLM analyzing: "Kubernetes pod stability issue"    │
-│ │ 00:12 🔧 MCP executing: kubectl describe pod crash-pod-xyz  │
-│ │ 00:28 🧠 LLM generating response...                         │
-│ │ 15:30 ❌ Processing failed: MCP timeout                     │
-│ │                                                             │
-│ │ Error Details:                                              │
-│ │ ┌─────────────────────────────────────────────────────────┐ │
-│ │ │ Error: MCP server timeout after 15s                    │ │
-│ │ │ Command: kubectl get events --namespace=prod-app       │ │
-│ │ │ Agent: KubernetesAgent                                  │ │
-│ │ │ Last successful step: kubectl describe pod             │ │
-│ │ └─────────────────────────────────────────────────────────┘ │
-│ │                                                             │
-│ │ Actions: [👁 View Full Timeline] [📋 Copy Error Details]    │
-│ └───────────────────────────────────────────────────────────────┘
-```
+**📋 Detailed User Flows**: For comprehensive user journey mappings, interaction patterns, and UX specifications by phase, see **`EP-0004-dashboard-ui-phases.md`**.
 
-**Session Detail Page (Historical Example):**
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ [← Back to Dashboard] Alert Details: k8s-20240119-122834       │
-├─────────────────────────────────────────────────────────────────┤
-│ kubernetes | ServiceRestart | ✅ Completed in 0.8s | 12:28:34  │
-├─────────────────────────────────────────────────────────────────┤
-│ Processing Timeline:                                            │
-│ 00:00.000 ●─ Alert received                                     │
-│ 00:00.045 ├─ [LLM] Initial analysis (234ms)                     │
-│ 00:00.279 ├─ [MCP] Service status check (156ms)                 │
-│ 00:00.435 ├─ [LLM] Response generation (365ms)                  │
-│ 00:00.800 └─ ✅ Processing complete                             │
-│                                                                 │
-│ Final Resolution:                                               │
-│ "Service restart completed successfully. Health checks passing."│
-│                                                                 │
-│ [📋 Copy Timeline] [📤 Export Details]                         │
-└─────────────────────────────────────────────────────────────────┘
-```
+**Progressive Enhancement Strategy:**
+- **Phase 1**: Basic read-only observability  
+- **Phase 2**: Operational distinction (active vs historical)
+- **Phase 3**: Deep dive investigation capabilities
+- **Phase 4+**: Advanced analytical and monitoring features
+
+#### Consistent Design Principles
+
+- **Active/Historical Distinction**: Clear visual separation maintained across all phases
+- **Unified Detail View**: Same detail page pattern for both active and historical sessions
+- **Real-time First**: Live updates prioritized for operational awareness
+- **Material Design**: Consistent Material-UI patterns throughout all phases
+
+#### User Interface Design
+
+**📋 Detailed UI Mockups & Layouts**: For comprehensive visual mockups, ASCII layouts, and Material-UI component implementations, see **`EP-0004-dashboard-ui-phases.md`**.
+
+#### Design Evolution Summary
+
+**Phase 1: Simple List View**  
+Clean Material-UI table with basic session information (status, type, agent, time, duration).
+
+**Phase 2: Active/Historical Split**  
+Distinct panels for active alerts (top) and historical sessions (bottom) with clear visual separation.
+
+**Phase 3: Navigation & Detail Pages**  
+Dedicated session detail pages with timeline visualization and navigation between list and detail views.
+
+**Phase 4-7: Enhanced Features**  
+Progressive enhancement with filtering, search, real-time updates, advanced timeline visualization, and performance optimizations.
+
+#### Core Design Principles
+
+- **Material Design Consistency**: All phases use Material-UI v5.15.0 components
+- **Progressive Enhancement**: Each phase builds upon previous functionality
+- **Active/Historical Distinction**: Clear visual and functional separation maintained throughout
+- **Responsive Design**: Components adapt to different screen sizes and orientations
+- **Accessibility First**: WCAG 2.1 AA compliance built into all component designs
 
 ## Security Design
 
@@ -917,54 +898,55 @@ No migration required as this is a new standalone application.
 
 ## Implementation Sequence & Priorities
 
-### Development Order (Backend First with Integrated Hook System)
+### Phased Development Strategy
 
-As identified in the requirements analysis, the backend WebSocket infrastructure must be implemented before meaningful frontend development can begin. However, leveraging the existing EP-0003 hook system significantly simplifies the backend implementation.
+The dashboard implementation follows a **dual-track approach**: backend infrastructure development alongside incremental frontend phases for early value delivery.
 
-#### Phase 1: Backend WebSocket Infrastructure  
-**Priority: Critical - Must complete first**
-- Implement new `/ws/dashboard/{user_id}` WebSocket endpoint
-- Build subscription management system (`dashboard_updates`, `session_{id}` channels)
-- Create message routing and channel management infrastructure
-- Create dashboard broadcaster service for WebSocket message distribution
+**📋 Detailed Implementation Plan**: For comprehensive phase-by-phase implementation details, component specifications, API integrations, and success criteria, see **`EP-0004-dashboard-ui-phases.md`**.
 
-#### Phase 2: Integrated Hook System Implementation
-**Priority: High - Required for dashboard functionality**
-- Create dashboard broadcast hooks extending existing EP-0003 `BaseEventHook`
-- Integrate dashboard hooks with existing hook registration system
-- Implement dashboard update service for formatting hook events
-- Register dashboard hooks alongside existing history hooks for concurrent execution
+### Backend Infrastructure (Foundation)
 
-#### Phase 3: Frontend Dashboard Development
-**Priority: Medium - Depends on backend completion**
-- Initialize `dashboard/` React application structure
-- Implement core dashboard components and layout
-- Build WebSocket client with subscription management
-- Create session list and detail views
+**Priority: Critical - Must complete before frontend phases**
 
-#### Phase 4: Integration & Testing
-**Priority: Low - Final integration**
-- End-to-end testing of integrated hook system and WebSocket communication
-- Performance optimization and load testing
-- Documentation and deployment preparation
+#### Backend Track 1: Core Infrastructure
+- **WebSocket System**: Implement `/ws/dashboard/{user_id}` multiplexed endpoint
+- **Subscription Management**: Channel-based message routing (`dashboard_updates`, `session_{id}`)
+- **Connection Management**: Auto-reconnection, state persistence, graceful cleanup
+
+#### Backend Track 2: Integrated Hook System  
+- **Dashboard Broadcast Hooks**: Extend existing EP-0003 `BaseEventHook` system
+- **Hook Registration**: Integrate dashboard hooks alongside existing history hooks
+- **Event Formatting**: Transform hook events for dashboard WebSocket broadcasting
+
+### Frontend Phases (Progressive Enhancement)
+
+**Phase 1 (Basic Alert List)**: Simple session list with Material-UI Table  
+**Phase 2 (Active/Historical Split)**: Distinct panels for operational awareness  
+**Phase 3 (Navigation & Detail)**: Session detail pages with timeline visualization  
+**Phase 4 (Search & Filtering)**: Enhanced data exploration capabilities  
+**Phase 5 (Real-time Updates)**: Live session monitoring with WebSocket integration  
+**Phase 6 (Advanced Features)**: Pagination, export, performance optimizations  
+**Phase 7 (Polish & Performance)**: Virtual scrolling, caching, final optimizations
 
 ### Implementation Dependencies
 
 ```
-Backend WebSocket Infrastructure
+Backend WebSocket + Hook System
     ↓
-Integrated Hook System Implementation
+Phase 1: Basic List (Independent)
     ↓
-Frontend Dashboard Core
+Phase 2: Active/Historical Split
+    ↓ 
+Phase 3: Detail Navigation
     ↓
-Frontend Real-time Features
+Phase 4: Search/Filter (Independent)
     ↓
-Integration Testing
+Phase 5: Real-time (Requires WebSocket)
+    ↓
+Phase 6-7: Advanced Features
 ```
 
-**Critical Path**: Backend WebSocket implementation blocks all frontend real-time functionality.
-
-**Key Advantage**: Hook system integration eliminates the need to modify existing LLM/MCP clients or history service, reducing implementation complexity and ensuring data consistency.
+**Key Advantage**: Early phases can begin with mock data while backend infrastructure is being completed.
 
 ## Implementation Considerations
 
@@ -979,12 +961,28 @@ Integration Testing
 
 ### Dependencies
 
-- **React 18.2.0**: Core framework dependency
-- **Material-UI v5.15.0**: Component library dependency  
-- **Axios**: HTTP client library
-- **React-Window**: Virtual scrolling performance optimization
-- **React-Router-Dom**: Client-side routing
+**📋 Complete Dependency List**: For detailed dependency specifications, installation commands, and version requirements, see **`EP-0004-dashboard-ui-phases.md`**.
+
+#### Core Framework
+- **React 18.2.0**: Latest stable with concurrent features and improved performance
+- **TypeScript**: Type safety and enhanced developer experience  
+- **Vite**: Fast build tool with superior development experience
+
+#### UI & Design
+- **Material-UI v5.15.0**: Complete Material Design system with 50+ components
+- **@mui/icons-material**: Comprehensive icon library for consistent iconography
+- **@mui/lab**: Timeline components for session visualization (Phase 5+)
+- **@emotion/react**: CSS-in-JS solution bundled with Material-UI
+
+#### Functionality
+- **React-Router-Dom v6**: Client-side routing and navigation
+- **Axios**: HTTP client for API communication
+- **react-markdown**: Markdown rendering for AI analysis content
+- **React-Window**: Virtual scrolling for performance optimization (Phase 6+)
+
+#### Backend Integration  
 - **EP-0003 Hook System**: Existing hook infrastructure (BaseEventHook, HookManager)
+- **History Service API**: Existing REST endpoints for session data
 
 ### Integrated Hook System Implementation Details
 
