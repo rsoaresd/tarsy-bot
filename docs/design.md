@@ -556,7 +556,7 @@ class HistoryService:
     def __init__(self)
     def initialize(self) -> bool
     def create_session(self, alert_id: str, alert_data: Dict, agent_type: str, alert_type: Optional[str] = None) -> Optional[str]
-    def update_session_status(self, session_id: str, status: str, error_message: Optional[str] = None) -> bool
+    def update_session_status(self, session_id: str, status: str, error_message: Optional[str] = None, final_analysis: Optional[str] = None) -> bool
     def log_llm_interaction(self, session_id: str, prompt_text: str, response_text: str, model_used: str, step_description: str, **kwargs) -> bool
     def log_mcp_communication(self, session_id: str, server_name: str, communication_type: str, step_description: str, success: bool, **kwargs) -> bool
     def get_sessions_list(self, filters: Dict = None, page: int = 1, page_size: int = 20) -> Tuple[List, int]
@@ -832,6 +832,7 @@ AlertSession Entity:
 - started_at: datetime            # Session start timestamp
 - completed_at: Optional[datetime] # Session completion timestamp
 - error_message: Optional[string] # Error message if failed
+- final_analysis: Optional[string] # Final formatted analysis result if completed successfully
 - session_metadata: Optional[object] # Additional context
 
 LLMInteraction Entity:

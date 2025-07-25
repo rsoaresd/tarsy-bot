@@ -441,7 +441,21 @@ class TestHistorySessionManagement:
         
         service.history_service.update_session_status.assert_called_once_with(
             session_id="session_123",
-            status="completed"
+            status="completed",
+            final_analysis=None
+        )
+    
+    def test_update_session_completed_with_final_analysis(self, alert_service_with_history):
+        """Test marking session as completed with final analysis."""
+        service = alert_service_with_history
+        analysis = "# Alert Analysis\n\nSuccessfully resolved the issue."
+        
+        service._update_session_completed("session_123", "completed", analysis)
+        
+        service.history_service.update_session_status.assert_called_once_with(
+            session_id="session_123",
+            status="completed",
+            final_analysis=analysis
         )
     
     def test_update_session_error_success(self, alert_service_with_history):

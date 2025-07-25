@@ -69,6 +69,7 @@ class SessionDetailResponse(BaseModel):
     started_at: datetime = Field(description="When the session started")
     completed_at: Optional[datetime] = Field(description="When the session completed (if finished)")
     error_message: Optional[str] = Field(description="Error message if session failed")
+    final_analysis: Optional[str] = Field(description="Final formatted analysis result if session completed successfully")
     duration_ms: Optional[int] = Field(description="Total session duration in milliseconds (if completed)")
     session_metadata: Optional[Dict[str, Any]] = Field(description="Additional session metadata")
     

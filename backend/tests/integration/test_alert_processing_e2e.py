@@ -406,8 +406,7 @@ class TestAgentSpecialization:
         self,
         alert_service,
         sample_alert,
-        mock_llm_manager,
-        mock_mcp_server_registry
+        mock_llm_manager
     ):
         """Test that agent instructions are properly composed (General + MCP + Custom)."""
         # Act

@@ -240,6 +240,7 @@ async def get_session_detail(
             started_at=started_at,
             completed_at=completed_at,
             error_message=session_info.get('error_message'),
+            final_analysis=session_info.get('final_analysis'),
             duration_ms=duration_ms,
             session_metadata=session_info.get('session_metadata', {}),
             chronological_timeline=timeline_events,

@@ -201,7 +201,8 @@ class HistoryService:
         self,
         session_id: str,
         status: str,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        final_analysis: Optional[str] = None
     ) -> bool:
         """
         Update session processing status with retry logic.
@@ -210,6 +211,7 @@ class HistoryService:
             session_id: The session identifier
             status: New status (pending, in_progress, completed, failed)
             error_message: Error message if status is failed
+            final_analysis: Final formatted analysis if status is completed
             
         Returns:
             True if updated successfully, False otherwise
@@ -231,6 +233,8 @@ class HistoryService:
                 session.status = status
                 if error_message:
                     session.error_message = error_message
+                if final_analysis:
+                    session.final_analysis = final_analysis
                 if status in ["completed", "failed"]:
                     session.completed_at = datetime.now(timezone.utc)
                 

@@ -208,7 +208,7 @@ class AlertService:
                 )
                 
                 # Mark history session as completed successfully
-                self._update_session_completed(session_id, "completed")
+                self._update_session_completed(session_id, "completed", final_result)
                 
                 if progress_callback:
                     await progress_callback(100, "Analysis completed successfully")
@@ -394,13 +394,14 @@ class AlertService:
         except Exception as e:
             logger.warning(f"Failed to update session status: {str(e)}")
     
-    def _update_session_completed(self, session_id: Optional[str], status: str):
+    def _update_session_completed(self, session_id: Optional[str], status: str, final_analysis: Optional[str] = None):
         """
         Mark history session as completed.
         
         Args:
             session_id: Session ID to complete
             status: Final status (e.g., 'completed', 'error')
+            final_analysis: Final formatted analysis if status is completed successfully
         """
         try:
             if not session_id or not self.history_service or not self.history_service.enabled:
@@ -409,7 +410,8 @@ class AlertService:
             # The history service automatically sets completed_at when status is 'completed' or 'failed'
             self.history_service.update_session_status(
                 session_id=session_id,
-                status=status
+                status=status,
+                final_analysis=final_analysis
             )
             
         except Exception as e:

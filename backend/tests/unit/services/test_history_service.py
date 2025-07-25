@@ -255,16 +255,50 @@ class TestHistoryService:
             assert mock_session.completed_at is not None
     
     @pytest.mark.unit
-    def test_update_session_status_disabled_service(self, history_service):
-        """Test session status update when service is disabled."""
-        history_service.is_enabled = False
+    def test_update_session_status_with_final_analysis(self, history_service, mock_repository):
+        """Test session status update with final analysis."""
+        mock_session = Mock(spec=AlertSession)
+        mock_repository.get_alert_session.return_value = mock_session
+        analysis = "# Alert Analysis\n\nSuccessfully resolved the Kubernetes issue."
         
-        result = history_service.update_session_status(
-            session_id="test-session-id",
-            status="completed"
-        )
+        with patch.object(history_service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = mock_repository
+            mock_get_repo.return_value.__exit__.return_value = None
+            
+            result = history_service.update_session_status(
+                session_id="test-session-id",
+                status="completed",
+                final_analysis=analysis
+            )
+            
+            assert result == True
+            assert mock_session.status == "completed"
+            assert mock_session.final_analysis == analysis
+            assert mock_session.completed_at is not None
+            mock_repository.update_alert_session.assert_called_once_with(mock_session)
+    
+    @pytest.mark.unit
+    def test_update_session_status_without_final_analysis(self, history_service, mock_repository):
+        """Test session status update without final analysis doesn't overwrite existing value."""
+        mock_session = Mock(spec=AlertSession)
+        existing_analysis = "Existing analysis"
+        mock_session.final_analysis = existing_analysis
+        mock_repository.get_alert_session.return_value = mock_session
         
-        assert result == False
+        with patch.object(history_service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = mock_repository
+            mock_get_repo.return_value.__exit__.return_value = None
+            
+            result = history_service.update_session_status(
+                session_id="test-session-id",
+                status="in_progress"
+            )
+            
+            assert result == True
+            assert mock_session.status == "in_progress"
+            # final_analysis should remain unchanged when not provided
+            assert mock_session.final_analysis == existing_analysis
+            mock_repository.update_alert_session.assert_called_once_with(mock_session)
     
     @pytest.mark.unit
     def test_log_llm_interaction_success(self, history_service, mock_repository):

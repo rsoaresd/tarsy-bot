@@ -72,6 +72,11 @@ class AlertSession(SQLModel, table=True):
         description="Error message if processing failed"
     )
     
+    final_analysis: Optional[str] = Field(
+        default=None,
+        description="Final formatted analysis result if processing completed successfully"
+    )
+    
     session_metadata: Optional[dict] = Field(
         default=None,
         sa_column=Column(JSON),
