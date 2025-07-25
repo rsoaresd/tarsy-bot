@@ -601,4 +601,551 @@ class TestHistoryRepositoryPerformance:
             alert_type="TestAlert0"
         )
         # Should get completed sessions with TestAlert0 (sessions 0, 10, 20, etc.)
-        assert len(result["sessions"]) == 10 
+        assert len(result["sessions"]) == 10
+
+    # Dashboard-specific tests
+    @pytest.mark.unit
+    def test_get_dashboard_metrics_success(self, db_session):
+        """Test successful dashboard metrics calculation."""
+        repo = HistoryRepository(db_session)
+        
+        # Create test sessions with different statuses
+        from datetime import datetime, timezone, timedelta
+        
+        # Active sessions
+        for i in range(3):
+            session = AlertSession(
+                session_id=f"active_{i}",
+                alert_id=f"alert_active_{i}",
+                agent_type="kubernetes",
+                alert_type="PodCrashLooping",
+                status="in_progress",
+                started_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+                alert_data={"test": "data"}
+            )
+            db_session.add(session)
+        
+        # Completed sessions
+        for i in range(5):
+            session = AlertSession(
+                session_id=f"completed_{i}",
+                alert_id=f"alert_completed_{i}",
+                agent_type="network" if i % 2 else "kubernetes",
+                alert_type="ServiceDown" if i % 2 else "PodCrashLooping",
+                status="completed",
+                started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+                completed_at=datetime.now(timezone.utc) - timedelta(hours=1, minutes=30),
+                alert_data={"test": "data"}
+            )
+            db_session.add(session)
+        
+        # Failed sessions
+        for i in range(2):
+            session = AlertSession(
+                session_id=f"failed_{i}",
+                alert_id=f"alert_failed_{i}",
+                agent_type="database",
+                alert_type="ConnectionTimeout",
+                status="failed",
+                started_at=datetime.now(timezone.utc) - timedelta(hours=1),
+                completed_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+                error_message="Connection timeout",
+                alert_data={"test": "data"}
+            )
+            db_session.add(session)
+        
+        # Add some interactions for counting
+        for i in range(10):
+            interaction = LLMInteraction(
+                interaction_id=f"llm_{i}",
+                session_id=f"completed_{i % 5}",
+                prompt_text="Test prompt",
+                response_text="Test response",
+                model_used="test-model",
+                step_description="Test step",
+                timestamp=datetime.now(timezone.utc)
+            )
+            db_session.add(interaction)
+        
+        for i in range(8):
+            communication = MCPCommunication(
+                communication_id=f"mcp_{i}",
+                session_id=f"completed_{i % 5}",
+                server_name="test-server",
+                communication_type="tool_call",
+                tool_name="test-tool",
+                success=True,
+                step_description="Test step",
+                timestamp=datetime.now(timezone.utc)
+            )
+            db_session.add(communication)
+        
+        db_session.commit()
+        
+        result = repo.get_dashboard_metrics()
+        
+        # Verify session counts
+        assert result["active_sessions"] == 3  # 3 in_progress sessions
+        assert result["completed_sessions"] == 5  # 5 completed sessions
+        assert result["failed_sessions"] == 2  # 2 failed sessions
+        
+        # Verify interaction counts
+        assert result["total_interactions"] == 18  # 10 LLM + 8 MCP
+        
+        # Verify metrics are calculated
+        assert "avg_session_duration" in result
+        assert "error_rate" in result
+        assert "last_24h_sessions" in result
+        
+        # Verify error rate calculation (2 failed out of 10 total = 20%)
+        assert result["error_rate"] == 20.0
+    
+    @pytest.mark.unit
+    def test_get_dashboard_metrics_empty_database(self, db_session):
+        """Test dashboard metrics with empty database."""
+        repo = HistoryRepository(db_session)
+        
+        result = repo.get_dashboard_metrics()
+        
+        # All counts should be zero
+        assert result["active_sessions"] == 0
+        assert result["completed_sessions"] == 0
+        assert result["failed_sessions"] == 0
+        assert result["total_interactions"] == 0
+        assert result["avg_session_duration"] == 0.0
+        assert result["error_rate"] == 0.0
+        assert result["last_24h_sessions"] == 0
+    
+    @pytest.mark.unit
+    def test_get_filter_options_success(self, db_session):
+        """Test successful filter options retrieval."""
+        repo = HistoryRepository(db_session)
+        
+        # Create test data with different types
+        sessions = [
+            AlertSession(session_id="1", alert_id="a1", agent_type="kubernetes", alert_type="PodCrashLooping", status="in_progress", alert_data={}),
+            AlertSession(session_id="2", alert_id="a2", agent_type="network", alert_type="ServiceDown", status="completed", alert_data={}),
+            AlertSession(session_id="3", alert_id="a3", agent_type="database", alert_type="ConnectionTimeout", status="failed", alert_data={})
+        ]
+        
+        for session in sessions:
+            db_session.add(session)
+        db_session.commit()
+        
+        result = repo.get_filter_options()
+        
+        # Verify agent types (should include kubernetes, network, database)
+        assert "agent_types" in result
+        assert len(result["agent_types"]) == 3
+        assert "kubernetes" in result["agent_types"]
+        assert "network" in result["agent_types"]
+        assert "database" in result["agent_types"]
+        
+        # Verify alert types
+        assert "alert_types" in result
+        assert len(result["alert_types"]) == 3
+        assert "PodCrashLooping" in result["alert_types"]
+        assert "ServiceDown" in result["alert_types"]
+        assert "ConnectionTimeout" in result["alert_types"]
+        
+        # Verify status options
+        assert "status_options" in result
+        assert len(result["status_options"]) == 3
+        assert "in_progress" in result["status_options"]
+        assert "completed" in result["status_options"]
+        assert "failed" in result["status_options"]
+        
+        # Verify time ranges
+        assert "time_ranges" in result
+        assert len(result["time_ranges"]) == 5
+    
+    @pytest.mark.unit
+    def test_get_filter_options_empty_database(self, db_session):
+        """Test filter options with empty database."""
+        repo = HistoryRepository(db_session)
+        
+        result = repo.get_filter_options()
+        
+        # Should return empty lists for dynamic options
+        assert result["agent_types"] == []
+        assert result["alert_types"] == []
+        assert result["status_options"] == []
+        
+        # Time ranges should still be present (static)
+        assert len(result["time_ranges"]) == 5
+    
+    @pytest.mark.unit
+    def test_get_filter_options_sorted_results(self, db_session):
+        """Test that filter options are properly sorted."""
+        repo = HistoryRepository(db_session)
+        
+        # Create test data in non-alphabetical order
+        sessions = [
+            AlertSession(session_id="1", alert_id="a1", agent_type="zebra", alert_type="ZAlert", status="pending", alert_data={}),
+            AlertSession(session_id="2", alert_id="a2", agent_type="alpha", alert_type="AAlert", status="completed", alert_data={}),
+            AlertSession(session_id="3", alert_id="a3", agent_type="beta", alert_type="BAlert", status="in_progress", alert_data={})
+        ]
+        
+        for session in sessions:
+            db_session.add(session)
+        db_session.commit()
+        
+        result = repo.get_filter_options()
+        
+        # Verify sorting
+        assert result["agent_types"] == sorted(result["agent_types"])
+        assert result["alert_types"] == sorted(result["alert_types"])
+        assert result["status_options"] == sorted(result["status_options"])
+    
+    @pytest.mark.unit
+    def test_dashboard_metrics_duration_calculation(self, db_session):
+        """Test average duration calculation in dashboard metrics."""
+        repo = HistoryRepository(db_session)
+        
+        # Create sessions with known durations
+        from datetime import datetime, timezone, timedelta
+        
+        # Session 1: 60 seconds duration
+        session1 = AlertSession(
+            session_id="duration_test_1",
+            alert_id="alert_1",
+            agent_type="test",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=2),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            alert_data={}
+        )
+        
+        # Session 2: 120 seconds duration
+        session2 = AlertSession(
+            session_id="duration_test_2",
+            alert_id="alert_2",
+            agent_type="test",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=4),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=2),
+            alert_data={}
+        )
+        
+        db_session.add(session1)
+        db_session.add(session2)
+        db_session.commit()
+        
+        result = repo.get_dashboard_metrics()
+        
+        # Average should be (60 + 120) / 2 = 90 seconds
+        assert result["avg_session_duration"] == 90.0
+    
+    def test_export_session_data_success(self, db_session):
+        """Test successful session data export."""
+        repo = HistoryRepository(db_session)
+        
+        # Create test session with all required fields
+        session = AlertSession(
+            session_id="test_export_session",
+            alert_id="test_alert_export",
+            agent_type="KubernetesAgent",
+            alert_type="TestAlert",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=3),
+            alert_data={"environment": "test", "cluster": "test-cluster"},
+            session_metadata={"description": "Test export session"}
+        )
+        
+        # Add LLM interaction with required fields
+        llm_interaction = LLMInteraction(
+            session_id="test_export_session",
+            interaction_id="test_llm_1",
+            model_used="test-model",
+            timestamp=datetime.now(timezone.utc) - timedelta(minutes=4),
+            prompt_text="Test prompt",
+            response_text="Test response",
+            step_description="Test LLM interaction"
+        )
+        
+        # Add MCP communication with required fields
+        mcp_communication = MCPCommunication(
+            session_id="test_export_session",
+            communication_id="test_mcp_1",
+            timestamp=datetime.now(timezone.utc) - timedelta(minutes=4),
+            server_name="test-server",
+            communication_type="tool_call",
+            tool_name="test-tool",
+            tool_arguments={"action": "test"},
+            tool_result={"result": "success"},
+            success=True,
+            step_description="Test MCP communication"
+        )
+        
+        db_session.add(session)
+        db_session.add(llm_interaction)
+        db_session.add(mcp_communication)
+        db_session.commit()
+        
+        # Test JSON export
+        result = repo.export_session_data("test_export_session", "json")
+        
+        # Verify result structure
+        assert result["session_id"] == "test_export_session"
+        assert result["format"] == "json"
+        assert result["error"] is None
+        assert result["data"] is not None
+        
+        # Verify session data
+        session_data = result["data"]["session"]
+        assert session_data["session_id"] == "test_export_session"
+        assert session_data["alert_id"] == "test_alert_export"
+        assert session_data["agent_type"] == "KubernetesAgent"
+        assert session_data["status"] == "completed"
+        assert session_data["alert_data"]["environment"] == "test"
+        
+        # Verify timeline data
+        timeline_data = result["data"]["timeline"]
+        assert timeline_data["session"]["session_id"] == "test_export_session"
+        assert timeline_data["session"]["total_interactions"] == 2  # 1 LLM + 1 MCP interaction
+        
+        # Verify export metadata
+        export_metadata = result["data"]["export_metadata"]
+        assert export_metadata["format"] == "json"
+        assert export_metadata["total_interactions"] == 2  # Should match timeline interactions
+        assert "exported_at" in export_metadata
+        assert "session_duration_seconds" in export_metadata
+    
+    def test_export_session_data_not_found(self, db_session):
+        """Test export with non-existent session."""
+        repo = HistoryRepository(db_session)
+        
+        result = repo.export_session_data("nonexistent_session", "json")
+        
+        # Verify error response
+        assert result["session_id"] == "nonexistent_session"
+        assert result["format"] == "json"
+        assert result["data"] is None
+        assert "not found" in result["error"].lower()
+    
+    def test_export_session_data_csv_format(self, db_session):
+        """Test export with CSV format parameter."""
+        repo = HistoryRepository(db_session)
+        
+        # Create minimal test session
+        session = AlertSession(
+            session_id="test_csv_session",
+            alert_id="test_alert_csv",
+            agent_type="KubernetesAgent",
+            alert_type="TestAlert",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=2),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            alert_data={}
+        )
+        
+        db_session.add(session)
+        db_session.commit()
+        
+        result = repo.export_session_data("test_csv_session", "csv")
+        
+        # Verify format is preserved in response
+        assert result["format"] == "csv"
+        assert result["session_id"] == "test_csv_session"
+        assert result["data"] is not None
+        assert result["data"]["export_metadata"]["format"] == "csv"
+    
+    def test_search_sessions_success(self, db_session):
+        """Test successful session search."""
+        repo = HistoryRepository(db_session)
+        
+        # Create test sessions with searchable content
+        session1 = AlertSession(
+            session_id="search_session_1",
+            alert_id="namespace_terminating_alert",
+            agent_type="KubernetesAgent",
+            alert_type="NamespaceTerminating",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=8),
+            alert_data={"namespace": "production-ns", "environment": "production"}
+        )
+        
+        session2 = AlertSession(
+            session_id="search_session_2",
+            alert_id="pod_crash_alert",
+            agent_type="KubernetesAgent",
+            alert_type="PodCrashLoop",
+            status="failed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=3),
+            alert_data={"namespace": "staging-ns", "environment": "staging"},
+            error_message="Failed to resolve namespace issue"
+        )
+        
+        session3 = AlertSession(
+            session_id="search_session_3",
+            alert_id="unrelated_alert",
+            agent_type="DatabaseAgent",
+            alert_type="ConnectionTimeout",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=2),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            alert_data={"database": "main-db"}
+        )
+        
+        db_session.add(session1)
+        db_session.add(session2)
+        db_session.add(session3)
+        db_session.commit()
+        
+        # Test search by alert_type
+        results = repo.search_sessions("namespace", 10)
+        
+        # Should find sessions 1 and 2 (both have "namespace" in content)
+        assert len(results) == 2
+        session_ids = [r["session_id"] for r in results]
+        assert "search_session_1" in session_ids
+        assert "search_session_2" in session_ids
+        
+        # Verify result structure
+        result = results[0]
+        assert "session_id" in result
+        assert "alert_id" in result
+        assert "agent_type" in result
+        assert "alert_type" in result
+        assert "status" in result
+        assert "started_at" in result
+        assert "completed_at" in result
+        assert "duration_seconds" in result
+        
+        # Test search by agent_type
+        k8s_results = repo.search_sessions("KubernetesAgent", 10)
+        assert len(k8s_results) == 2  # sessions 1 and 2
+        
+        # Test search by error message
+        error_results = repo.search_sessions("Failed to resolve", 10)
+        assert len(error_results) == 1
+        assert error_results[0]["session_id"] == "search_session_2"
+    
+    def test_search_sessions_json_field_search(self, db_session):
+        """Test search within JSON fields."""
+        repo = HistoryRepository(db_session)
+        
+        # Create session with JSON data
+        session = AlertSession(
+            session_id="json_search_session",
+            alert_id="json_test_alert",
+            agent_type="KubernetesAgent",
+            alert_type="TestAlert",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=3),
+            alert_data={"environment": "production", "cluster": "prod-cluster-01"},
+            session_metadata={"description": "Production cluster maintenance"}
+        )
+        
+        db_session.add(session)
+        db_session.commit()
+        
+        # Test search by environment in alert_data
+        env_results = repo.search_sessions("production", 10)
+        assert len(env_results) == 1
+        assert env_results[0]["session_id"] == "json_search_session"
+        
+        # Test search by cluster in alert_data
+        cluster_results = repo.search_sessions("prod-cluster-01", 10)
+        assert len(cluster_results) == 1
+        assert cluster_results[0]["session_id"] == "json_search_session"
+        
+        # Test search by description in session_metadata
+        desc_results = repo.search_sessions("maintenance", 10)
+        assert len(desc_results) == 1
+        assert desc_results[0]["session_id"] == "json_search_session"
+    
+    def test_search_sessions_empty_results(self, db_session):
+        """Test search with no matching results."""
+        repo = HistoryRepository(db_session)
+        
+        # Create a session that won't match our search
+        session = AlertSession(
+            session_id="no_match_session",
+            alert_id="different_alert",
+            agent_type="DatabaseAgent",
+            alert_type="ConnectionTimeout",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=3),
+            alert_data={"database": "test-db"}
+        )
+        
+        db_session.add(session)
+        db_session.commit()
+        
+        # Search for something that doesn't exist
+        results = repo.search_sessions("nonexistent_term", 10)
+        assert results == []
+    
+    def test_search_sessions_limit_parameter(self, db_session):
+        """Test search with limit parameter."""
+        repo = HistoryRepository(db_session)
+        
+        # Create multiple matching sessions
+        for i in range(5):
+            session = AlertSession(
+                session_id=f"limit_test_session_{i}",
+                alert_id=f"test_alert_{i}",
+                agent_type="TestAgent",
+                alert_type="TestAlert",
+                status="completed",
+                started_at=datetime.now(timezone.utc) - timedelta(minutes=10-i),
+                completed_at=datetime.now(timezone.utc) - timedelta(minutes=8-i),
+                alert_data={}
+            )
+            db_session.add(session)
+        
+        db_session.commit()
+        
+        # Test with limit=2
+        results = repo.search_sessions("TestAgent", 2)
+        assert len(results) == 2
+        
+        # Test with limit=10 (should return all 5)
+        results = repo.search_sessions("TestAgent", 10)
+        assert len(results) == 5
+    
+    def test_search_sessions_ordering(self, db_session):
+        """Test that search results are ordered by most recent first."""
+        repo = HistoryRepository(db_session)
+        
+        # Create sessions with different timestamps
+        older_session = AlertSession(
+            session_id="older_session",
+            alert_id="older_alert",
+            agent_type="TestAgent",
+            alert_type="TestAlert",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            completed_at=datetime.now(timezone.utc) - timedelta(hours=2) + timedelta(minutes=1),
+            alert_data={}
+        )
+        
+        newer_session = AlertSession(
+            session_id="newer_session",
+            alert_id="newer_alert",
+            agent_type="TestAgent",
+            alert_type="TestAlert",
+            status="completed",
+            started_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+            completed_at=datetime.now(timezone.utc) - timedelta(minutes=29),
+            alert_data={}
+        )
+        
+        db_session.add(older_session)
+        db_session.add(newer_session)
+        db_session.commit()
+        
+        results = repo.search_sessions("TestAgent", 10)
+        
+        # Newer session should come first
+        assert len(results) == 2
+        assert results[0]["session_id"] == "newer_session"
+        assert results[1]["session_id"] == "older_session"
+
+ 

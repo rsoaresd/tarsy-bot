@@ -36,6 +36,11 @@ The existing alert dev UI serves only as a development/testing interface for sub
 - `GET /api/v1/history/sessions` - List sessions with filtering (status, agent_type, alert_type, time ranges)
 - `GET /api/v1/history/sessions/{session_id}` - Detailed session with chronological timeline
 - `GET /api/v1/history/health` - History service health check
+- `GET /api/v1/history/metrics` - Dashboard overview metrics (NEW)
+- `GET /api/v1/history/active-sessions` - Currently processing sessions (NEW)
+- `GET /api/v1/history/filter-options` - Dynamic filter options (NEW)
+- `GET /api/v1/history/sessions/{session_id}/export` - Export session data in JSON/CSV format (NEW)
+- `GET /api/v1/history/search` - Search sessions by content, metadata, and error messages (NEW)
 
 **Current Alert Dev UI (Development/Testing Interface):**
 - React 18.2.0 with TypeScript
@@ -270,4 +275,7 @@ After requirements approval:
 **AI Prompt for Next Phase:**
 ```
 Create a design document using the template at docs/templates/ep-design-template.md for EP-0004 based on the approved requirements in this document. The Tarsy dashboard should be implemented in the `dashboard/` directory.
-``` 
+```
+
+---
+*Last Updated: 2025-01-25 - Added export and search API endpoints* 

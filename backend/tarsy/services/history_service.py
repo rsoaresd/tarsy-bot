@@ -453,7 +453,15 @@ class HistoryService:
                 )
                 
                 sessions = result.get('sessions', [])
+                interaction_counts = result.get('interaction_counts', {})
                 total_items = result.get('pagination', {}).get('total_items', 0)
+                
+                # Add interaction counts as dynamic attributes to session objects
+                for session in sessions:
+                    counts = interaction_counts.get(session.session_id, {})
+                    # Use object.__setattr__ to bypass SQLModel validation
+                    object.__setattr__(session, 'llm_interaction_count', counts.get('llm_interactions', 0))
+                    object.__setattr__(session, 'mcp_communication_count', counts.get('mcp_communications', 0))
                 
                 return sessions, total_items
                 
@@ -519,6 +527,132 @@ class HistoryService:
                 
         except Exception as e:
             logger.error(f"Failed to get active sessions: {str(e)}")
+            return []
+    
+    def get_dashboard_metrics(self) -> Dict[str, Any]:
+        """
+        Get dashboard metrics including session counts and statistics.
+        
+        Returns:
+            Dictionary containing dashboard metrics
+        """
+        try:
+            with self.get_repository() as repo:
+                if not repo:
+                    return {
+                        "active_sessions": 0,
+                        "completed_sessions": 0,
+                        "failed_sessions": 0,
+                        "total_interactions": 0,
+                        "avg_session_duration": 0.0,
+                        "error_rate": 0.0,
+                        "last_24h_sessions": 0
+                    }
+                
+                return repo.get_dashboard_metrics()
+                
+        except Exception as e:
+            logger.error(f"Failed to get dashboard metrics: {str(e)}")
+            return {
+                "active_sessions": 0,
+                "completed_sessions": 0,
+                "failed_sessions": 0,
+                "total_interactions": 0,
+                "avg_session_duration": 0.0,
+                "error_rate": 0.0,
+                "last_24h_sessions": 0
+            }
+    
+    def get_filter_options(self) -> Dict[str, Any]:
+        """
+        Get available filter options for the dashboard.
+        
+        Returns:
+            Dictionary containing filter options
+        """
+        try:
+            with self.get_repository() as repo:
+                if not repo:
+                    return {
+                        "agent_types": [],
+                        "alert_types": [],
+                        "status_options": ["pending", "in_progress", "completed", "failed"],
+                        "time_ranges": [
+                            {"label": "Last Hour", "value": "1h"},
+                            {"label": "Last 4 Hours", "value": "4h"},
+                            {"label": "Today", "value": "today"},
+                            {"label": "This Week", "value": "week"}
+                        ]
+                    }
+                
+                return repo.get_filter_options()
+                
+        except Exception as e:
+            logger.error(f"Failed to get filter options: {str(e)}")
+            return {
+                "agent_types": [],
+                "alert_types": [],
+                "status_options": ["pending", "in_progress", "completed", "failed"],
+                "time_ranges": [
+                    {"label": "Last Hour", "value": "1h"},
+                    {"label": "Last 4 Hours", "value": "4h"},
+                    {"label": "Today", "value": "today"},
+                    {"label": "This Week", "value": "week"}
+                ]
+            }
+    
+    def export_session_data(self, session_id: str, format: str = 'json') -> Dict[str, Any]:
+        """
+        Export session data in the specified format.
+        
+        Args:
+            session_id: The session ID to export
+            format: Export format ('json' or 'csv')
+            
+        Returns:
+            Dictionary containing export data and metadata
+        """
+        try:
+            with self.get_repository() as repo:
+                if not repo:
+                    return {
+                        "error": "Repository unavailable",
+                        "session_id": session_id,
+                        "format": format,
+                        "data": None
+                    }
+                
+                return repo.export_session_data(session_id, format)
+                
+        except Exception as e:
+            logger.error(f"Failed to export session data for {session_id}: {str(e)}")
+            return {
+                "error": str(e),
+                "session_id": session_id,
+                "format": format,
+                "data": None
+            }
+    
+    def search_sessions(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Search sessions by alert content, error messages, or metadata.
+        
+        Args:
+            query: Search query string
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of matching session summaries
+        """
+        try:
+            with self.get_repository() as repo:
+                if not repo:
+                    return []
+                
+                return repo.search_sessions(query, limit)
+                
+        except Exception as e:
+            logger.error(f"Failed to search sessions with query '{query}': {str(e)}")
             return []
     
     # Maintenance Operations

@@ -602,4 +602,378 @@ class TestHistoryServiceErrorHandling:
             assert result == False
             
             result = history_service_with_errors.log_mcp_communication("test", "server", "type", "tool", "step")
-            assert result == False 
+            assert result == False
+
+
+class TestDashboardMethods:
+    """Test suite for new dashboard-specific methods in HistoryService."""
+    
+    @pytest.fixture
+    def mock_repository(self):
+        """Create mock repository for dashboard methods."""
+        repo = Mock()
+        repo.get_dashboard_metrics.return_value = {
+            "active_sessions": 5,
+            "completed_sessions": 20,
+            "failed_sessions": 3,
+            "total_interactions": 100,
+            "avg_session_duration": 30.5,
+            "error_rate": 12.5,
+            "last_24h_sessions": 8
+        }
+        repo.get_filter_options.return_value = {
+            "agent_types": ["kubernetes", "network"],
+            "alert_types": ["PodCrashLooping"],
+            "status_options": ["pending", "in_progress", "completed", "failed"],
+            "time_ranges": [
+                {"label": "Last Hour", "value": "1h"},
+                {"label": "Today", "value": "today"}
+            ]
+        }
+        return repo
+    
+    @pytest.fixture
+    def history_service_with_mock_repo(self, mock_repository):
+        """Create HistoryService with mocked repository."""
+        service = HistoryService()
+        service.is_enabled = True
+        service._is_healthy = True
+        
+        # Mock the get_repository context manager
+        with patch.object(service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = mock_repository
+            mock_get_repo.return_value.__exit__.return_value = None
+            yield service, mock_repository
+    
+    @pytest.mark.unit
+    def test_get_dashboard_metrics_success(self, history_service_with_mock_repo):
+        """Test successful dashboard metrics retrieval."""
+        service, mock_repo = history_service_with_mock_repo
+        
+        result = service.get_dashboard_metrics()
+        
+        # Verify the result
+        assert result["active_sessions"] == 5
+        assert result["completed_sessions"] == 20
+        assert result["failed_sessions"] == 3
+        assert result["total_interactions"] == 100
+        assert result["avg_session_duration"] == 30.5
+        assert result["error_rate"] == 12.5
+        assert result["last_24h_sessions"] == 8
+        
+        # Verify repository was called
+        mock_repo.get_dashboard_metrics.assert_called_once()
+    
+    @pytest.mark.unit
+    def test_get_dashboard_metrics_no_repository(self):
+        """Test dashboard metrics when repository is unavailable."""
+        service = HistoryService()
+        service.is_enabled = True
+        service._is_healthy = False
+        
+        with patch.object(service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = None
+            
+            result = service.get_dashboard_metrics()
+            
+            # Should return default values
+            assert result["active_sessions"] == 0
+            assert result["completed_sessions"] == 0
+            assert result["failed_sessions"] == 0
+            assert result["total_interactions"] == 0
+            assert result["avg_session_duration"] == 0.0
+            assert result["error_rate"] == 0.0
+            assert result["last_24h_sessions"] == 0
+    
+    @pytest.mark.unit
+    def test_get_dashboard_metrics_exception(self):
+        """Test dashboard metrics with repository exception."""
+        service = HistoryService()
+        service.is_enabled = True
+        
+        with patch.object(service, 'get_repository') as mock_get_repo:
+            mock_get_repo.side_effect = Exception("Database error")
+            
+            result = service.get_dashboard_metrics()
+            
+            # Should return default values on exception
+            assert result["active_sessions"] == 0
+            assert result["completed_sessions"] == 0
+            assert result["failed_sessions"] == 0
+    
+    @pytest.mark.unit
+    def test_get_filter_options_success(self, history_service_with_mock_repo):
+        """Test successful filter options retrieval."""
+        service, mock_repo = history_service_with_mock_repo
+        
+        result = service.get_filter_options()
+        
+        # Verify the result
+        assert "agent_types" in result
+        assert "alert_types" in result
+        assert "status_options" in result
+        assert "time_ranges" in result
+        assert len(result["agent_types"]) == 2
+        assert "kubernetes" in result["agent_types"]
+        assert len(result["time_ranges"]) == 2
+        
+        # Verify repository was called
+        mock_repo.get_filter_options.assert_called_once()
+    
+    @pytest.mark.unit
+    def test_get_filter_options_no_repository(self):
+        """Test filter options when repository is unavailable."""
+        service = HistoryService()
+        service.is_enabled = True
+        service._is_healthy = False
+        
+        with patch.object(service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = None
+            
+            result = service.get_filter_options()
+            
+            # Should return default values
+            assert result["agent_types"] == []
+            assert result["alert_types"] == []
+            assert len(result["status_options"]) == 4
+            assert len(result["time_ranges"]) == 4
+    
+    @pytest.mark.unit
+    def test_get_filter_options_exception(self):
+        """Test filter options with repository exception."""
+        service = HistoryService()
+        service.is_enabled = True
+        
+        with patch.object(service, 'get_repository') as mock_get_repo:
+            mock_get_repo.side_effect = Exception("Database error")
+            
+            result = service.get_filter_options()
+            
+            # Should return default values on exception
+            assert result["agent_types"] == []
+            assert result["alert_types"] == []
+            assert len(result["status_options"]) == 4
+
+
+class TestExportAndSearchMethods:
+    """Test suite for export and search functionality in HistoryService."""
+    
+    @pytest.fixture
+    def service(self):
+        """Create HistoryService instance for testing."""
+        return HistoryService()
+    
+    @pytest.fixture
+    def mock_repo(self):
+        """Create mock repository."""
+        return Mock()
+    
+    @pytest.mark.unit
+    def test_export_session_data_success(self, service, mock_repo):
+        """Test successful session data export."""
+        # Setup mock repository
+        mock_repo.export_session_data.return_value = {
+            "session_id": "test_session",
+            "format": "json",
+            "data": {
+                "session": {"session_id": "test_session", "status": "completed"},
+                "timeline": {"interactions": []},
+                "export_metadata": {"exported_at": "2025-01-25T00:00:00Z"}
+            },
+            "error": None
+        }
+        
+        # Mock the repository context manager
+        service.get_repository = Mock(return_value=mock_repo)
+        mock_repo.__enter__ = Mock(return_value=mock_repo)
+        mock_repo.__exit__ = Mock(return_value=None)
+        
+        # Call method
+        result = service.export_session_data("test_session", "json")
+        
+        # Verify result
+        assert result["session_id"] == "test_session"
+        assert result["format"] == "json"
+        assert result["data"]["session"]["session_id"] == "test_session"
+        assert result["error"] is None
+        
+        # Verify repository was called
+        mock_repo.export_session_data.assert_called_once_with("test_session", "json")
+    
+    @pytest.mark.unit
+    def test_export_session_data_csv_format(self, service, mock_repo):
+        """Test session data export with CSV format."""
+        # Setup mock repository
+        mock_repo.export_session_data.return_value = {
+            "session_id": "test_session",
+            "format": "csv",
+            "data": {
+                "session": {
+                    "session_id": "test_session",
+                    "alert_id": "test_alert",
+                    "status": "completed"
+                },
+                "timeline": {"interactions": []},
+                "export_metadata": {"exported_at": "2025-01-25T00:00:00Z"}
+            },
+            "error": None
+        }
+        
+        # Mock the repository context manager
+        service.get_repository = Mock(return_value=mock_repo)
+        mock_repo.__enter__ = Mock(return_value=mock_repo)
+        mock_repo.__exit__ = Mock(return_value=None)
+        
+        # Call method
+        result = service.export_session_data("test_session", "csv")
+        
+        # Verify result
+        assert result["format"] == "csv"
+        assert result["data"]["session"]["session_id"] == "test_session"
+        
+        # Verify repository was called with CSV format
+        mock_repo.export_session_data.assert_called_once_with("test_session", "csv")
+    
+    @pytest.mark.unit
+    def test_export_session_data_no_repository(self, service):
+        """Test export when repository is unavailable."""
+        # Mock get_repository to return a context manager that yields None
+        mock_context = Mock()
+        mock_context.__enter__ = Mock(return_value=None)
+        mock_context.__exit__ = Mock(return_value=None)
+        service.get_repository = Mock(return_value=mock_context)
+        
+        # Call method
+        result = service.export_session_data("test_session", "json")
+        
+        # Verify error response
+        assert result["error"] == "Repository unavailable"
+        assert result["session_id"] == "test_session"
+        assert result["format"] == "json"
+        assert result["data"] is None
+    
+    @pytest.mark.unit
+    def test_export_session_data_repository_exception(self, service, mock_repo):
+        """Test export when repository raises exception."""
+        # Setup mock repository to raise exception
+        mock_repo.export_session_data.side_effect = Exception("Database error")
+        
+        # Mock the repository context manager
+        service.get_repository = Mock(return_value=mock_repo)
+        mock_repo.__enter__ = Mock(return_value=mock_repo)
+        mock_repo.__exit__ = Mock(return_value=None)
+        
+        # Call method
+        result = service.export_session_data("test_session", "json")
+        
+        # Verify error response
+        assert result["error"] == "Database error"
+        assert result["session_id"] == "test_session"
+        assert result["format"] == "json"
+        assert result["data"] is None
+    
+    @pytest.mark.unit
+    def test_search_sessions_success(self, service, mock_repo):
+        """Test successful session search."""
+        # Setup mock repository
+        expected_results = [
+            {
+                "session_id": "session_1",
+                "alert_id": "namespace_alert",
+                "agent_type": "KubernetesAgent",
+                "status": "completed"
+            },
+            {
+                "session_id": "session_2", 
+                "alert_id": "another_namespace_alert",
+                "agent_type": "KubernetesAgent",
+                "status": "failed"
+            }
+        ]
+        mock_repo.search_sessions.return_value = expected_results
+        
+        # Mock the repository context manager
+        service.get_repository = Mock(return_value=mock_repo)
+        mock_repo.__enter__ = Mock(return_value=mock_repo)
+        mock_repo.__exit__ = Mock(return_value=None)
+        
+        # Call method
+        result = service.search_sessions("namespace", 5)
+        
+        # Verify result
+        assert result == expected_results
+        assert len(result) == 2
+        assert result[0]["session_id"] == "session_1"
+        assert result[1]["session_id"] == "session_2"
+        
+        # Verify repository was called
+        mock_repo.search_sessions.assert_called_once_with("namespace", 5)
+    
+    @pytest.mark.unit
+    def test_search_sessions_empty_results(self, service, mock_repo):
+        """Test search with no matching results."""
+        # Setup mock repository to return empty list
+        mock_repo.search_sessions.return_value = []
+        
+        # Mock the repository context manager
+        service.get_repository = Mock(return_value=mock_repo)
+        mock_repo.__enter__ = Mock(return_value=mock_repo)
+        mock_repo.__exit__ = Mock(return_value=None)
+        
+        # Call method
+        result = service.search_sessions("nonexistent", 10)
+        
+        # Verify empty result
+        assert result == []
+        
+        # Verify repository was called
+        mock_repo.search_sessions.assert_called_once_with("nonexistent", 10)
+    
+    @pytest.mark.unit
+    def test_search_sessions_default_limit(self, service, mock_repo):
+        """Test search with default limit parameter."""
+        # Setup mock repository
+        mock_repo.search_sessions.return_value = []
+        
+        # Mock the repository context manager
+        service.get_repository = Mock(return_value=mock_repo)
+        mock_repo.__enter__ = Mock(return_value=mock_repo)
+        mock_repo.__exit__ = Mock(return_value=None)
+        
+        # Call method without limit parameter
+        result = service.search_sessions("test")
+        
+        # Verify repository was called with default limit
+        mock_repo.search_sessions.assert_called_once_with("test", 10)
+    
+    @pytest.mark.unit
+    def test_search_sessions_no_repository(self, service):
+        """Test search when repository is unavailable."""
+        # Mock get_repository to return a context manager that yields None
+        mock_context = Mock()
+        mock_context.__enter__ = Mock(return_value=None)
+        mock_context.__exit__ = Mock(return_value=None)
+        service.get_repository = Mock(return_value=mock_context)
+        
+        # Call method
+        result = service.search_sessions("test", 5)
+        
+        # Verify empty result
+        assert result == []
+    
+    @pytest.mark.unit
+    def test_search_sessions_repository_exception(self, service, mock_repo):
+        """Test search when repository raises exception."""
+        # Setup mock repository to raise exception
+        mock_repo.search_sessions.side_effect = Exception("Database connection failed")
+        
+        # Mock the repository context manager
+        service.get_repository = Mock(return_value=mock_repo)
+        mock_repo.__enter__ = Mock(return_value=mock_repo)
+        mock_repo.__exit__ = Mock(return_value=None)
+        
+        # Call method
+        result = service.search_sessions("test", 5)
+        
+        # Verify empty result on exception
+        assert result == [] 

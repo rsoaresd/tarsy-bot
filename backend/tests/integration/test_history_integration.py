@@ -566,7 +566,10 @@ class TestHistoryAPIIntegration:
                 completed_at=datetime.now(timezone.utc),
                 error_message=None,
                 llm_interactions=[],  # Add missing attributes
-                mcp_communications=[]
+                mcp_communications=[],
+                # Add the new dynamic attributes expected by the controller
+                llm_interaction_count=0,
+                mcp_communication_count=0
             )
         ]
         service.get_sessions_list.return_value = (mock_sessions, 1)

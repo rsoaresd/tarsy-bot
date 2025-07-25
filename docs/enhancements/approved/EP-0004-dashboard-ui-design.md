@@ -2,7 +2,8 @@
 
 **Status:** Approved  
 **Created:** 2025-01-19  
-**Phase:** Design Approved
+**Phase:** Design Approved  
+**Last Updated:** 2025-01-25 (Backend API endpoints added)
 **Requirements Document:** `docs/enhancements/approved/EP-0004-dashboard-ui-requirements.md`
 **Next Phase:** Implementation Plan
 
@@ -450,7 +451,15 @@ No database changes required - dashboard consumes existing EP-0003 history servi
 
 ### New API Endpoints
 
-Dashboard will consume existing EP-0003 endpoints without requiring new backend API endpoints:
+Dashboard requires new dashboard-specific endpoints in addition to existing EP-0003 endpoints:
+
+#### New Dashboard Endpoints
+
+- **GET /api/v1/history/metrics**: Dashboard overview metrics (active sessions, completion rates, error rates, interaction counts)
+- **GET /api/v1/history/active-sessions**: Currently processing sessions with real-time status
+- **GET /api/v1/history/filter-options**: Dynamic filter options based on actual data (agent types, alert types, status options)
+- **GET /api/v1/history/sessions/{session_id}/export**: Export comprehensive session data with timeline in JSON or CSV format
+- **GET /api/v1/history/search**: Search sessions by alert content, error messages, and metadata with full-text search capabilities
 
 #### Existing Endpoints Used
 
@@ -460,7 +469,26 @@ Dashboard will consume existing EP-0003 endpoints without requiring new backend 
 
 ### Modified API Endpoints
 
-No modifications to existing API endpoints required.
+**Route Conflict Resolution**: The `/api/v1/history/sessions/active` endpoint was changed to `/api/v1/history/active-sessions` to avoid FastAPI routing conflicts with the parameterized `/api/v1/history/sessions/{session_id}` endpoint.
+
+#### Backend Implementation Details
+
+**New Service Methods:**
+- `HistoryService.get_dashboard_metrics()`: Aggregates session counts, interaction statistics, error rates, and duration metrics
+- `HistoryService.get_filter_options()`: Queries database for distinct values to populate filter dropdowns dynamically
+- `HistoryService.export_session_data()`: Orchestrates session data export with timeline reconstruction and format handling
+- `HistoryService.search_sessions()`: Coordinates multi-field session search with error handling and result limiting
+
+**New Repository Methods:**
+- `HistoryRepository.get_dashboard_metrics()`: Executes database queries for session counts by status, interaction counts, duration calculations, and 24-hour activity metrics
+- `HistoryRepository.get_filter_options()`: Performs `SELECT DISTINCT` queries for agent types, alert types, and status options with proper sorting
+- `HistoryRepository.export_session_data()`: Fetches complete session data with timeline reconstruction, supporting both JSON and CSV export formats
+- `HistoryRepository.search_sessions()`: Implements SQLite full-text search across multiple fields including JSON data extraction for environment, cluster, and namespace searches
+
+**Database Query Optimizations:**
+- Uses `COUNT(*)` aggregations for efficient metric calculations
+- Leverages indexed fields (`status`, `agent_type`, `started_at`) for fast filtering
+- Implements proper error handling with graceful fallback to default values
 
 ### API Integration Points
 
@@ -1071,4 +1099,7 @@ After design approval:
 **AI Prompt for Next Phase:**
 ```
 Create an implementation plan using the template at docs/templates/ep-implementation-template.md for EP-0004 based on the approved integrated hook system design in this document and the requirements in EP-0004-dashboard-ui-requirements.md. Prioritize backend WebSocket implementation followed by integrated hook system as Phase 1-2 dependencies.
-``` 
+```
+
+---
+*Last Updated: 2025-01-25 - Added export/search endpoints, comprehensive test coverage, and backend implementation details* 

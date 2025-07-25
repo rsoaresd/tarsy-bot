@@ -121,6 +121,12 @@ run: ## Start development server with manual venv activation
 	@echo "$(GREEN)Starting development server (manual venv)...$(NC)"
 	. .venv/bin/activate && uvicorn tarsy.main:app --reload --port 8000
 
+.PHONY: stop
+stop: ## Stop backend server running on port 8000
+	@echo "$(GREEN)Stopping backend server...$(NC)"
+	@lsof -ti:8000 | xargs -r kill -9 || echo "No process found on port 8000"
+	@echo "$(GREEN)Backend server stopped$(NC)"
+
 # Database and Cleanup
 .PHONY: clean
 clean: ## Clean up generated files and caches

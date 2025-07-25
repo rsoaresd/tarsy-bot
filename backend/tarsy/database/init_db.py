@@ -114,7 +114,7 @@ def test_database_connection(database_url: Optional[str] = None) -> bool:
         with Session(engine) as session:
             # Simple connectivity test
             result = session.exec(text("SELECT 1")).first()
-            return result == 1
+            return result[0] == 1
             
     except Exception as e:
         logger.debug(f"Database connection test failed: {str(e)}")

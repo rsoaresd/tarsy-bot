@@ -2,7 +2,8 @@
 
 **Status:** Approved  
 **Created:** 2025-01-19  
-**Phase:** Implementation Approved
+**Phase:** Implementation Approved  
+**Last Updated:** 2025-01-25 (Backend API endpoints implemented)
 **Requirements Document:** `docs/enhancements/approved/EP-0004-dashboard-ui-requirements.md`
 **Design Document:** `docs/enhancements/approved/EP-0004-dashboard-ui-design.md`
 
@@ -518,10 +519,137 @@ grep "dashboard_update_formatted" backend/logs/app.log
 - [ ] Concurrent hook execution maintains existing EP-0003 performance
 - [ ] Real-time updates flow from hook events to dashboard clients
 
+## Phase 2.5: Dashboard API Endpoints
+
+### Phase 2.5 Overview
+**Dependencies:** Phase 2 completion
+**Goal:** Implement dashboard-specific REST API endpoints for metrics, active sessions, and filter options
+
+#### Step 2.5.1: Dashboard API Endpoints Implementation
+**Goal:** Create new REST API endpoints for dashboard-specific data
+**Files to Create/Modify:**
+- `backend/tarsy/controllers/history_controller.py` (modify - add dashboard endpoints)
+- `backend/tarsy/services/history_service.py` (modify - add dashboard methods)
+- `backend/tarsy/repositories/history_repository.py` (modify - add dashboard queries)
+
+**AI Prompt:** `Implement Step 2.5.1 of EP-0004: Create dashboard-specific REST API endpoints with proper database queries for metrics, active sessions, and filter options`
+
+**Tasks:**
+- [x] Add `GET /api/v1/history/metrics` endpoint for dashboard overview metrics
+- [x] Add `GET /api/v1/history/active-sessions` endpoint for currently processing sessions
+- [x] Add `GET /api/v1/history/filter-options` endpoint for dynamic filter options
+- [x] Add `GET /api/v1/history/sessions/{session_id}/export` endpoint for session data export (JSON/CSV)
+- [x] Add `GET /api/v1/history/search` endpoint for multi-field session search
+- [x] Implement `HistoryService.get_dashboard_metrics()` with session counts and statistics
+- [x] Implement `HistoryService.get_filter_options()` with database-driven filter options
+- [x] Implement `HistoryService.export_session_data()` with timeline reconstruction and format handling
+- [x] Implement `HistoryService.search_sessions()` with multi-field search coordination
+- [x] Create `HistoryRepository.get_dashboard_metrics()` with optimized database queries
+- [x] Create `HistoryRepository.get_filter_options()` with distinct value queries
+- [x] Create `HistoryRepository.export_session_data()` with complete session data retrieval
+- [x] Create `HistoryRepository.search_sessions()` with SQLite full-text search across multiple fields
+- [x] Add comprehensive error handling with graceful fallbacks
+
+**Dependencies:**
+- Existing EP-0003 history service and repository infrastructure
+- Database models for AlertSession, LLMInteraction, MCPCommunication
+
+**Validation Criteria:**
+- [x] `/api/v1/history/metrics` returns session counts, error rates, and interaction statistics
+- [x] `/api/v1/history/active-sessions` returns currently processing sessions with real-time status
+- [x] `/api/v1/history/filter-options` returns dynamic filter options based on actual data
+- [x] `/api/v1/history/sessions/{session_id}/export` supports both JSON and CSV export formats
+- [x] `/api/v1/history/search` performs multi-field search with query parameter and result limiting
+- [x] All endpoints handle errors gracefully with appropriate HTTP status codes
+- [x] Database queries are optimized using indexed fields and COUNT aggregations
+
+**Success Check:**
+```bash
+# Test metrics endpoint
+curl http://localhost:8000/api/v1/history/metrics
+
+# Test active sessions endpoint
+curl http://localhost:8000/api/v1/history/active-sessions
+
+# Test filter options endpoint
+curl http://localhost:8000/api/v1/history/filter-options
+
+# Test export endpoint (JSON format)
+curl "http://localhost:8000/api/v1/history/sessions/{session_id}/export?format=json"
+
+# Test export endpoint (CSV format)
+curl "http://localhost:8000/api/v1/history/sessions/{session_id}/export?format=csv"
+
+# Test search endpoint
+curl "http://localhost:8000/api/v1/history/search?q=namespace&limit=5"
+
+# Verify response formats match frontend expectations
+```
+
+#### Step 2.5.2: API Testing and Validation
+**Goal:** Create comprehensive tests for dashboard API endpoints
+**Files to Create/Modify:**
+- `backend/tests/unit/controllers/test_history_controller.py` (modify - add dashboard endpoint tests)
+- `backend/tests/unit/services/test_history_service.py` (modify - add dashboard method tests)
+- `backend/tests/unit/repositories/test_history_repository.py` (modify - add dashboard query tests)
+
+**AI Prompt:** `Implement Step 2.5.2 of EP-0004: Create comprehensive test suite for dashboard API endpoints covering success cases, error scenarios, and edge cases`
+
+**Tasks:**
+- [x] Create controller tests for all dashboard endpoints (success and error cases)
+- [x] Create service tests for dashboard methods with mocked repositories
+- [x] Create repository tests for dashboard queries with real database operations
+- [x] Create comprehensive export and search endpoint tests (8 controller tests)
+- [x] Create export and search service method tests (9 service tests)
+- [x] Create export and search repository tests (8 repository tests)
+- [x] Test error handling and graceful degradation scenarios
+- [x] Validate response formats and data structures (JSON/CSV export, search results)
+- [x] Test database model compliance and constraint validation
+
+**Dependencies:**
+- Step 2.5.1 completion
+- Existing test infrastructure and fixtures
+
+**Validation Criteria:**
+- [x] All dashboard endpoints have comprehensive test coverage (25 new tests total)
+- [x] Tests cover success paths, error scenarios, and edge cases
+- [x] Database queries are tested with realistic data scenarios
+- [x] Export functionality tested for both JSON and CSV formats with proper headers
+- [x] Search functionality tested with multi-field queries and JSON field extraction
+- [x] All tests pass consistently with 100% success rate
+
+**Success Check:**
+```bash
+# Run all dashboard endpoint tests
+cd backend && python -m pytest tests/unit/controllers/test_history_controller.py::TestExportAndSearchEndpoints -v
+
+# Run service layer tests
+cd backend && python -m pytest tests/unit/services/test_history_service.py::TestExportAndSearchMethods -v
+
+# Run repository layer tests
+cd backend && python -m pytest tests/unit/repositories/test_history_repository.py -k "test_export_session_data or test_search_sessions" -v
+
+# Run all new dashboard tests together
+cd backend && python -m pytest tests/unit/controllers/test_history_controller.py::TestExportAndSearchEndpoints tests/unit/services/test_history_service.py::TestExportAndSearchMethods -v
+
+# Verify all tests pass
+echo "All dashboard API tests should pass"
+```
+
+### Phase 2.5 Completion Criteria
+- [x] Dashboard API endpoints return proper data with optimized database queries
+- [x] All endpoints handle errors gracefully with appropriate fallbacks
+- [x] Comprehensive test coverage validates functionality and performance (25 new tests, 100% pass rate)
+- [x] API responses match frontend data structure requirements
+- [x] Route conflicts resolved (active-sessions vs sessions/{id})
+- [x] Export functionality implemented with JSON/CSV format support and proper streaming responses
+- [x] Search functionality implemented with multi-field queries and JSON field extraction
+- [x] Database model compliance ensured with proper required field handling
+
 ## Phase 3: Frontend Dashboard Application
 
 ### Phase 3 Overview
-**Dependencies:** Phase 2 completion
+**Dependencies:** Phase 2.5 completion
 **Goal:** Create standalone React dashboard application with real-time capabilities
 
 #### Step 3.1: Dashboard Application Structure
@@ -1124,5 +1252,7 @@ When all phases are complete and all success criteria are met, this EP implement
 
 **Final AI Prompt:**
 ```
+
+---
 Review EP-0004 implementation and mark it as completed. Move all three documents (requirements, design, implementation) to the implemented directory and update the project documentation.
 ``` 

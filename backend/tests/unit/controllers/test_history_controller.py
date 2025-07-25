@@ -71,6 +71,9 @@ class TestHistoryControllerEndpoints:
         session1.error_message = None
         session1.llm_interactions = []
         session1.mcp_communications = []
+        # Add the new dynamic attributes expected by the controller
+        session1.llm_interaction_count = 0
+        session1.mcp_communication_count = 0
         
         session2 = Mock()
         session2.session_id = "session-2"
@@ -83,6 +86,9 @@ class TestHistoryControllerEndpoints:
         session2.error_message = None
         session2.llm_interactions = []
         session2.mcp_communications = []
+        # Add the new dynamic attributes expected by the controller
+        session2.llm_interaction_count = 0
+        session2.mcp_communication_count = 0
         
         mock_sessions = [session1, session2]
         mock_history_service.get_sessions_list.return_value = (mock_sessions, 2)
@@ -602,6 +608,9 @@ class TestHistoryControllerResponseFormat:
         mock_session.error_message = None
         mock_session.llm_interactions = []  # Add missing attributes
         mock_session.mcp_communications = []
+        # Add the new dynamic attributes expected by the controller
+        mock_session.llm_interaction_count = 0
+        mock_session.mcp_communication_count = 0
         
         mock_service.get_sessions_list.return_value = ([mock_session], 1)
         
@@ -861,4 +870,486 @@ class TestHistoryControllerIntegration:
             assert response.status_code == 200
         
         # Service should have been called for each request
-        assert mock_service.get_sessions_list.call_count == 5 
+        assert mock_service.get_sessions_list.call_count == 5
+
+class TestDashboardEndpoints:
+    """Test suite for new dashboard-specific API endpoints."""
+    
+    @pytest.fixture
+    def app(self):
+        """Create FastAPI application with history router."""
+        app = FastAPI()
+        app.include_router(router)
+        return app
+    
+    @pytest.fixture
+    def client(self, app):
+        """Create test client."""
+        return TestClient(app)
+    
+    @pytest.fixture
+    def mock_history_service(self):
+        """Create mock history service for dashboard endpoints."""
+        service = Mock(spec=HistoryService)
+        service.enabled = True
+        service.is_enabled = True
+        
+        # Mock dashboard methods
+        service.get_dashboard_metrics.return_value = {
+            "active_sessions": 3,
+            "completed_sessions": 25,
+            "failed_sessions": 2,
+            "total_interactions": 150,
+            "avg_session_duration": 45.5,
+            "error_rate": 6.67,
+            "last_24h_sessions": 10
+        }
+        
+        # Create a proper mock session object with datetime handling
+        mock_session = Mock()
+        mock_session.session_id = "session_1"
+        mock_session.alert_id = "alert_1"
+        mock_session.agent_type = "kubernetes"
+        mock_session.alert_type = "PodCrashLooping"
+        mock_session.status = "in_progress"
+        mock_session.started_at = datetime.now(timezone.utc)
+        mock_session.completed_at = None
+        mock_session.error_message = None
+        
+        service.get_active_sessions.return_value = [mock_session]
+        
+        service.get_filter_options.return_value = {
+            "agent_types": ["kubernetes", "network", "database"],
+            "alert_types": ["PodCrashLooping", "ServiceDown"],
+            "status_options": ["pending", "in_progress", "completed", "failed"],
+            "time_ranges": [
+                {"label": "Last Hour", "value": "1h"},
+                {"label": "Last 4 Hours", "value": "4h"},
+                {"label": "Today", "value": "today"},
+                {"label": "This Week", "value": "week"}
+            ]
+        }
+        
+        return service
+    
+    @pytest.mark.unit
+    def test_get_dashboard_metrics_success(self, app, client, mock_history_service):
+        """Test successful dashboard metrics retrieval."""
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        # Make request
+        response = client.get("/api/v1/history/metrics")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+        assert data["active_sessions"] == 3
+        assert data["completed_sessions"] == 25
+        assert data["failed_sessions"] == 2
+        assert data["total_interactions"] == 150
+        assert data["avg_session_duration"] == 45.5
+        assert data["error_rate"] == 6.67
+        assert data["last_24h_sessions"] == 10
+        
+        # Verify service was called
+        mock_history_service.get_dashboard_metrics.assert_called_once()
+    
+    @pytest.mark.unit
+    def test_get_dashboard_metrics_service_error(self, app, client, mock_history_service):
+        """Test dashboard metrics endpoint with service error."""
+        # Configure mock to raise exception
+        mock_history_service.get_dashboard_metrics.side_effect = Exception("Database error")
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        # Make request
+        response = client.get("/api/v1/history/metrics")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert error response
+        assert response.status_code == 500
+        assert "Failed to get metrics" in response.json()["detail"]
+    
+    @pytest.mark.unit
+    def test_get_active_sessions_success(self, app, client):
+        """Test successful active sessions retrieval."""
+        # Create a more realistic mock service
+        mock_service = Mock()
+        
+        # Create a real AlertSession-like object
+        from tarsy.models.history import AlertSession
+        test_session = AlertSession(
+            session_id="session_1",
+            alert_id="alert_1",
+            agent_type="kubernetes",
+            alert_type="PodCrashLooping",
+            status="in_progress",
+            started_at=datetime.now(timezone.utc),
+            alert_data={}
+        )
+        
+        mock_service.get_active_sessions.return_value = [test_session]
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request
+        response = client.get("/api/v1/history/active-sessions")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["session_id"] == "session_1"
+        assert data[0]["alert_id"] == "alert_1"
+        assert data[0]["agent_type"] == "kubernetes"
+        assert data[0]["alert_type"] == "PodCrashLooping"
+        assert data[0]["status"] == "in_progress"
+        assert "started_at" in data[0]
+        assert "duration_seconds" in data[0]
+        assert data[0]["completed_at"] is None
+        
+        # Verify service was called
+        mock_service.get_active_sessions.assert_called_once()
+    
+    @pytest.mark.unit
+    def test_get_active_sessions_empty(self, app, client):
+        """Test active sessions endpoint with no active sessions."""
+        # Create mock service
+        mock_service = Mock()
+        mock_service.get_active_sessions.return_value = []
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request
+        response = client.get("/api/v1/history/active-sessions")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+        assert data == []
+    
+    @pytest.mark.unit
+    def test_get_active_sessions_service_error(self, app, client):
+        """Test active sessions endpoint with service error."""
+        # Create mock service that raises exception
+        mock_service = Mock()
+        mock_service.get_active_sessions.side_effect = Exception("Database error")
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request
+        response = client.get("/api/v1/history/active-sessions")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert error response
+        assert response.status_code == 500
+        assert "Failed to get active sessions" in response.json()["detail"]
+    
+    @pytest.mark.unit
+    def test_get_filter_options_success(self, app, client, mock_history_service):
+        """Test successful filter options retrieval."""
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        # Make request
+        response = client.get("/api/v1/history/filter-options")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+        assert "agent_types" in data
+        assert "alert_types" in data
+        assert "status_options" in data
+        assert "time_ranges" in data
+        assert len(data["agent_types"]) == 3
+        assert "kubernetes" in data["agent_types"]
+        assert len(data["time_ranges"]) == 4
+        
+        # Verify service was called
+        mock_history_service.get_filter_options.assert_called_once()
+    
+    @pytest.mark.unit
+    def test_get_filter_options_service_error(self, app, client, mock_history_service):
+        """Test filter options endpoint with service error."""
+        # Configure mock to raise exception
+        mock_history_service.get_filter_options.side_effect = Exception("Database error")
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        # Make request
+        response = client.get("/api/v1/history/filter-options")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert error response
+        assert response.status_code == 500
+        assert "Failed to get filter options" in response.json()["detail"]
+
+
+class TestExportAndSearchEndpoints:
+    """Test suite for export and search API endpoints."""
+    
+    @pytest.fixture
+    def app(self):
+        """Create FastAPI application with history router."""
+        app = FastAPI()
+        app.include_router(router)
+        return app
+    
+    @pytest.fixture
+    def client(self, app):
+        """Create test client."""
+        return TestClient(app)
+    
+    @pytest.mark.unit
+    def test_export_session_json_success(self, app, client):
+        """Test successful session export in JSON format."""
+        # Create mock service
+        mock_service = Mock()
+        mock_service.export_session_data.return_value = {
+            "session_id": "test_session",
+            "format": "json",
+            "data": {
+                "session": {
+                    "session_id": "test_session",
+                    "alert_id": "test_alert",
+                    "agent_type": "KubernetesAgent",
+                    "status": "completed"
+                },
+                "timeline": {"interactions": []},
+                "export_metadata": {"exported_at": "2025-01-25T00:00:00Z"}
+            },
+            "error": None
+        }
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request
+        response = client.get("/api/v1/history/sessions/test_session/export?format=json")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session"]["session_id"] == "test_session"
+        assert data["timeline"]["interactions"] == []
+        
+        # Verify service was called
+        mock_service.export_session_data.assert_called_once_with("test_session", "json")
+    
+    @pytest.mark.unit
+    def test_export_session_csv_success(self, app, client):
+        """Test successful session export in CSV format."""
+        # Create mock service
+        mock_service = Mock()
+        mock_service.export_session_data.return_value = {
+            "session_id": "test_session",
+            "format": "csv",
+            "data": {
+                "session": {
+                    "session_id": "test_session",
+                    "alert_id": "test_alert",
+                    "agent_type": "KubernetesAgent",
+                    "alert_type": "TestAlert",
+                    "status": "completed",
+                    "started_at": "2025-01-25T00:00:00Z",
+                    "completed_at": "2025-01-25T00:01:00Z",
+                    "error_message": None
+                },
+                "timeline": {"interactions": []},
+                "export_metadata": {"exported_at": "2025-01-25T00:00:00Z"}
+            },
+            "error": None
+        }
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request
+        response = client.get("/api/v1/history/sessions/test_session/export?format=csv")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert response
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/csv; charset=utf-8"
+        assert "attachment; filename=session_test_session.csv" in response.headers.get("content-disposition", "")
+        
+        # Check CSV content
+        csv_content = response.content.decode('utf-8')
+        assert "Session Information" in csv_content
+        assert "test_session" in csv_content
+        assert "KubernetesAgent" in csv_content
+        
+        # Verify service was called
+        mock_service.export_session_data.assert_called_once_with("test_session", "csv")
+    
+    @pytest.mark.unit
+    def test_export_session_not_found(self, app, client):
+        """Test export endpoint with non-existent session."""
+        # Create mock service
+        mock_service = Mock()
+        mock_service.export_session_data.return_value = {
+            "error": "Session not_found_session not found",
+            "session_id": "not_found_session",
+            "format": "json",
+            "data": None
+        }
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request
+        response = client.get("/api/v1/history/sessions/not_found_session/export")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert error response
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+    
+    @pytest.mark.unit
+    def test_export_session_invalid_format(self, app, client):
+        """Test export endpoint with invalid format parameter."""
+        # Create mock service
+        mock_service = Mock()
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request with invalid format
+        response = client.get("/api/v1/history/sessions/test_session/export?format=xml")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert validation error
+        assert response.status_code == 422  # Validation error
+    
+    @pytest.mark.unit
+    def test_search_sessions_success(self, app, client):
+        """Test successful session search."""
+        # Create mock service
+        mock_service = Mock()
+        mock_service.search_sessions.return_value = [
+            {
+                "session_id": "session_1",
+                "alert_id": "namespace_alert_1",
+                "agent_type": "KubernetesAgent",
+                "alert_type": "NamespaceTerminating",
+                "status": "completed",
+                "started_at": "2025-01-25T00:00:00Z",
+                "completed_at": "2025-01-25T00:01:00Z",
+                "error_message": None,
+                "duration_seconds": 60.0
+            }
+        ]
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request
+        response = client.get("/api/v1/history/search?q=namespace&limit=5")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["session_id"] == "session_1"
+        assert data[0]["alert_type"] == "NamespaceTerminating"
+        
+        # Verify service was called
+        mock_service.search_sessions.assert_called_once_with("namespace", 5)
+    
+    @pytest.mark.unit
+    def test_search_sessions_empty_results(self, app, client):
+        """Test search with no matching results."""
+        # Create mock service
+        mock_service = Mock()
+        mock_service.search_sessions.return_value = []
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request
+        response = client.get("/api/v1/history/search?q=nonexistent")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert response
+        assert response.status_code == 200
+        data = response.json()
+        assert data == []
+        
+        # Verify service was called with default limit
+        mock_service.search_sessions.assert_called_once_with("nonexistent", 10)
+    
+    @pytest.mark.unit
+    def test_search_sessions_invalid_limit(self, app, client):
+        """Test search with invalid limit parameter."""
+        # Create mock service
+        mock_service = Mock()
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request with invalid limit
+        response = client.get("/api/v1/history/search?q=test&limit=0")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert validation error
+        assert response.status_code == 422  # Validation error
+    
+    @pytest.mark.unit
+    def test_search_sessions_service_error(self, app, client):
+        """Test search endpoint with service error."""
+        # Create mock service that raises exception
+        mock_service = Mock()
+        mock_service.search_sessions.side_effect = Exception("Database error")
+        
+        # Override dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_service
+        
+        # Make request
+        response = client.get("/api/v1/history/search?q=test")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Assert error response
+        assert response.status_code == 500
+        assert "Failed to search sessions" in response.json()["detail"] 

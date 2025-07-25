@@ -6,10 +6,13 @@ Provides REST API for querying historical data with filtering, pagination,
 and chronological timeline reconstruction.
 """
 
+import csv
+import io
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi.responses import StreamingResponse
 
 from tarsy.models.api_models import (
     ErrorResponse,
@@ -111,9 +114,9 @@ async def list_sessions(
             if session.completed_at and session.started_at:
                 duration_ms = int((session.completed_at - session.started_at).total_seconds() * 1000)
             
-            # Get interaction/communication counts
-            llm_count = len(session.llm_interactions) if hasattr(session, 'llm_interactions') else 0
-            mcp_count = len(session.mcp_communications) if hasattr(session, 'mcp_communications') else 0
+            # Get interaction/communication counts (from repository subqueries)
+            llm_count = getattr(session, 'llm_interaction_count', 0)
+            mcp_count = getattr(session, 'mcp_communication_count', 0)
             
             session_summary = SessionSummary(
                 session_id=session.session_id,
@@ -167,7 +170,6 @@ async def list_sessions(
     **Response includes:**
     - Complete session metadata and processing details
     - Chronological timeline of all LLM interactions and MCP communications
-    - Session summary statistics and performance metrics
     - Full audit trail with microsecond-precision timing
     """
 )
@@ -326,5 +328,155 @@ async def health_check(
                 "message": "Health check failed with exception"
             }
         )
+
+# Dashboard-specific endpoints for EP-0004 implementation
+
+@router.get(
+    "/metrics",
+    summary="Dashboard Metrics",
+    description="Get dashboard overview metrics for active and completed sessions"
+)
+async def get_dashboard_metrics(
+    history_service: HistoryService = Depends(get_history_service)
+):
+    """Get dashboard metrics including session counts and status distribution."""
+    try:
+        return history_service.get_dashboard_metrics()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get metrics: {str(e)}")
+
+@router.get(
+    "/active-sessions",
+    summary="Active Sessions", 
+    description="Get currently active/processing sessions"
+)
+async def get_active_sessions(
+    history_service: HistoryService = Depends(get_history_service)
+):
+    """Get list of currently active sessions."""
+    try:
+        active_sessions = history_service.get_active_sessions()
+        # Convert to the format expected by the frontend
+        return [
+            {
+                "session_id": session.session_id,
+                "alert_id": session.alert_id,
+                "agent_type": session.agent_type,
+                "alert_type": session.alert_type,
+                "status": session.status,
+                "started_at": session.started_at.isoformat(),
+                "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+                "error_message": session.error_message,
+                "duration_seconds": (
+                    (session.completed_at - session.started_at).total_seconds() 
+                    if session.completed_at else 
+                    (datetime.now(timezone.utc) - session.started_at).total_seconds()
+                )
+            }
+            for session in active_sessions
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get active sessions: {str(e)}")
+
+@router.get(
+    "/filter-options",
+    summary="Filter Options",
+    description="Get available filter options for dashboard filtering"
+)
+async def get_filter_options(
+    history_service: HistoryService = Depends(get_history_service)
+):
+    """Get available filter options for the dashboard."""
+    try:
+        return history_service.get_filter_options()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get filter options: {str(e)}")
+
+@router.get(
+    "/sessions/{session_id}/export",
+    summary="Export Session Data",
+    description="Export session data with timeline in JSON or CSV format"
+)
+async def export_session_data(
+    session_id: str = Path(..., description="Session ID to export"),
+    format: str = Query("json", regex="^(json|csv)$", description="Export format: json or csv"),
+    history_service: HistoryService = Depends(get_history_service)
+):
+    """Export comprehensive session data including timeline."""
+    try:
+        export_result = history_service.export_session_data(session_id, format)
+        
+        if export_result.get("error"):
+            if "not found" in export_result["error"].lower():
+                raise HTTPException(status_code=404, detail=export_result["error"])
+            else:
+                raise HTTPException(status_code=500, detail=export_result["error"])
+        
+        export_data = export_result["data"]
+        
+        if format == "csv":
+            # Generate CSV format
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # Write session header
+            writer.writerow(["Session Information"])
+            writer.writerow(["Field", "Value"])
+            writer.writerow(["Session ID", export_data["session"]["session_id"]])
+            writer.writerow(["Alert ID", export_data["session"]["alert_id"]])
+            writer.writerow(["Agent Type", export_data["session"]["agent_type"]])
+            writer.writerow(["Alert Type", export_data["session"]["alert_type"]])
+            writer.writerow(["Status", export_data["session"]["status"]])
+            writer.writerow(["Started At", export_data["session"]["started_at"]])
+            writer.writerow(["Completed At", export_data["session"]["completed_at"] or "N/A"])
+            writer.writerow(["Error Message", export_data["session"]["error_message"] or "None"])
+            writer.writerow([])
+            
+            # Write timeline interactions
+            writer.writerow(["Timeline Interactions"])
+            writer.writerow(["Timestamp", "Type", "Description", "Duration (ms)", "Success"])
+            
+            for interaction in export_data["timeline"].get("interactions", []):
+                writer.writerow([
+                    interaction.get("timestamp", ""),
+                    interaction.get("type", ""),
+                    interaction.get("description", "")[:100] + "..." if len(interaction.get("description", "")) > 100 else interaction.get("description", ""),
+                    interaction.get("duration_ms", ""),
+                    interaction.get("success", "")
+                ])
+            
+            csv_content = output.getvalue()
+            output.close()
+            
+            return StreamingResponse(
+                io.BytesIO(csv_content.encode('utf-8')),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=session_{session_id}.csv"}
+            )
+        else:
+            # Return JSON format
+            return export_data
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export session data: {str(e)}")
+
+@router.get(
+    "/search",
+    summary="Search Sessions",
+    description="Search sessions by alert content, error messages, or metadata"
+)
+async def search_sessions(
+    q: str = Query(..., description="Search query string"),
+    limit: int = Query(10, ge=1, le=100, description="Maximum number of results"),
+    history_service: HistoryService = Depends(get_history_service)
+):
+    """Search sessions by various fields."""
+    try:
+        results = history_service.search_sessions(q, limit)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search sessions: {str(e)}")
 
 # Note: Exception handlers should be registered at the app level in main.py 
