@@ -424,7 +424,7 @@ class TestServiceInteractionPatterns:
         }
         
         # Act
-        result = await agent.analyze_alert(alert_data, sample_runbook_content, mcp_data)
+        result = await agent.analyze_alert(alert_data, sample_runbook_content, mcp_data, "test-session-integration")
         
         # Assert
         assert isinstance(result, str)
@@ -450,7 +450,7 @@ class TestServiceInteractionPatterns:
         )
         
         # Act
-        result = await agent.process_alert(sample_alert, sample_runbook_content)
+        result = await agent.process_alert(sample_alert, sample_runbook_content, "test-session-integration")
         
         # Assert
         assert progress_callback_mock.call_count >= 1
@@ -481,7 +481,7 @@ class TestErrorPropagationBetweenComponents:
         )
         
         # Act
-        result = await agent.process_alert(sample_alert, sample_runbook_content)
+        result = await agent.process_alert(sample_alert, sample_runbook_content, "test-session-integration")
         
         # Assert - Agent should handle MCP errors gracefully
         assert result is not None
@@ -506,7 +506,7 @@ class TestErrorPropagationBetweenComponents:
         )
         
         # Act
-        result = await agent.process_alert(sample_alert, sample_runbook_content)
+        result = await agent.process_alert(sample_alert, sample_runbook_content, "test-session-integration")
         
         # Assert - Agent should handle LLM errors
         assert result is not None

@@ -321,9 +321,9 @@ class TestHistoryRepository:
         # Verify chronological order
         events = timeline["chronological_timeline"]
         assert len(events) == 3
-        assert events[0]["type"] == "llm_interaction"
-        assert events[1]["type"] == "mcp_communication"
-        assert events[2]["type"] == "llm_interaction"
+        assert events[0]["type"] == "llm"
+        assert events[1]["type"] == "mcp"
+        assert events[2]["type"] == "llm"
         
         # Verify timeline is ordered by timestamp
         for i in range(len(events) - 1):

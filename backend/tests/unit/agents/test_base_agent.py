@@ -445,7 +445,7 @@ class TestBaseAgentMCPIntegration:
             }
         ]
         
-        results = await base_agent._execute_mcp_tools(tools_to_call)
+        results = await base_agent._execute_mcp_tools(tools_to_call, "test-session-123")
         
         assert "test-server" in results
         assert len(results["test-server"]) == 1
@@ -453,7 +453,7 @@ class TestBaseAgentMCPIntegration:
         assert results["test-server"][0]["result"] == {"result": "success"}
         
         mock_mcp_client.call_tool.assert_called_once_with(
-            "test-server", "kubectl-get", {"resource": "pods"}
+            "test-server", "kubectl-get", {"resource": "pods"}, "test-session-123"
         )
 
     @pytest.mark.unit
@@ -471,7 +471,7 @@ class TestBaseAgentMCPIntegration:
             }
         ]
         
-        results = await base_agent._execute_mcp_tools(tools_to_call)
+        results = await base_agent._execute_mcp_tools(tools_to_call, "test-session-456")
         
         assert "forbidden-server" in results
         assert "not allowed for agent" in results["forbidden-server"][0]["error"]
@@ -492,7 +492,7 @@ class TestBaseAgentMCPIntegration:
             }
         ]
         
-        results = await base_agent._execute_mcp_tools(tools_to_call)
+        results = await base_agent._execute_mcp_tools(tools_to_call, "test-session-789")
         
         assert "test-server" in results
         assert "Tool execution failed" in results["test-server"][0]["error"]
@@ -615,7 +615,7 @@ class TestBaseAgentCoreProcessing:
         runbook_content = "Test runbook"
         mcp_data = {"test-server": [{"tool": "kubectl", "result": "pod logs"}]}
         
-        result = await base_agent.analyze_alert(sample_alert_data, runbook_content, mcp_data)
+        result = await base_agent.analyze_alert(sample_alert_data, runbook_content, mcp_data, "test-session-123")
         
         assert result == "Detailed analysis result"
         mock_llm_client.generate_response.assert_called_once()
@@ -633,7 +633,7 @@ class TestBaseAgentCoreProcessing:
         mock_llm_client.generate_response.side_effect = Exception("LLM service unavailable")
         
         with pytest.raises(Exception, match="Analysis error: LLM service unavailable"):
-            await base_agent.analyze_alert(sample_alert_data, "runbook", {})
+            await base_agent.analyze_alert(sample_alert_data, "runbook", {}, "test-session-error")
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -661,7 +661,7 @@ class TestBaseAgentCoreProcessing:
         runbook_content = "Test runbook"
         available_tools = {"tools": [{"name": "kubectl-get-pods"}]}
         
-        result = await base_agent.determine_mcp_tools(alert_data, runbook_content, available_tools)
+        result = await base_agent.determine_mcp_tools(alert_data, runbook_content, available_tools, "test-session-123")
         
         assert len(result) == 1
         assert result[0]["server"] == "test-server"
@@ -676,7 +676,7 @@ class TestBaseAgentCoreProcessing:
         mock_llm_client.generate_response.return_value = "Not valid JSON"
         
         with pytest.raises(Exception, match="Tool selection error"):
-            await base_agent.determine_mcp_tools({}, "", {})
+            await base_agent.determine_mcp_tools({}, "", {}, "test-session-error")
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -691,7 +691,7 @@ class TestBaseAgentCoreProcessing:
         ]'''
         
         with pytest.raises(Exception, match="Tool selection error"):
-            await base_agent.determine_mcp_tools({}, "", {})
+            await base_agent.determine_mcp_tools({}, "", {}, "test-session-error")
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -724,7 +724,7 @@ class TestBaseAgentCoreProcessing:
         iteration_history = [{"tools_called": [], "mcp_data": {}}]
         
         result = await base_agent.determine_next_mcp_tools(
-            alert_data, runbook_content, available_tools, iteration_history, 1
+            alert_data, runbook_content, available_tools, iteration_history, 1, "test-session-123"
         )
         
         assert result["continue"] is True
@@ -737,7 +737,7 @@ class TestBaseAgentCoreProcessing:
         """Test determining next MCP tools when stopping iteration."""
         mock_llm_client.generate_response.return_value = '{"continue": false}'
         
-        result = await base_agent.determine_next_mcp_tools({}, "", {}, [], 2)
+        result = await base_agent.determine_next_mcp_tools({}, "", {}, [], 2, "test-session-stop")
         
         assert result["continue"] is False
 
@@ -748,7 +748,7 @@ class TestBaseAgentCoreProcessing:
         mock_llm_client.generate_response.return_value = '{"missing_continue_field": true}'
         
         with pytest.raises(Exception, match="Iterative tool selection error"):
-            await base_agent.determine_next_mcp_tools({}, "", {}, [], 1)
+            await base_agent.determine_next_mcp_tools({}, "", {}, [], 1, "test-session-error")
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -845,7 +845,7 @@ class TestBaseAgentIterativeWorkflow:
         base_agent._configured_servers = ["test-server"]
         
         result = await base_agent._iterative_analysis(
-            sample_alert_data, "test runbook", [], None
+            sample_alert_data, "test runbook", [], None, "test-session-123"
         )
         
         assert result == "Analysis complete"
@@ -872,7 +872,7 @@ class TestBaseAgentIterativeWorkflow:
         base_agent._configured_servers = ["test-server"]
         
         result = await base_agent._iterative_analysis(
-            sample_alert_data, "test runbook", [], None
+            sample_alert_data, "test runbook", [], None, "test-session-456"
         )
         
         assert result == "Max iterations reached"
@@ -890,11 +890,11 @@ class TestBaseAgentIterativeWorkflow:
         base_agent.analyze_alert = AsyncMock(return_value="Fallback analysis")
         
         result = await base_agent._iterative_analysis(
-            sample_alert_data, "test runbook", [], None
+            sample_alert_data, "test runbook", [], None, "test-session-789"
         )
         
         assert result == "Fallback analysis"
-        base_agent.analyze_alert.assert_called_once_with(sample_alert_data, "test runbook", {})
+        base_agent.analyze_alert.assert_called_once_with(sample_alert_data, "test runbook", {}, session_id="test-session-789")
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -910,7 +910,7 @@ class TestBaseAgentIterativeWorkflow:
         base_agent.analyze_alert = AsyncMock(return_value="Analysis after error")
         
         result = await base_agent._iterative_analysis(
-            sample_alert_data, "test runbook", [], None
+            sample_alert_data, "test runbook", [], None, "test-session-123"
         )
         
         assert result == "Analysis after error"
@@ -930,7 +930,7 @@ class TestBaseAgentIterativeWorkflow:
         base_agent.analyze_alert = AsyncMock(side_effect=Exception("Final analysis failed"))
         
         result = await base_agent._iterative_analysis(
-            sample_alert_data, "test runbook", [], None
+            sample_alert_data, "test runbook", [], None, "test-session-def"
         )
         
         assert "Analysis incomplete due to error: Final analysis failed" in result
@@ -962,7 +962,7 @@ class TestBaseAgentIterativeWorkflow:
         base_agent._configured_servers = ["test-server"]
         
         result = await base_agent._iterative_analysis(
-            sample_alert_data, "test runbook", [], None
+            sample_alert_data, "test runbook", [], None, "test-session-ghi"
         )
         
         assert result == "Aggregated analysis"
@@ -1013,7 +1013,7 @@ class TestBaseAgentErrorHandling:
         """Test process_alert with MCP configuration error."""
         mock_mcp_registry.get_server_configs.return_value = []  # No servers configured
         
-        result = await base_agent.process_alert(sample_alert, "runbook content")
+        result = await base_agent.process_alert(sample_alert, "runbook content", "test-session-123")
         
         assert result["status"] == "error"
         assert "Agent processing failed" in result["error"]
@@ -1030,7 +1030,8 @@ class TestBaseAgentErrorHandling:
         result = await base_agent.process_alert(
             sample_alert, 
             "runbook content",
-            callback=failing_callback
+            callback=failing_callback,
+            session_id="test-session-123"
         )
         
         # Should complete successfully despite callback failures
@@ -1057,7 +1058,7 @@ class TestBaseAgentErrorHandling:
         base_agent.determine_next_mcp_tools = AsyncMock(return_value={"continue": False})
         base_agent.analyze_alert = AsyncMock(return_value="Success analysis")
         
-        result = await base_agent.process_alert(sample_alert, "runbook content")
+        result = await base_agent.process_alert(sample_alert, "runbook content", "test-session-success")
         
         assert result["status"] == "success"
         assert result["analysis"] == "Success analysis"
@@ -1180,11 +1181,12 @@ class TestBaseAgent:
         # Mock the tools listing to avoid MCP calls
         mock_mcp_client.list_tools.return_value = {"test-server": []}
         
-        # Act - Should work without session_id parameter
+        # Act - Should work with session_id parameter
         result = await base_agent.process_alert(
             alert=sample_alert,
             runbook_content=runbook_content,
-            callback=progress_callback
+            callback=progress_callback,
+            session_id="test-session-123"
         )
         
         # Assert
@@ -1201,7 +1203,7 @@ class TestBaseAgent:
         sample_alert,
         mock_mcp_client
     ):
-        """Test that process_alert works with None session_id."""
+        """Test that process_alert raises ValueError with None session_id."""
         # Arrange
         runbook_content = "Test runbook content"
         progress_callback = Mock()
@@ -1209,19 +1211,14 @@ class TestBaseAgent:
         # Mock the tools listing to avoid MCP calls
         mock_mcp_client.list_tools.return_value = {"test-server": []}
         
-        # Act - Should work with explicit None session_id
-        result = await base_agent.process_alert(
-            alert=sample_alert,
-            runbook_content=runbook_content,
-            callback=progress_callback,
-            session_id=None
-        )
-        
-        # Assert
-        assert result is not None
-        assert isinstance(result, dict)
-        assert result["status"] in ["success", "error"]
-        assert result["agent"] == "TestConcreteAgent"
+        # Act & Assert - Should raise ValueError with None session_id
+        with pytest.raises(ValueError, match="session_id is required for alert processing"):
+            await base_agent.process_alert(
+                alert=sample_alert,
+                runbook_content=runbook_content,
+                callback=progress_callback,
+                session_id=None
+            )
     
     @pytest.mark.asyncio
     @pytest.mark.unit

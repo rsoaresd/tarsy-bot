@@ -214,7 +214,7 @@ class TestLLMClientGenerateResponse:
             mock_hook_context.return_value.__aenter__.return_value = mock_context
             
             messages = [LLMMessage(role="user", content="Test question")]
-            result = await client.generate_response(messages)
+            result = await client.generate_response(messages, "test-session-123")
             
             assert result == "Test response"
             client.llm_client.ainvoke.assert_called_once()
@@ -229,7 +229,7 @@ class TestLLMClientGenerateResponse:
         messages = [LLMMessage(role="user", content="Test")]
         
         with pytest.raises(Exception, match="openai client not available"):
-            await client.generate_response(messages)
+            await client.generate_response(messages, "test-session-error")
     
     async def test_generate_response_langchain_error(self, client):
         """Test response generation when LangChain call fails."""
@@ -243,7 +243,7 @@ class TestLLMClientGenerateResponse:
             messages = [LLMMessage(role="user", content="Test")]
             
             with pytest.raises(Exception, match="openai API error"):
-                await client.generate_response(messages)
+                await client.generate_response(messages, "test-session-api-error")
 
 
 @pytest.mark.unit
@@ -467,12 +467,12 @@ class TestLLMManagerResponseGeneration:
         """Test response generation with default provider."""
         messages = [LLMMessage(role="user", content="Test message")]
         
-        result = await manager_with_mock_client.generate_response(messages)
+        result = await manager_with_mock_client.generate_response(messages, session_id="test-session-123")
         
         assert result == "Test response"
         
         openai_client = manager_with_mock_client.clients["openai"]
-        openai_client.generate_response.assert_called_once_with(messages)
+        openai_client.generate_response.assert_called_once_with(messages, "test-session-123")
     
     async def test_generate_response_with_kwargs(self, manager_with_mock_client):
         """Test response generation with additional kwargs."""
@@ -480,6 +480,7 @@ class TestLLMManagerResponseGeneration:
         
         await manager_with_mock_client.generate_response(
             messages, 
+            session_id="test-session-123",
             max_tokens=100,
             temperature=0.5
         )
@@ -487,6 +488,7 @@ class TestLLMManagerResponseGeneration:
         openai_client = manager_with_mock_client.clients["openai"]
         openai_client.generate_response.assert_called_once_with(
             messages, 
+            "test-session-123",
             max_tokens=100,
             temperature=0.5
         )
@@ -502,7 +504,7 @@ class TestLLMManagerResponseGeneration:
             messages = [LLMMessage(role="user", content="Test")]
             
             with pytest.raises(Exception, match="LLM provider not available"):
-                await manager.generate_response(messages, provider="nonexistent")
+                await manager.generate_response(messages, session_id="test-session-123", provider="nonexistent")
 
 
 @pytest.mark.unit
@@ -601,7 +603,7 @@ class TestErrorHandlingAndEdgeCases:
                 mock_context.get_request_id.return_value = "empty-req"
                 mock_hook_context.return_value.__aenter__.return_value = mock_context
                 
-                result = await client.generate_response([])
+                result = await client.generate_response([], session_id="test-session-123")
                 
                 assert result == "Empty response"
                 mock_langchain_client.ainvoke.assert_called_once_with([])
@@ -631,7 +633,7 @@ class TestErrorHandlingAndEdgeCases:
                 mock_hook_context.return_value.__aenter__.return_value = mock_context
                 
                 messages = [LLMMessage(role="user", content=f"Message {i}") for i in range(3)]
-                tasks = [client.generate_response([msg]) for msg in messages]
+                tasks = [client.generate_response([msg], f"test-session-{i}") for i, msg in enumerate(messages)]
                 results = await asyncio.gather(*tasks)
                 
                 assert len(results) == 3

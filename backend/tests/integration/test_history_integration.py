@@ -245,11 +245,11 @@ class TestHistoryServiceIntegration:
             assert current_time <= next_time, f"Event {i} timestamp is after event {i+1}"
         
         # Verify event types in expected order
-        assert events[0]["type"] == "llm_interaction"
+        assert events[0]["type"] == "llm"
         assert events[0]["step_description"] == "Initial analysis"
-        assert events[1]["type"] == "mcp_communication"
+        assert events[1]["type"] == "mcp"
         assert events[1]["step_description"] == "Get namespace info"
-        assert events[2]["type"] == "llm_interaction"
+        assert events[2]["type"] == "llm"
         assert events[2]["step_description"] == "Follow-up analysis"
     
     @pytest.mark.integration

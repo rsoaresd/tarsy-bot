@@ -147,8 +147,16 @@ class MCPClient:
             
             return all_tools
     
-    async def call_tool(self, server_name: str, tool_name: str, parameters: Dict[str, Any], **kwargs) -> Dict[str, Any]:
-        """Call a specific tool on an MCP server."""
+    async def call_tool(self, server_name: str, tool_name: str, parameters: Dict[str, Any], session_id: str, **kwargs) -> Dict[str, Any]:
+        """Call a specific tool on an MCP server.
+        
+        Args:
+            server_name: Name of the MCP server
+            tool_name: Name of the tool to call
+            parameters: Parameters to pass to the tool
+            session_id: Required session ID for timeline logging and tracking
+            **kwargs: Optional additional parameters
+        """
         if not self._initialized:
             await self.initialize()
         
@@ -156,7 +164,7 @@ class MCPClient:
             raise Exception(f"MCP server not found: {server_name}")
         
         # Use HookContext to handle all hook lifecycle management
-        session_id = kwargs.pop('session_id', None)  # Remove session_id from kwargs to avoid duplicate
+        # CLEAN PATTERN: Explicit session_id parameter - no extraction needed
         async with HookContext(
             service_type="mcp",
             method_name="call_tool",

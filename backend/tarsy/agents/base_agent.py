@@ -198,6 +198,7 @@ class BaseAgent(ABC):
                           alert_data: Dict, 
                           runbook_content: str, 
                           mcp_data: Dict,
+                          session_id: str,
                           **kwargs) -> str:
         """Analyze an alert using the agent's LLM capabilities."""
         logger.info(f"Starting alert analysis with {self.__class__.__name__} - Alert: {alert_data.get('alert', 'unknown')}")
@@ -218,7 +219,7 @@ class BaseAgent(ABC):
         ]
         
         try:
-            result = await self.llm_client.generate_response(messages, **kwargs)
+            result = await self.llm_client.generate_response(messages, session_id, **kwargs)
             logger.info(f"Alert analysis completed with {self.__class__.__name__}")
             return result
         except Exception as e:
@@ -229,6 +230,7 @@ class BaseAgent(ABC):
                                 alert_data: Dict,
                                 runbook_content: str,
                                 available_tools: Dict,
+                                session_id: str,
                                 **kwargs) -> List[Dict]:
         """Determine which MCP tools to call based on alert and runbook."""
         logger.info(f"Starting MCP tool selection with {self.__class__.__name__} - Alert: {alert_data.get('alert', 'unknown')}")
@@ -249,7 +251,7 @@ class BaseAgent(ABC):
         ]
         
         try:
-            response = await self.llm_client.generate_response(messages, **kwargs)
+            response = await self.llm_client.generate_response(messages, session_id, **kwargs)
             
             # Parse the JSON response
             tools_to_call = self._parse_json_response(response, expected_type=list)
@@ -277,6 +279,7 @@ class BaseAgent(ABC):
                                      available_tools: Dict,
                                      iteration_history: List[Dict],
                                      current_iteration: int,
+                                     session_id: str,
                                      **kwargs) -> Dict:
         """Determine next MCP tools to call based on current context and previous iterations."""
         logger.info(f"Starting iterative MCP tool selection with {self.__class__.__name__} - Iteration {current_iteration}")
@@ -299,7 +302,7 @@ class BaseAgent(ABC):
         ]
         
         try:
-            response = await self.llm_client.generate_response(messages, **kwargs)
+            response = await self.llm_client.generate_response(messages, session_id, **kwargs)
             
             # Parse the JSON response
             next_action = self._parse_json_response(response, expected_type=dict)
@@ -393,8 +396,8 @@ class BaseAgent(ABC):
         self,
         alert: Alert,
         runbook_content: str,
-        callback: Optional[Callable] = None,
-        session_id: Optional[str] = None
+        session_id: str,
+        callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
         """
         Process an alert using the agent's specialized knowledge.
@@ -411,6 +414,10 @@ class BaseAgent(ABC):
         Returns:
             Dictionary containing the analysis result and metadata
         """
+        # Validate required session_id for timeline logging
+        if not session_id or not session_id.strip():
+            raise ValueError("session_id is required for alert processing and timeline logging")
+                       
         try:
             # Use provided callback or fall back to constructor callback
             progress_callback = callback or self.progress_callback
@@ -436,7 +443,8 @@ class BaseAgent(ABC):
                 alert_data, 
                 runbook_content, 
                 available_tools,
-                progress_callback
+                progress_callback,
+                session_id=session_id
             )
             
             # Final result
@@ -581,7 +589,8 @@ class BaseAgent(ABC):
         alert_data: Dict,
         runbook_content: str,
         available_tools: List[Dict[str, Any]],
-        progress_callback: Optional[Callable]
+        progress_callback: Optional[Callable],
+        session_id: str
     ) -> str:
         """
         Perform iterative analysis using LLM and MCP tools.
@@ -601,17 +610,17 @@ class BaseAgent(ABC):
         # Initial tool selection
         try:
             initial_tools = await self.determine_mcp_tools(
-                alert_data, runbook_content, {"tools": available_tools}
+                alert_data, runbook_content, {"tools": available_tools}, session_id=session_id
             )
         except Exception as e:
             logger.error(f"Initial tool selection failed: {str(e)}")
             # Fall back to analysis without tools
-            return await self.analyze_alert(alert_data, runbook_content, {})
+            return await self.analyze_alert(alert_data, runbook_content, {}, session_id=session_id)
         
         # Execute initial tools if any
         mcp_data = {}
         if initial_tools:
-            mcp_data = await self._execute_mcp_tools(initial_tools)
+            mcp_data = await self._execute_mcp_tools(initial_tools, session_id=session_id)
             iteration_history.append({
                 "tools_called": initial_tools,
                 "mcp_data": mcp_data
@@ -630,7 +639,7 @@ class BaseAgent(ABC):
             try:
                 next_action = await self.determine_next_mcp_tools(
                     alert_data, runbook_content, {"tools": available_tools},
-                    iteration_history, self._iteration_count
+                    iteration_history, self._iteration_count, session_id=session_id
                 )
             except Exception as e:
                 logger.error(f"Next tool determination failed in iteration {self._iteration_count}: {str(e)}")
@@ -644,7 +653,7 @@ class BaseAgent(ABC):
             # Execute additional tools
             additional_tools = next_action.get("tools", [])
             if additional_tools:
-                additional_mcp_data = await self._execute_mcp_tools(additional_tools)
+                additional_mcp_data = await self._execute_mcp_tools(additional_tools, session_id=session_id)
                 # Merge with existing data
                 for server_name, server_data in additional_mcp_data.items():
                     if server_name in mcp_data:
@@ -668,12 +677,12 @@ class BaseAgent(ABC):
         
         # Final analysis with all collected data
         try:
-            return await self.analyze_alert(alert_data, runbook_content, mcp_data)
+            return await self.analyze_alert(alert_data, runbook_content, mcp_data, session_id=session_id)
         except Exception as e:
             logger.error(f"Final analysis failed: {str(e)}")
             return f"Analysis incomplete due to error: {str(e)}"
 
-    async def _execute_mcp_tools(self, tools_to_call: List[Dict]) -> Dict[str, List[Dict]]:
+    async def _execute_mcp_tools(self, tools_to_call: List[Dict], session_id: str) -> Dict[str, List[Dict]]:
         """Execute a list of MCP tool calls and return organized results."""
         results = {}
         
@@ -687,7 +696,7 @@ class BaseAgent(ABC):
                 if self._configured_servers and server_name not in self._configured_servers:
                     raise ValueError(f"Tool '{tool_name}' from server '{server_name}' not allowed for agent {self.__class__.__name__}")
                 
-                result = await self.mcp_client.call_tool(server_name, tool_name, tool_params)
+                result = await self.mcp_client.call_tool(server_name, tool_name, tool_params, session_id)
                 
                 # Organize results by server
                 if server_name not in results:

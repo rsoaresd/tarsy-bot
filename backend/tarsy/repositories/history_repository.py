@@ -321,27 +321,38 @@ class HistoryRepository:
             # Add LLM interactions to timeline
             for interaction in llm_interactions:
                 timeline_events.append({
+                    "id": interaction.interaction_id,
+                    "event_id": interaction.interaction_id,
                     "timestamp": interaction.timestamp,
-                    "type": "llm_interaction",
+                    "type": "llm",
                     "step_description": interaction.step_description,
-                    "model_used": interaction.model_used,
-                    "token_usage": interaction.token_usage,
                     "duration_ms": interaction.duration_ms,
-                    "interaction_id": interaction.interaction_id
+                    "details": {
+                        "prompt": interaction.prompt_text or "No prompt available",
+                        "response": interaction.response_text or "No response available", 
+                        "model_name": interaction.model_used,
+                        "tokens_used": interaction.token_usage,
+                        "temperature": None  # Not stored in current model
+                    }
                 })
             
             # Add MCP communications to timeline
             for communication in mcp_communications:
                 timeline_events.append({
+                    "id": communication.communication_id,
+                    "event_id": communication.communication_id,
                     "timestamp": communication.timestamp,
-                    "type": "mcp_communication",
+                    "type": "mcp",
                     "step_description": communication.step_description,
-                    "server_name": communication.server_name,
-                    "communication_type": communication.communication_type,
-                    "tool_name": communication.tool_name,
-                    "success": communication.success,
                     "duration_ms": communication.duration_ms,
-                    "communication_id": communication.communication_id
+                    "details": {
+                        "tool_name": communication.tool_name,
+                        "server_name": communication.server_name,
+                        "communication_type": communication.communication_type,
+                        "parameters": communication.tool_arguments or {},
+                        "result": communication.tool_result or {},
+                        "success": communication.success
+                    }
                 })
             
             # Sort all events by timestamp for exact chronological ordering
@@ -349,7 +360,14 @@ class HistoryRepository:
             
             # Convert timestamps to ISO format for JSON serialization
             for event in timeline_events:
-                event["timestamp"] = event["timestamp"].isoformat() + "Z"
+                timestamp = event["timestamp"]
+                if timestamp.tzinfo is not None:
+                    # Convert to UTC and use Z suffix for consistency
+                    utc_timestamp = timestamp.astimezone(datetime.UTC if hasattr(datetime, 'UTC') else timezone.utc)
+                    event["timestamp"] = utc_timestamp.replace(tzinfo=None).isoformat() + "Z"
+                else:
+                    # Assume naive timestamps are UTC
+                    event["timestamp"] = timestamp.isoformat() + "Z"
             
             return {
                 "session": {
@@ -361,6 +379,9 @@ class HistoryRepository:
                     "status": session.status,
                     "started_at": session.started_at.isoformat() + "Z" if session.started_at else None,
                     "completed_at": session.completed_at.isoformat() + "Z" if session.completed_at else None,
+                    "error_message": session.error_message,
+                    "final_analysis": session.final_analysis,
+                    "session_metadata": session.session_metadata,
                     "total_interactions": len(llm_interactions) + len(mcp_communications)
                 },
                 "chronological_timeline": timeline_events,

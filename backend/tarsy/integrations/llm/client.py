@@ -90,21 +90,27 @@ class LLMClient:
                 langchain_messages.append(AIMessage(content=msg.content))
         return langchain_messages
     
-    async def generate_response(self, messages: List[LLMMessage], **kwargs) -> str:
+    async def generate_response(self, messages: List[LLMMessage], session_id: str, **kwargs) -> str:
         """
         Generate a response from the LLM using LangChain.
         
         This is the core method that handles communication with any LLM provider.
         All business logic should be handled by the calling code.
+        
+        Args:
+            messages: List of messages for the conversation
+            session_id: Required session ID for timeline logging and tracking
+            **kwargs: Optional LLM parameters (temperature, max_tokens, etc.)
         """
         if not self.available or not self.llm_client:
             raise Exception(f"{self.provider_name} client not available")
         
         # Use HookContext to handle all hook lifecycle management
+        # CLEAN PATTERN: Explicit session_id parameter - no extraction needed
         async with HookContext(
             service_type="llm",
             method_name="generate_response", 
-            session_id=kwargs.get('session_id'),
+            session_id=session_id,
             messages=messages,
             model=self.model,
             provider=self.provider_name,
@@ -214,16 +220,23 @@ class LLMManager:
     
     async def generate_response(self, 
                               messages: List[LLMMessage],
+                              session_id: str,
                               provider: str = None,
                               **kwargs) -> str:
-        """Generate a response using the specified or default LLM provider."""
+        """Generate a response using the specified or default LLM provider.
+        
+        Args:
+            messages: List of messages for the conversation
+            session_id: Required session ID for timeline logging and tracking
+            provider: Optional provider override (uses default if not specified)
+            **kwargs: Optional LLM parameters (temperature, max_tokens, etc.)
+        """
         client = self.get_client(provider)
         if not client:
             available = list(self.clients.keys())
             raise Exception(f"LLM provider not available. Available: {available}")
         
-        # Ensure session_id and other context is passed through to enable history tracking
-        return await client.generate_response(messages, **kwargs)
+        return await client.generate_response(messages, session_id, **kwargs)
 
     def list_available_providers(self) -> List[str]:
         """List available LLM providers."""

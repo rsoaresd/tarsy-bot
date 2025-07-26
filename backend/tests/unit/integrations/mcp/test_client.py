@@ -443,7 +443,7 @@ class TestMCPClientCallTool:
         with patch.object(self.client, '_log_mcp_request') as mock_log_req, \
              patch.object(self.client, '_log_mcp_response') as mock_log_resp:
             
-            result = await self.client.call_tool("test-server", "test-tool", self.test_params)
+            result = await self.client.call_tool("test-server", "test-tool", self.test_params, "test-session-123")
         
         # Verify result
         assert result == {"result": "Tool execution result"}
@@ -474,7 +474,7 @@ class TestMCPClientCallTool:
         mock_result.content = [mock_item1, mock_item2]
         self.mock_session.call_tool.return_value = mock_result
         
-        result = await self.client.call_tool("test-server", "test-tool", self.test_params)
+        result = await self.client.call_tool("test-server", "test-tool", self.test_params, "test-session-123")
         
         assert result == {"result": "First part\nSecond part"}
     
@@ -499,7 +499,7 @@ class TestMCPClientCallTool:
         mock_result.content = [mock_item]
         self.mock_session.call_tool.return_value = mock_result
         
-        result = await self.client.call_tool("test-server", "test-tool", self.test_params)
+        result = await self.client.call_tool("test-server", "test-tool", self.test_params, "test-session-123")
         
         assert result == {"result": "Text content from str"}
     
@@ -515,7 +515,7 @@ class TestMCPClientCallTool:
         mock_result.content = "Simple string result"
         self.mock_session.call_tool.return_value = mock_result
         
-        result = await self.client.call_tool("test-server", "test-tool", self.test_params)
+        result = await self.client.call_tool("test-server", "test-tool", self.test_params, "test-session-123")
         
         assert result == {"result": "Simple string result"}
     
@@ -534,7 +534,7 @@ class TestMCPClientCallTool:
         mock_result = MockResultWithoutContent()
         self.mock_session.call_tool.return_value = mock_result
         
-        result = await self.client.call_tool("test-server", "test-tool", self.test_params)
+        result = await self.client.call_tool("test-server", "test-tool", self.test_params, "test-session-123")
         
         assert result == {"result": "String representation"}
     
@@ -545,7 +545,7 @@ class TestMCPClientCallTool:
         mock_hook_context.return_value.__aenter__.return_value = mock_ctx
         
         with pytest.raises(Exception) as exc_info:
-            await self.client.call_tool("nonexistent-server", "test-tool", self.test_params)
+            await self.client.call_tool("nonexistent-server", "test-tool", self.test_params, "test-session-error")
         
         assert "MCP server not found: nonexistent-server" in str(exc_info.value)
         
@@ -564,7 +564,7 @@ class TestMCPClientCallTool:
         
         with patch.object(self.client, '_log_mcp_error') as mock_log_error:
             with pytest.raises(Exception) as exc_info:
-                await self.client.call_tool("test-server", "test-tool", self.test_params)
+                await self.client.call_tool("test-server", "test-tool", self.test_params, "test-session-123")
         
         # Verify error message format
         assert "Failed to call tool test-tool on test-server: Tool execution failed" in str(exc_info.value)
@@ -616,7 +616,7 @@ class TestMCPClientCallTool:
         # Setup for quick failure after initialization
         with patch('tarsy.integrations.mcp.client.HookContext'):
             with pytest.raises(Exception, match="MCP server not found"):
-                await self.client.call_tool("test-server", "test-tool", self.test_params)
+                await self.client.call_tool("test-server", "test-tool", self.test_params, "test-session-123")
         
         mock_initialize.assert_called_once()
 
@@ -889,7 +889,7 @@ class TestMCPClientIntegrationScenarios:
             assert tools["workflow-server"][0]["name"] == "test-tool"
             
             # 3. Call tool
-            result = await self.client.call_tool("workflow-server", "test-tool", {"param": "value"})
+            result = await self.client.call_tool("workflow-server", "test-tool", {"param": "value"}, "test-session-workflow")
             assert result == {"result": "Tool result"}
             
             # 4. Close
@@ -948,7 +948,7 @@ class TestMCPClientIntegrationScenarios:
         
         tools_task = asyncio.create_task(self.client.list_tools("concurrent-server"))
         call_task = asyncio.create_task(
-            self.client.call_tool("concurrent-server", "test-tool", {"param": "value"})
+            self.client.call_tool("concurrent-server", "test-tool", {"param": "value"}, "test-session-concurrent")
         )
         
         tools_result, call_result = await asyncio.gather(tools_task, call_task)

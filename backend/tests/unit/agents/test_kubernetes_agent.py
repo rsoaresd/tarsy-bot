@@ -418,7 +418,7 @@ class TestKubernetesAgentLLMIntegration:
         runbook_content = "Test runbook"
         mcp_data = {"test": "data"}
         
-        result = await agent.analyze_alert(sample_alert_data, runbook_content, mcp_data)
+        result = await agent.analyze_alert(sample_alert_data, runbook_content, mcp_data, session_id="test-session-123")
         
         assert result == "Analysis result"
         mock_llm.generate_response.assert_called_once()
@@ -451,7 +451,7 @@ class TestKubernetesAgentLLMIntegration:
         available_tools = {"tools": [{"name": "get_pod_status", "server": "kubernetes-server"}]}
         runbook_content = "Test runbook"
         
-        result = await agent.determine_mcp_tools(sample_alert_data, runbook_content, available_tools)
+        result = await agent.determine_mcp_tools(sample_alert_data, runbook_content, available_tools, session_id="test-session-123")
         
         assert len(result) == 1
         assert result[0]["server"] == "kubernetes-server"
@@ -469,7 +469,7 @@ class TestKubernetesAgentLLMIntegration:
         mock_llm.generate_response = AsyncMock(side_effect=Exception("LLM error"))
         
         with pytest.raises(Exception, match="Analysis error: LLM error"):
-            await agent.analyze_alert(sample_alert_data, "runbook", {})
+            await agent.analyze_alert(sample_alert_data, "runbook", {}, session_id="test-session-123")
 
 
 @pytest.mark.unit
@@ -511,7 +511,7 @@ class TestKubernetesAgentMCPIntegration:
             }
         ]
         
-        result = await agent._execute_mcp_tools(tools_to_call)
+        result = await agent._execute_mcp_tools(tools_to_call, session_id="test-session-123")
         
         assert "kubernetes-server" in result
         assert len(result["kubernetes-server"]) == 1
@@ -523,9 +523,10 @@ class TestKubernetesAgentMCPIntegration:
         assert "timestamp" in tool_result
         
         mock_mcp.call_tool.assert_called_once_with(
-            "kubernetes-server", 
-            "get_pod_status", 
-            {"namespace": "production", "pod": "app-pod"}
+            "kubernetes-server",
+            "get_pod_status",
+            {"namespace": "production", "pod": "app-pod"},
+            "test-session-123"
         )
     
     async def test_execute_mcp_tools_server_validation(self, kubernetes_agent_with_mocks):
@@ -542,7 +543,7 @@ class TestKubernetesAgentMCPIntegration:
             }
         ]
         
-        result = await agent._execute_mcp_tools(tools_to_call)
+        result = await agent._execute_mcp_tools(tools_to_call, session_id="test-session-123")
         
         # Should record error for unauthorized server
         assert "unauthorized-server" in result
@@ -568,7 +569,7 @@ class TestKubernetesAgentMCPIntegration:
             }
         ]
         
-        result = await agent._execute_mcp_tools(tools_to_call)
+        result = await agent._execute_mcp_tools(tools_to_call, session_id="test-session-123")
         
         assert "kubernetes-server" in result
         tool_result = result["kubernetes-server"][0]
@@ -657,7 +658,7 @@ class TestKubernetesAgentErrorHandling:
         
         with pytest.raises(Exception, match="Tool selection error"):
             await kubernetes_agent.determine_mcp_tools(
-                {"alert": "test"}, "runbook", {"tools": []}
+                {"alert": "test"}, "runbook", {"tools": []}, session_id="test-session-123"
             )
     
     async def test_determine_mcp_tools_wrong_response_type(self, kubernetes_agent):
@@ -666,7 +667,7 @@ class TestKubernetesAgentErrorHandling:
         
         with pytest.raises(Exception, match="Tool selection error"):
             await kubernetes_agent.determine_mcp_tools(
-                {"alert": "test"}, "runbook", {"tools": []}
+                {"alert": "test"}, "runbook", {"tools": []}, session_id="test-session-123"
             )
     
     async def test_determine_mcp_tools_missing_required_fields(self, kubernetes_agent):
@@ -682,7 +683,7 @@ class TestKubernetesAgentErrorHandling:
         
         with pytest.raises(Exception, match="Tool selection error"):
             await kubernetes_agent.determine_mcp_tools(
-                {"alert": "test"}, "runbook", {"tools": []}
+                {"alert": "test"}, "runbook", {"tools": []}, session_id="test-session-123"
             )
     
     def test_parse_json_response_with_markdown_blocks(self, kubernetes_agent):
@@ -802,7 +803,7 @@ class TestKubernetesAgentIntegrationScenarios:
         4. Check configuration
         """
         
-        result = await agent.process_alert(pod_crash_alert, runbook_content)
+        result = await agent.process_alert(pod_crash_alert, runbook_content, session_id="test-session-123")
         
         # Verify successful completion
         assert result["status"] == "success"
@@ -817,7 +818,8 @@ class TestKubernetesAgentIntegrationScenarios:
         mock_mcp.call_tool.assert_called_with(
             "kubernetes-server",
             "get_pod_status",
-            {"namespace": "production", "pod": "app-deployment-abc123"}
+            {"namespace": "production", "pod": "app-deployment-abc123"},
+            "test-session-123"
         )
         
         # Verify progress callbacks were made
@@ -837,7 +839,7 @@ class TestKubernetesAgentIntegrationScenarios:
         alert_data = agent._prepare_alert_data(pod_crash_alert)
         
         try:
-            await agent.determine_mcp_tools(alert_data, "runbook", {"tools": available_tools})
+            await agent.determine_mcp_tools(alert_data, "runbook", {"tools": available_tools}, session_id="test-session-123")
         except:
             pass  # We just want to verify the prompt was built correctly
         
@@ -861,7 +863,7 @@ class TestKubernetesAgentIntegrationScenarios:
             "Analysis based on alert data only: Pod crash loop suggests configuration issues."  # Fallback analysis
         ])
         
-        result = await agent.process_alert(pod_crash_alert, "runbook")
+        result = await agent.process_alert(pod_crash_alert, "runbook", session_id="test-session-123")
         
         # Should still complete successfully with fallback analysis
         assert result["status"] == "success"
@@ -909,7 +911,7 @@ class TestKubernetesAgentIntegrationScenarios:
             {"result": "Namespace events data"}
         ])
         
-        result = await agent.process_alert(pod_crash_alert, "runbook")
+        result = await agent.process_alert(pod_crash_alert, "runbook", session_id="test-session-123")
         
         # Verify multi-iteration completion
         assert result["status"] == "success"
@@ -918,5 +920,5 @@ class TestKubernetesAgentIntegrationScenarios:
         
         # Verify multiple tool executions
         assert mock_mcp.call_tool.call_count == 2
-        mock_mcp.call_tool.assert_any_call("kubernetes-server", "get_pod_status", {"namespace": "production"})
-        mock_mcp.call_tool.assert_any_call("kubernetes-server", "get_namespace_events", {"namespace": "production"}) 
+        mock_mcp.call_tool.assert_any_call("kubernetes-server", "get_pod_status", {"namespace": "production"}, "test-session-123")
+        mock_mcp.call_tool.assert_any_call("kubernetes-server", "get_namespace_events", {"namespace": "production"}, "test-session-123") 

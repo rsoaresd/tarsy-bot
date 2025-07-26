@@ -117,8 +117,11 @@ def mock_llm_client():
     client.available = True
     
     # Mock successful responses
-    async def mock_generate_response(messages, **kwargs):
+    async def mock_generate_response(messages, session_id, **kwargs):
         """Generate mock responses based on message content."""
+        if not session_id:
+            raise ValueError("session_id is required for LLM interactions")
+        
         if not messages:
             return "No analysis available"
         
@@ -190,8 +193,11 @@ def mock_llm_manager():
     mock_client = Mock(spec=LLMClient)
     mock_client.available = True
     
-    def mock_generate_response_sync(messages, **kwargs):
+    def mock_generate_response_sync(messages, session_id, **kwargs):
         """Generate mock responses based on message content."""
+        if not session_id:
+            raise ValueError("session_id is required for LLM interactions")
+        
         if not messages:
             return "No analysis available"
         
@@ -349,7 +355,7 @@ def mock_agent_registry():
 
 
 @pytest.fixture
-def mock_agent_factory(mock_llm_manager, mock_mcp_client, mock_mcp_server_registry):
+def mock_agent_factory(mock_llm_manager, mock_mcp_client):
     """Mock agent factory."""
     factory = Mock(spec=AgentFactory)
     
@@ -359,7 +365,10 @@ def mock_agent_factory(mock_llm_manager, mock_mcp_client, mock_mcp_server_regist
             mock_agent = Mock(spec=KubernetesAgent)
             
             # Mock the process_alert method to actually call dependencies for test verification
-            async def mock_process_alert(alert, runbook_content, callback=None, session_id=None):
+            async def mock_process_alert(alert, runbook_content, session_id, callback=None):
+                if not session_id:
+                    raise ValueError("session_id is required for alert processing")
+                
                 # Simulate calling LLM client multiple times as a real agent would
                 llm_client = mock_llm_manager.get_client()
                 
@@ -367,19 +376,19 @@ def mock_agent_factory(mock_llm_manager, mock_mcp_client, mock_mcp_server_regist
                 await llm_client.generate_response([
                     Mock(role="system", content="You are an expert SRE analyzing Kubernetes namespace issues. Use available MCP tools to diagnose problems."),
                     Mock(role="user", content="select tools for Kubernetes namespace analysis")
-                ])
+                ], session_id=session_id)
                 
                 # Call for iterative decision
                 await llm_client.generate_response([
                     Mock(role="system", content="You are an expert SRE with Kubernetes expertise. Determine if more analysis is needed."), 
                     Mock(role="user", content="iterative analysis - should we continue?")
-                ])
+                ], session_id=session_id)
                 
                 # Call for final analysis
                 analysis_result = await llm_client.generate_response([
                     Mock(role="system", content="You are an expert SRE specializing in Kubernetes troubleshooting. Provide actionable analysis."),
                     Mock(role="user", content="final analysis of namespace issue")
-                ])
+                ], session_id=session_id)
                 
                 # Simulate calling MCP client for tool listing and execution (iterative analysis)
                 await mock_mcp_client.list_tools(server_name="kubernetes-server")
