@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Container, AppBar, Toolbar, Typography, Box, Tooltip, CircularProgress } from '@mui/material';
 import { FiberManualRecord } from '@mui/icons-material';
 import DashboardLayout from './DashboardLayout';
@@ -12,8 +11,6 @@ import type { Session, SessionUpdate } from '../types';
  * Contains the main dashboard logic moved from App.tsx with navigation support
  */
 function DashboardView() {
-  const navigate = useNavigate();
-  
   // Active alerts state
   const [activeAlerts, setActiveAlerts] = useState<Session[]>([]);
   const [activeLoading, setActiveLoading] = useState<boolean>(true);
@@ -179,10 +176,11 @@ function DashboardView() {
     };
   }, []);
 
-  // Phase 3: Handle session click with navigation
+  // Phase 3: Handle session click with navigation in new tab
   const handleSessionClick = (sessionId: string) => {
-    console.log('Navigating to session detail:', sessionId);
-    navigate(`/sessions/${sessionId}`);
+    console.log('Opening session detail in new tab:', sessionId);
+    const url = `${window.location.origin}/sessions/${sessionId}`;
+    window.open(url, '_blank');
   };
 
   // Handle refresh actions

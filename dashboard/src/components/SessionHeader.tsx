@@ -38,13 +38,40 @@ const formatDuration = (durationMs: number | null): string => {
   }
 };
 
+// Animation styles for processing sessions
+const animationStyles = {
+  breathingGlow: {
+    '@keyframes breathingGlow': {
+      '0%': { 
+        boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24), 0 0 0 0 rgba(2, 136, 209, 0.1)'
+      },
+      '50%': { 
+        boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24), 0 0 12px 2px rgba(2, 136, 209, 0.25)'
+      },
+      '100%': { 
+        boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24), 0 0 0 0 rgba(2, 136, 209, 0.1)'
+      },
+    },
+    animation: 'breathingGlow 2.8s ease-in-out infinite',
+  },
+};
+
 /**
  * SessionHeader component - Phase 3
  * Displays session metadata including status, timing, and summary information
  */
 function SessionHeader({ session }: SessionHeaderProps) {
+  // Apply breathing glow animation for processing sessions
+  const getAnimationStyle = () => {
+    if (session.status !== 'in_progress') return {};
+    return animationStyles.breathingGlow;
+  };
+
   return (
-    <Paper sx={{ p: 3 }}>
+    <Paper sx={{ 
+      p: 3,
+      ...getAnimationStyle(), // Apply animation for in-progress status
+    }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
         {/* Status Badge */}
         <Box>
@@ -55,6 +82,11 @@ function SessionHeader({ session }: SessionHeaderProps) {
         <Box sx={{ flex: 1 }}>
           <Typography variant="h5" gutterBottom sx={{ fontWeight: 600 }}>
             {session.session_id}
+            {session.status === 'in_progress' && (
+              <Typography component="span" variant="body2" color="info.main" sx={{ ml: 2, fontWeight: 400 }}>
+                • Processing...
+              </Typography>
+            )}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {session.alert_type} • {session.agent_type} agent • Started at {formatTimestamp(session.started_at)}
