@@ -1286,3 +1286,128 @@ class TestBaseAgent:
         assert isinstance(result, dict)
         assert result["status"] in ["success", "error"]  # Either is acceptable
         assert result["agent"] == "TestConcreteAgent" 
+
+
+class TestSessionIdPropagation:
+    """Test session_id propagation and validation in BaseAgent."""
+    
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_process_alert_requires_session_id_validation(self):
+        """Test that process_alert validates session_id properly."""
+        mock_llm_client = AsyncMock()
+        mock_mcp_client = AsyncMock()
+        mock_mcp_registry = Mock()
+        base_agent = TestConcreteAgent(mock_llm_client, mock_mcp_client, mock_mcp_registry)
+        
+        sample_alert = Alert(
+            id="test-alert",
+            alert_type="TestAlert", 
+            environment="test",
+            cluster="test-cluster",
+            severity="high",
+            namespace="test-namespace",
+            message="Test message",
+            runbook="Test runbook"
+        )
+        
+        # Test None session_id raises error
+        with pytest.raises(ValueError, match="session_id is required"):
+            await base_agent.process_alert(sample_alert, "runbook", session_id=None)
+        
+        # Test empty session_id raises error  
+        with pytest.raises(ValueError, match="session_id is required"):
+            await base_agent.process_alert(sample_alert, "runbook", session_id="")
+        
+        # Test whitespace-only session_id raises error
+        with pytest.raises(ValueError, match="session_id is required"):
+            await base_agent.process_alert(sample_alert, "runbook", session_id="   ")
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_analyze_alert_session_id_propagation(self):
+        """Test that analyze_alert correctly passes session_id to LLM client."""
+        mock_llm_client = AsyncMock()
+        mock_llm_client.generate_response.return_value = "Test analysis"
+        mock_mcp_client = AsyncMock()
+        mock_mcp_registry = Mock()
+        mock_mcp_registry.get_server_configs.return_value = []
+        
+        base_agent = TestConcreteAgent(mock_llm_client, mock_mcp_client, mock_mcp_registry)
+        
+        sample_alert_data = {
+            "id": "test-alert-123",
+            "type": "TestAlert", 
+            "severity": "high",
+            "namespace": "test-namespace"
+        }
+        
+        await base_agent.analyze_alert(
+            sample_alert_data, 
+            "runbook content", 
+            {"mcp": "data"}, 
+            session_id="test-session-12345"
+        )
+        
+        # Verify session_id was passed to LLM client
+        mock_llm_client.generate_response.assert_called_once()
+        call_args = mock_llm_client.generate_response.call_args
+        assert call_args[0][1] == "test-session-12345"  # Second positional arg
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_determine_mcp_tools_session_id_propagation(self):
+        """Test that determine_mcp_tools correctly passes session_id to LLM client."""
+        mock_llm_client = AsyncMock()
+        mock_response = '[{"server": "test", "tool": "test", "parameters": {}, "reason": "test"}]'
+        mock_llm_client.generate_response.return_value = mock_response
+        mock_mcp_client = AsyncMock()
+        mock_mcp_registry = Mock()
+        mock_mcp_registry.get_server_configs.return_value = []
+        
+        base_agent = TestConcreteAgent(mock_llm_client, mock_mcp_client, mock_mcp_registry)
+        
+        sample_alert_data = {
+            "id": "test-alert-123",
+            "type": "TestAlert",
+            "severity": "high",
+            "namespace": "test-namespace"
+        }
+        
+        await base_agent.determine_mcp_tools(
+            sample_alert_data, 
+            "runbook content", 
+            {"tools": []}, 
+            session_id="test-session-12345"
+        )
+        
+        # Verify session_id was passed to LLM client
+        mock_llm_client.generate_response.assert_called_once()
+        call_args = mock_llm_client.generate_response.call_args
+        assert call_args[0][1] == "test-session-12345"  # Second positional arg
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_execute_mcp_tools_session_id_propagation(self):
+        """Test that _execute_mcp_tools correctly passes session_id to MCP client."""
+        mock_llm_client = AsyncMock()
+        mock_mcp_client = AsyncMock()
+        mock_mcp_client.call_tool.return_value = {"result": "success"}
+        mock_mcp_registry = Mock()
+        
+        base_agent = TestConcreteAgent(mock_llm_client, mock_mcp_client, mock_mcp_registry)
+        base_agent._configured_servers = ["test-server"]
+        
+        tools_to_call = [{
+            "server": "test-server",
+            "tool": "test-tool", 
+            "parameters": {"param": "value"},
+            "reason": "Testing"
+        }]
+        
+        await base_agent._execute_mcp_tools(tools_to_call, session_id="test-session-12345")
+        
+        # Verify session_id was passed to MCP client
+        mock_mcp_client.call_tool.assert_called_once_with(
+            "test-server", "test-tool", {"param": "value"}, "test-session-12345"
+        ) 

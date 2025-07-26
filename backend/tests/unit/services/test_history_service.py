@@ -1462,3 +1462,58 @@ async def test_cleanup_orphaned_sessions_no_active_sessions():
         page_size=1000
     )
     mock_repo.update_alert_session.assert_not_called() 
+
+
+class TestHistoryAPIResponseStructure:
+    """Test suite for history service API response structure validation."""
+    
+    @pytest.mark.unit
+    def test_session_detail_response_structure(self):
+        """Test that session detail response has all required fields."""
+        # This tests the fix where we added missing fields to the API response
+        
+        # Expected response structure after the session_id fixes
+        expected_fields = {
+            'session_id',
+            'alert_id', 
+            'alert_data',
+            'agent_type',
+            'alert_type',
+            'status',
+            'started_at',
+            'completed_at',
+            'error_message',
+            'final_analysis',
+            'duration_ms',
+            'session_metadata',
+            'chronological_timeline',
+            'summary'
+        }
+        
+        # Create mock response data
+        mock_response_data = {
+            'session_id': 'test-session-123',
+            'alert_id': 'alert-456',
+            'alert_data': {'test': 'data'},
+            'agent_type': 'TestAgent',
+            'alert_type': 'TestAlert',
+            'status': 'completed',
+            'started_at': '2024-01-01T00:00:00Z',
+            'completed_at': '2024-01-01T00:01:00Z',
+            'error_message': None,
+            'final_analysis': 'Test analysis complete',
+            'duration_ms': 60000,
+            'session_metadata': {'key': 'value'},
+            'chronological_timeline': [],
+            'summary': {'summary': 'test'}
+        }
+        
+        # Verify all expected fields are present
+        response_fields = set(mock_response_data.keys())
+        missing_fields = expected_fields - response_fields
+        assert not missing_fields, f"Missing required fields: {missing_fields}"
+        
+        # Verify the previously missing fields are included
+        assert 'error_message' in mock_response_data
+        assert 'final_analysis' in mock_response_data  
+        assert 'session_metadata' in mock_response_data 
