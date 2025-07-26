@@ -112,7 +112,7 @@ const HistoricalAlertsList: React.FC<HistoricalAlertsListProps> = ({
                 ) : (
                   sessions.map((session) => (
                     <AlertListItem
-                      key={session.id || `session-${Math.random()}`}
+                      key={session.session_id || `session-${Math.random()}`}
                       session={session}
                       onClick={handleSessionClick}
                     />

@@ -1,5 +1,5 @@
 import axios, { type AxiosInstance, AxiosError } from 'axios';
-import type { SessionsResponse, Session } from '../types';
+import type { SessionsResponse, Session, DetailedSession } from '../types';
 
 // API base URL configuration
 // In development with Vite proxy, use relative URLs
@@ -124,6 +124,36 @@ class APIClient {
     } catch (error) {
       console.error('Failed to fetch historical sessions:', error);
       throw error instanceof Error ? error : new Error('Failed to fetch historical sessions');
+    }
+  }
+
+  /**
+   * Phase 3: Fetch detailed session data by ID
+   * Returns comprehensive session data including alert_data, final_analysis, and timeline
+   */
+  async getSessionDetail(sessionId: string): Promise<DetailedSession> {
+    try {
+      const response = await this.client.get<DetailedSession>(`/api/v1/history/sessions/${sessionId}`);
+      
+      console.log('Session detail API response:', {
+        sessionId,
+        hasAlertData: !!response.data?.alert_data,
+        hasFinalAnalysis: !!response.data?.final_analysis,
+        timelineItems: response.data?.chronological_timeline?.length || 0,
+        status: response.data?.status
+      });
+      
+      if (response.data && typeof response.data === 'object' && 'session_id' in response.data) {
+        return response.data;
+      } else {
+        throw new Error('Invalid session detail response format');
+      }
+    } catch (error) {
+      console.error('Failed to fetch session detail:', error);
+      if (error instanceof Error && error.message.includes('404')) {
+        throw new Error('Session not found');
+      }
+      throw error instanceof Error ? error : new Error('Failed to fetch session detail');
     }
   }
 

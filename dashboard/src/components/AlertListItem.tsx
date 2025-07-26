@@ -32,7 +32,11 @@ const formatTime = (timestamp: string): string => {
 const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick }) => {
   const handleRowClick = () => {
     if (onClick) {
-      onClick(session.id);
+      if (!session.session_id) {
+        console.warn('Session has no ID:', session);
+        return;
+      }
+      onClick(session.session_id);
     }
   };
 

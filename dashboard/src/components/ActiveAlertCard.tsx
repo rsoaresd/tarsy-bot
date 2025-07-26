@@ -74,8 +74,8 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
   );
 
   const handleCardClick = () => {
-    if (onClick && session.id) {
-      onClick(session.id);
+    if (onClick && session.session_id) {
+      onClick(session.session_id);
     }
   };
 
@@ -192,7 +192,7 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
         )}
 
         {/* Summary (if available) */}
-        {session.summary && (
+        {session.summary && typeof session.summary === 'string' && session.summary.trim() && (
           <Typography 
             variant="body2" 
             color="text.secondary"

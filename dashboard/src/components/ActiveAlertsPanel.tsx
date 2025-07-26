@@ -23,6 +23,7 @@ const ActiveAlertsPanel: React.FC<ActiveAlertsPanelProps> = ({
   loading = false,
   error = null,
   onRefresh,
+  onSessionClick,
 }) => {
   const [progressData, setProgressData] = useState<Record<string, number>>({});
   const [wsConnected, setWsConnected] = useState(false);
@@ -88,7 +89,9 @@ const ActiveAlertsPanel: React.FC<ActiveAlertsPanelProps> = ({
   // Handle session card click
   const handleSessionClick = (sessionId: string) => {
     console.log('Active session clicked:', sessionId);
-    // Phase 3 will implement navigation to detail view
+    if (onSessionClick) {
+      onSessionClick(sessionId);
+    }
   };
 
   // Handle manual refresh
@@ -167,9 +170,9 @@ const ActiveAlertsPanel: React.FC<ActiveAlertsPanelProps> = ({
             <Stack spacing={2}>
               {sessions.map((session) => (
                 <ActiveAlertCard
-                  key={session.id}
+                  key={session.session_id}
                   session={session}
-                  progress={progressData[session.id]}
+                  progress={progressData[session.session_id]}
                   onClick={handleSessionClick}
                 />
               ))}

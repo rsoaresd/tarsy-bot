@@ -2349,7 +2349,7 @@ const formatDuration = (durationMs: number | null): string => {
 </details>
 
 <p align="center">
-  <img src="img/EP0004-UI-Phase7.png" alt="Phase 7 Dashboard UI" style="max-width: 50%; border: 1px solid #ccc; border-radius: 6px;" />
+  <img src="img/EP0004-UI-Phase7.png" alt="Phase 7 Dashboard UI" style="max-width: 100%; border: 1px solid #ccc; border-radius: 6px;" />
 </p>
 
 

@@ -27,6 +27,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         loading={activeLoading}
         error={activeError}
         onRefresh={onRefreshActive}
+        onSessionClick={onSessionClick}
       />
 
       {/* Historical Alerts Section - Below Active */}
