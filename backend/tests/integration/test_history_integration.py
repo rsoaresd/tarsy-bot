@@ -319,7 +319,7 @@ class TestHistoryServiceIntegration:
         # Test 3: Filter by time range
         cutoff_time = now - timedelta(hours=5)
         sessions, count = history_service_with_db.get_sessions_list(
-            filters={"start_date": cutoff_time}
+            filters={"start_date_us": int(cutoff_time.timestamp() * 1_000_000)}
         )
         assert count == 4  # All except session-5 (older than 5 hours)
         

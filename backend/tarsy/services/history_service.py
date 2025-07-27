@@ -432,8 +432,8 @@ class HistoryService:
         status: Optional[str] = None,
         agent_type: Optional[str] = None,
         alert_type: Optional[str] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
+        start_date_us: Optional[int] = None,
+        end_date_us: Optional[int] = None,
         page: int = 1,
         page_size: int = 20
     ) -> Dict[str, Any]:
@@ -444,8 +444,8 @@ class HistoryService:
             status: Filter by processing status
             agent_type: Filter by agent type
             alert_type: Filter by alert type
-            start_date: Filter sessions after this date
-            end_date: Filter sessions before this date
+            start_date_us: Filter sessions started after this Unix timestamp (microseconds)
+            end_date_us: Filter sessions started before this Unix timestamp (microseconds)
             page: Page number for pagination
             page_size: Number of results per page
             
@@ -461,8 +461,8 @@ class HistoryService:
                     status=status,
                     agent_type=agent_type,
                     alert_type=alert_type,
-                    start_date=start_date,
-                    end_date=end_date,
+                    start_date_us=start_date_us,
+                    end_date_us=end_date_us,
                     page=page,
                     page_size=page_size
                 )
@@ -481,7 +481,7 @@ class HistoryService:
         Retrieve alert sessions with filtering and pagination (returns tuple for API).
         
         Args:
-            filters: Dictionary of filters (status, agent_type, alert_type, start_date, end_date)
+            filters: Dictionary of filters (status, agent_type, alert_type, start_date_us, end_date_us)
             page: Page number for pagination
             page_size: Number of results per page
             
@@ -501,8 +501,8 @@ class HistoryService:
                     agent_type=filters.get('agent_type'),
                     alert_type=filters.get('alert_type'),
                     search=filters.get('search'),
-                    start_date=filters.get('start_date'),
-                    end_date=filters.get('end_date'),
+                    start_date_us=filters.get('start_date_us'),
+                    end_date_us=filters.get('end_date_us'),
                     page=page,
                     page_size=page_size
                 )

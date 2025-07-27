@@ -1832,8 +1832,6 @@ const formatDuration = (durationMs: number | null): string => {
 - Virtual scrolling for large lists
 - Loading skeletons and smooth animations
 - Error boundaries and comprehensive error handling
-- Accessibility improvements
-- Export functionality
 - Advanced real-time features
 
 ### New Components
@@ -1841,16 +1839,13 @@ const formatDuration = (durationMs: number | null): string => {
 ├── components/
 │   ├── VirtualizedList.tsx        # Performance optimization
 │   ├── LoadingSkeletons.tsx       # Loading state components
-│   ├── ErrorBoundary.tsx          # Error handling
-│   └── ExportDialog.tsx           # Data export functionality
+│   └── ErrorBoundary.tsx          # Error handling
 ```
 
 ### Features
 - Optimized performance for 1000+ alerts
 - Smooth loading states and transitions
 - Comprehensive error handling
-- Keyboard navigation support
-- Export to JSON/CSV
 - Advanced real-time monitoring
 
 ### UI Layout (Material-UI Components)
@@ -1902,10 +1897,10 @@ const formatDuration = (durationMs: number | null): string => {
     </Toolbar>
     
     {/* Progress Bar for Loading States */}
-    {(loading || exporting) && (
+    {(loading) && (
       <LinearProgress 
         variant={loading ? "indeterminate" : "determinate"} 
-        value={exportProgress}
+        value={loadingProgress}
         sx={{ height: 2 }}
       />
     )}
@@ -2085,37 +2080,7 @@ const formatDuration = (durationMs: number | null): string => {
         </Typography>
         
         <Box sx={{ display: 'flex', gap: 1 }}>
-          {/* Export Menu */}
-          <Button
-            startIcon={<FileDownload />}
-            variant="outlined"
-            size="small"
-            onClick={handleExportMenuOpen}
-            disabled={filteredCount === 0 || exporting}
-            endIcon={exporting ? <CircularProgress size={16} /> : <ArrowDropDown />}
-          >
-            {exporting ? 'Exporting...' : 'Export'}
-          </Button>
-          
-          <Menu
-            anchorEl={exportMenuAnchor}
-            open={Boolean(exportMenuAnchor)}
-            onClose={handleExportMenuClose}
-          >
-            <MenuItem onClick={() => handleExport('json')}>
-              <ListItemIcon>
-                <Code fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary="Export as JSON" />
-            </MenuItem>
-            <MenuItem onClick={() => handleExport('csv')}>
-              <ListItemIcon>
-                <TableChart fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary="Export as CSV" />
-            </MenuItem>
-          </Menu>
-          
+         
           {/* View Options */}
           <Tooltip title="Refresh Data">
             <IconButton 
@@ -2279,11 +2244,6 @@ const formatDuration = (durationMs: number | null): string => {
         onClick={handleRefresh}
       />
       <SpeedDialAction
-        icon={<FileDownload />}
-        tooltipTitle="Export All"
-        onClick={() => handleExport('json')}
-      />
-      <SpeedDialAction
         icon={<Settings />}
         tooltipTitle="Dashboard Settings"
         onClick={handleSettingsOpen}
@@ -2306,12 +2266,6 @@ const formatDuration = (durationMs: number | null): string => {
           <ListItemText 
             primary="Ctrl/Cmd + R" 
             secondary="Refresh data" 
-          />
-        </ListItem>
-        <ListItem>
-          <ListItemText 
-            primary="Ctrl/Cmd + E" 
-            secondary="Export current results" 
           />
         </ListItem>
         <ListItem>
@@ -2342,11 +2296,8 @@ const formatDuration = (durationMs: number | null): string => {
 - [ ] Handles large datasets smoothly using React-Window virtualization
 - [ ] Excellent loading states throughout using Material-UI Skeleton components
 - [ ] Comprehensive error handling using Material-UI ErrorBoundary and Alert components
-- [ ] Accessibility compliance with WCAG 2.1 AA standards
-- [ ] Export functionality works with Material-UI Menu and progress indicators
 - [ ] Performance meets requirements (1000+ alerts load under 2 seconds)
 - [ ] Smooth animations and transitions using Material-UI theme transitions
-- [ ] Keyboard navigation support with documented shortcuts
 - [ ] Real-time health monitoring with WebSocket connection status
 - [ ] Enhanced UX with Material-UI SpeedDial for quick actions
 - [ ] Loading skeletons match actual component shapes and sizes
@@ -2454,53 +2405,6 @@ dashboard/
 ```typescript
 // src/theme/index.ts - Material-UI theme configuration
 import { createTheme } from '@mui/material/styles';
-
-export const theme = createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: '#1976d2', // Material Blue
-    },
-    secondary: {
-      main: '#424242', // Material Grey
-    },
-    success: {
-      main: '#2e7d32', // Green for completed alerts
-    },
-    error: {
-      main: '#d32f2f', // Red for failed alerts
-    },
-    warning: {
-      main: '#ed6c02', // Orange for pending alerts
-    },
-    info: {
-      main: '#0288d1', // Light blue for processing alerts
-    },
-  },
-  typography: {
-    fontFamily: 'Roboto, Arial, sans-serif',
-    h6: {
-      fontWeight: 600, // AppBar title
-    },
-  },
-  components: {
-    MuiChip: {
-      styleOverrides: {
-        root: {
-          fontWeight: 500,
-        },
-      },
-    },
-    MuiTableCell: {
-      styleOverrides: {
-        head: {
-          fontWeight: 600,
-          backgroundColor: '#f5f5f5',
-        },
-      },
-    },
-  },
-});
 
 // src/App.tsx - Theme provider setup
 import { ThemeProvider } from '@mui/material/styles';

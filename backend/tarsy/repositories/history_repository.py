@@ -100,8 +100,8 @@ class HistoryRepository:
         agent_type: Optional[str] = None,
         alert_type: Optional[str] = None,
         search: Optional[str] = None,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None,
+        start_date_us: Optional[int] = None,
+        end_date_us: Optional[int] = None,
         page: int = 1,
         page_size: int = 20
     ) -> Dict[str, Any]:
@@ -117,8 +117,8 @@ class HistoryRepository:
             agent_type: Filter by agent type
             alert_type: Filter by alert type
             search: Text search across error messages, analysis, and alert content
-            start_date: Filter sessions after this date
-            end_date: Filter sessions before this date
+            start_date_us: Filter sessions started after this Unix timestamp (microseconds)
+            end_date_us: Filter sessions started before this Unix timestamp (microseconds)
             page: Page number for pagination
             page_size: Number of results per page
             
@@ -216,10 +216,10 @@ class HistoryRepository:
                 # Combine all search conditions with OR logic
                 conditions.append(or_(*search_conditions))
             
-            if start_date:
-                conditions.append(AlertSession.started_at_us >= start_date.timestamp() * 1_000_000)
-            if end_date:
-                conditions.append(AlertSession.started_at_us <= end_date.timestamp() * 1_000_000)
+            if start_date_us:
+                conditions.append(AlertSession.started_at_us >= start_date_us)
+            if end_date_us:
+                conditions.append(AlertSession.started_at_us <= end_date_us)
             
             # Apply all conditions with AND logic
             if conditions:

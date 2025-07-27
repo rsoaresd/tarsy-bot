@@ -590,8 +590,8 @@ class TestHistoryService:
                 status="completed",
                 agent_type=None,
                 alert_type=None,
-                start_date=None,
-                end_date=None,
+                start_date_us=None,
+                end_date_us=None,
                 page=1,
                 page_size=20
             )

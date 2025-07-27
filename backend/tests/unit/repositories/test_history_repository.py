@@ -228,13 +228,12 @@ class TestHistoryRepository:
         
         # Test start_date filter (convert unix timestamp back to datetime for current API)
         two_days_ago_us = now_us_time - (2 * 24 * 60 * 60 * 1000000)  # 2 days in microseconds
-        two_days_ago_dt = datetime.fromtimestamp(two_days_ago_us / 1000000, tz=timezone.utc)
-        result = repository.get_alert_sessions(start_date=two_days_ago_dt)
+        result = repository.get_alert_sessions(start_date_us=two_days_ago_us)
         assert len(result["sessions"]) == 1
         assert result["sessions"][0].session_id == new_session.session_id
         
-        # Test end_date filter (convert unix timestamp back to datetime for current API)
-        result = repository.get_alert_sessions(end_date=two_days_ago_dt)
+        # Test end_date_us filter
+        result = repository.get_alert_sessions(end_date_us=two_days_ago_us)
         assert len(result["sessions"]) == 1
         assert result["sessions"][0].session_id == old_session.session_id
     
@@ -808,7 +807,7 @@ class TestHistoryRepository:
         result = repository.get_alert_sessions(
             agent_type="KubernetesAgent",
             status="completed",
-            start_date=now - timedelta(hours=3.5)  # Should get session-1 and session-3
+            start_date_us=int((now - timedelta(hours=3.5)).timestamp() * 1_000_000)  # Should get session-1 and session-3
         )
         assert len(result["sessions"]) == 2
         session_ids = [s.session_id for s in result["sessions"]]
@@ -1108,7 +1107,8 @@ class TestHistoryRepositoryPerformance:
         
         # Verify status options
         assert "status_options" in result
-        assert len(result["status_options"]) == 3
+        assert len(result["status_options"]) == 4
+        assert "pending" in result["status_options"]
         assert "in_progress" in result["status_options"]
         assert "completed" in result["status_options"]
         assert "failed" in result["status_options"]
@@ -1127,7 +1127,9 @@ class TestHistoryRepositoryPerformance:
         # Should return empty lists for dynamic options
         assert result["agent_types"] == []
         assert result["alert_types"] == []
-        assert result["status_options"] == []
+        # Status options should always return all possible statuses (not dynamic from database)
+        assert len(result["status_options"]) == 4
+        assert result["status_options"] == ["pending", "in_progress", "completed", "failed"]
         
         # Time ranges should still be present (static)
         assert len(result["time_ranges"]) == 5
@@ -1153,7 +1155,8 @@ class TestHistoryRepositoryPerformance:
         # Verify sorting
         assert result["agent_types"] == sorted(result["agent_types"])
         assert result["alert_types"] == sorted(result["alert_types"])
-        assert result["status_options"] == sorted(result["status_options"])
+        # Status options are returned in constant definition order (not sorted)
+        assert result["status_options"] == ["pending", "in_progress", "completed", "failed"]
     
     @pytest.mark.unit
     def test_dashboard_metrics_duration_calculation(self, db_session):
