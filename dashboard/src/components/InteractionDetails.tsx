@@ -39,22 +39,22 @@ function InteractionDetails({
             tooltip="Copy prompt"
           />
         </Box>
-        <JsonDisplay data={llmDetails.prompt} />
-      </Box>
-      
-      <Box>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            Response
-          </Typography>
-          <CopyButton
-            text={llmDetails.response}
-            variant="icon"
-            size="small"
-            tooltip="Copy response"
-          />
+                                                    <JsonDisplay data={llmDetails.prompt} />
         </Box>
-        <JsonDisplay data={llmDetails.response} />
+        
+        <Box>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+              Response
+            </Typography>
+            <CopyButton
+              text={llmDetails.response}
+              variant="icon"
+              size="small"
+              tooltip="Copy response"
+            />
+          </Box>
+         <JsonDisplay data={llmDetails.response} />
       </Box>
 
       {/* Model metadata */}
