@@ -44,32 +44,32 @@ install-dev: ## Install development dependencies (includes test)
 .PHONY: test
 test: install ## Run all tests (unit + integration)
 	@echo "$(GREEN)Running all tests...$(NC)"
-	. .venv/bin/activate && $(PYTHON) $(TEST_DIR)/run_all_tests.py
+	TESTING=true . .venv/bin/activate && $(PYTHON) -m pytest tests/ -v --tb=short
 
 .PHONY: test-unit
 test-unit: install ## Run unit tests only
 	@echo "$(GREEN)Running unit tests...$(NC)"
-	. .venv/bin/activate && $(PYTHON) $(TEST_DIR)/run_unit_tests.py
+	TESTING=true . .venv/bin/activate && $(PYTHON) -m pytest tests/unit/ -v --tb=short
 
 .PHONY: test-integration
 test-integration: install ## Run integration tests only
 	@echo "$(GREEN)Running integration tests...$(NC)"
-	. .venv/bin/activate && $(PYTHON) $(TEST_DIR)/run_integration_tests.py
+	TESTING=true . .venv/bin/activate && $(PYTHON) -m pytest tests/integration/ -v --tb=short
 
 .PHONY: test-verbose
 test-verbose: ## Run all tests with verbose output
 	@echo "$(GREEN)Running all tests (verbose)...$(NC)"
-	. .venv/bin/activate && $(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ -v
+	TESTING=true . .venv/bin/activate && $(PYTHON) -m pytest tests/ -v
 
 .PHONY: test-coverage
 test-coverage: ## Run tests with coverage report
 	@echo "$(GREEN)Running tests with coverage...$(NC)"
-	. .venv/bin/activate && $(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ --cov=$(APP_DIR) --cov-report=html --cov-report=term-missing
+	TESTING=true . .venv/bin/activate && $(PYTHON) -m pytest tests/ --cov=tarsy --cov-report=html --cov-report=term-missing
 
 .PHONY: test-quick
 test-quick: ## Run tests in parallel for faster execution
 	@echo "$(GREEN)Running tests in parallel...$(NC)"
-	. .venv/bin/activate && $(UV) run $(PYTHON) -m pytest $(TEST_DIR)/ -n auto
+	TESTING=true . .venv/bin/activate && $(PYTHON) -m pytest tests/ -n auto
 
 # Code Quality
 .PHONY: lint

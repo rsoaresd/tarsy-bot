@@ -2,11 +2,23 @@
 Application settings and configuration management.
 """
 
+import os
+import sys
 from functools import lru_cache
 from typing import Dict, List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+
+def is_testing() -> bool:
+    """Check if we're running in a test environment."""
+    return (
+        "pytest" in os.environ.get("_", "") or
+        "PYTEST_CURRENT_TEST" in os.environ or
+        os.environ.get("TESTING", "").lower() == "true" or
+        "test" in sys.argv[0].lower() if len(sys.argv) > 0 else False
+    )
 
 
 class Settings(BaseSettings):
@@ -72,7 +84,7 @@ class Settings(BaseSettings):
     
     # History Service Configuration
     history_database_url: str = Field(
-        default="sqlite:///history.db",
+        default="",
         description="Database connection string for alert processing history"
     )
     history_enabled: bool = Field(
@@ -93,6 +105,17 @@ class Settings(BaseSettings):
         default=300,
         description="Timeout in seconds for alerts waiting in queue"
     )
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Set default database URL based on environment if not explicitly provided
+        if not self.history_database_url:
+            if is_testing():
+                # Use in-memory database for tests by default
+                self.history_database_url = "sqlite:///:memory:"
+            else:
+                # Use file database for dev/production
+                self.history_database_url = "sqlite:///history.db"
     
     class Config:
         env_file = ".env"

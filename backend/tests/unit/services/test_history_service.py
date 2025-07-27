@@ -21,13 +21,9 @@ class TestHistoryService:
     """Test suite for HistoryService class."""
     
     @pytest.fixture
-    def mock_settings(self):
+    def mock_settings(self, isolated_test_settings):
         """Create mock settings for testing."""
-        settings = Mock(spec=Settings)
-        settings.history_enabled = True
-        settings.history_database_url = "sqlite:///test_history.db"
-        settings.history_retention_days = 90
-        return settings
+        return isolated_test_settings
     
     @pytest.fixture
     def mock_db_manager(self):
@@ -68,7 +64,7 @@ class TestHistoryService:
         """Test service initialization when history is enabled."""
         assert history_service.is_enabled == True
         assert history_service.settings.history_enabled == True
-        assert history_service.settings.history_database_url == "sqlite:///test_history.db"
+        assert history_service.settings.history_database_url == "sqlite:///:memory:"
     
     @pytest.mark.unit
     def test_initialization_disabled(self):
