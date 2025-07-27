@@ -3,14 +3,28 @@ import { useNavigate } from 'react-router-dom';
 import { Container, AppBar, Toolbar, Typography, Box, Tooltip, CircularProgress, IconButton } from '@mui/material';
 import { FiberManualRecord, Refresh } from '@mui/icons-material';
 import DashboardLayout from './DashboardLayout';
-import FilterBar from './FilterBar';
+import FilterPanel from './FilterPanel';
 import { apiClient, handleAPIError } from '../services/api';
 import { webSocketService } from '../services/websocket';
-import type { Session, SessionUpdate, SessionFilter } from '../types';
+import {
+  saveFiltersToStorage,
+  loadFiltersFromStorage,
+  savePaginationToStorage,
+  loadPaginationFromStorage,
+  saveSortToStorage,
+  loadSortFromStorage,
+  saveAdvancedFiltersVisibility,
+  loadAdvancedFiltersVisibility,
+  getDefaultFilters,
+  getDefaultPagination,
+  getDefaultSort,
+  mergeWithDefaults
+} from '../utils/filterPersistence';
+import type { Session, SessionUpdate, SessionFilter, PaginationState, SortState, FilterOptions } from '../types';
 
 /**
- * DashboardView component for the Tarsy Dashboard - Phase 4
- * Contains the main dashboard logic with search and filtering capabilities
+ * DashboardView component for the Tarsy Dashboard - Phase 6
+ * Contains the main dashboard logic with advanced filtering, pagination, sorting, and persistence
  */
 function DashboardView() {
   const navigate = useNavigate();
@@ -24,12 +38,24 @@ function DashboardView() {
   const [historicalError, setHistoricalError] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
 
-  // Phase 4: Filter state
-  const [filters, setFilters] = useState<SessionFilter>({
-    search: '',
-    status: []
+  // Phase 6: Advanced filtering, sorting, and pagination state
+  const [filters, setFilters] = useState<SessionFilter>(() => {
+    const savedFilters = loadFiltersFromStorage();
+    return mergeWithDefaults(savedFilters, getDefaultFilters());
   });
   const [filteredCount, setFilteredCount] = useState<number>(0);
+  const [pagination, setPagination] = useState<PaginationState>(() => {
+    const savedPagination = loadPaginationFromStorage();
+    return mergeWithDefaults(savedPagination, getDefaultPagination());
+  });
+  const [sortState, setSortState] = useState<SortState>(() => {
+    const savedSort = loadSortFromStorage();
+    return mergeWithDefaults(savedSort, getDefaultSort());
+  });
+  const [filterOptions, setFilterOptions] = useState<FilterOptions | undefined>();
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(() => 
+    loadAdvancedFiltersVisibility()
+  );
 
   // Throttling state for API calls
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -67,9 +93,17 @@ function DashboardView() {
       setHistoricalError(null);
       
       let response;
-      if (applyFilters && (filters.search || (filters.status && filters.status.length > 0))) {
+      if (applyFilters && (
+        (filters.search && filters.search.trim()) ||
+        (filters.status && filters.status.length > 0) ||
+        (filters.agent_type && filters.agent_type.length > 0) ||
+        (filters.alert_type && filters.alert_type.length > 0) ||
+        filters.start_date ||
+        filters.end_date ||
+        filters.time_range_preset
+      )) {
         // Use filtered API if filters are active
-        console.log('🔍 Fetching filtered historical sessions:', filters);
+        console.log('🔍 Fetching filtered historical sessions:', filters, 'Page:', pagination.page, 'PageSize:', pagination.pageSize);
         const historicalFilters: SessionFilter = {
           ...filters,
           // For historical view, include completed and failed by default unless specific status filter is applied
@@ -77,14 +111,22 @@ function DashboardView() {
             ? filters.status 
             : ['completed', 'failed'] as ('completed' | 'failed' | 'in_progress' | 'pending')[]
         };
-        response = await apiClient.getFilteredSessions(historicalFilters);
+        response = await apiClient.getFilteredSessions(historicalFilters, pagination.page, pagination.pageSize);
       } else {
         // Use the original historical API (completed + failed sessions only)
-        response = await apiClient.getHistoricalSessions();
+        response = await apiClient.getHistoricalSessions(pagination.page, pagination.pageSize);
       }
       
       setHistoricalAlerts(response.sessions);
-      setFilteredCount(response.sessions.length);
+      setFilteredCount(response.pagination.total_items);
+      
+      // Update pagination with backend pagination info
+      setPagination(prev => ({
+        ...prev,
+        totalItems: response.pagination.total_items,
+        totalPages: response.pagination.total_pages,
+        page: response.pagination.page
+      }));
       
       console.log('📊 Historical alerts updated:', {
         totalSessions: response.sessions.length,
@@ -114,44 +156,132 @@ function DashboardView() {
     }, REFRESH_THROTTLE_MS);
   }, [filters]); // Add filters as dependency
 
-  // Phase 4: Filter handlers
+  // Phase 6: Enhanced filter handlers with persistence
   const handleFiltersChange = (newFilters: SessionFilter) => {
     console.log('🔄 Filters changed:', newFilters);
     setFilters(newFilters);
+    saveFiltersToStorage(newFilters);
+    // Reset to first page when filters change
+    setPagination(prev => ({ ...prev, page: 1 }));
+    savePaginationToStorage({ page: 1 });
   };
 
   const handleClearFilters = () => {
     console.log('🧹 Clearing all filters');
-    const clearedFilters: SessionFilter = {
-      search: '',
-      status: []
-    };
+    const clearedFilters = getDefaultFilters();
     setFilters(clearedFilters);
+    saveFiltersToStorage(clearedFilters);
+    // Reset pagination when clearing filters
+    const defaultPagination = getDefaultPagination();
+    setPagination(defaultPagination);
+    savePaginationToStorage(defaultPagination);
   };
 
-  // Initial load
+  // Phase 6: Pagination handlers
+  const handlePageChange = (newPage: number) => {
+    console.log('📄 Page changed:', newPage);
+    setPagination(prev => ({ ...prev, page: newPage }));
+    savePaginationToStorage({ page: newPage });
+  };
+
+  const handlePageSizeChange = (newPageSize: number) => {
+    console.log('📄 Page size changed:', newPageSize);
+    const newPage = Math.max(1, Math.ceil(((pagination.page - 1) * pagination.pageSize + 1) / newPageSize));
+    const newTotalPages = Math.max(1, Math.ceil(pagination.totalItems / newPageSize));
+    setPagination(prev => ({ 
+      ...prev, 
+      pageSize: newPageSize, 
+      page: newPage,
+      totalPages: newTotalPages
+    }));
+    savePaginationToStorage({ pageSize: newPageSize, page: newPage });
+  };
+
+  // Phase 6: Sort handlers
+  const handleSortChange = (field: string) => {
+    console.log('🔄 Sort changed:', field);
+    const newDirection = sortState.field === field && sortState.direction === 'asc' ? 'desc' : 'asc';
+    const newSortState = { field, direction: newDirection as 'asc' | 'desc' };
+    setSortState(newSortState);
+    saveSortToStorage(newSortState);
+  };
+
+  // Phase 6: Advanced filters visibility handler
+  const handleToggleAdvancedFilters = (isVisible: boolean) => {
+    console.log('🔧 Advanced filters visibility:', isVisible);
+    setShowAdvancedFilters(isVisible);
+    saveAdvancedFiltersVisibility(isVisible);
+  };
+
+  // Initial load and filter options
   useEffect(() => {
     fetchActiveAlerts();
     fetchHistoricalAlerts();
+    
+    // Phase 6: Load filter options from API
+    const loadFilterOptions = async () => {
+      try {
+        const options = await apiClient.getFilterOptions();
+        setFilterOptions(options);
+        console.log('📋 Filter options loaded:', options);
+      } catch (error) {
+        console.warn('Failed to load filter options:', error);
+        // Continue without filter options - components will use defaults
+      }
+    };
+    
+    loadFilterOptions();
   }, []);
 
-  // Phase 4: Re-fetch when filters change (with debouncing)
+  // Phase 6: Re-fetch when filters change (with debouncing)
   useEffect(() => {
     // Debounce filter changes to prevent excessive API calls
     const filterTimeout = setTimeout(() => {
-      // Skip the initial load (empty filters)
-      if (filters.search || (filters.status && filters.status.length > 0)) {
+      // Check if any filters are active
+      const hasActiveFilters = Boolean(
+        (filters.search && filters.search.trim()) ||
+        (filters.status && filters.status.length > 0) ||
+        (filters.agent_type && filters.agent_type.length > 0) ||
+        (filters.alert_type && filters.alert_type.length > 0) ||
+        filters.start_date ||
+        filters.end_date ||
+        filters.time_range_preset
+      );
+
+      if (hasActiveFilters) {
         console.log('🔍 Filters changed - refetching historical alerts:', filters);
         fetchHistoricalAlerts(true);
-      } else if (filters.search === '' && (!filters.status || filters.status.length === 0)) {
-        // When filters are cleared, fetch without filtering
-        console.log('🧹 Filters cleared - fetching unfiltered historical alerts');
+      } else {
+        // When no filters are active, fetch without filtering
+        console.log('🧹 No active filters - fetching unfiltered historical alerts');
         fetchHistoricalAlerts(false);
       }
     }, 300); // 300ms debounce for filter API calls
 
     return () => clearTimeout(filterTimeout);
   }, [filters]);
+
+  // Phase 6: Re-fetch immediately when pagination or sorting changes
+  useEffect(() => {
+    console.log('📄 Pagination/sort changed - refetching historical alerts:', {
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+      sortState
+    });
+    
+    // Check if any filters are active to determine which API to use
+    const hasActiveFilters = Boolean(
+      (filters.search && filters.search.trim()) ||
+      (filters.status && filters.status.length > 0) ||
+      (filters.agent_type && filters.agent_type.length > 0) ||
+      (filters.alert_type && filters.alert_type.length > 0) ||
+      filters.start_date ||
+      filters.end_date ||
+      filters.time_range_preset
+    );
+
+    fetchHistoricalAlerts(hasActiveFilters);
+  }, [pagination.page, pagination.pageSize, sortState]);
 
   // Set up WebSocket event handlers for real-time updates
   useEffect(() => {
@@ -379,12 +509,15 @@ function DashboardView() {
         </Toolbar>
       </AppBar>
 
-      {/* Phase 4: Search and Filter Bar */}
-      <FilterBar
+      {/* Phase 6: Advanced Filter Panel */}
+      <FilterPanel
         filters={filters}
         onFiltersChange={handleFiltersChange}
         onClearFilters={handleClearFilters}
+        filterOptions={filterOptions}
         loading={historicalLoading}
+        showAdvanced={showAdvancedFilters}
+        onToggleAdvanced={handleToggleAdvancedFilters}
       />
 
       {/* Main content area with two-section layout */}
@@ -401,6 +534,12 @@ function DashboardView() {
           onSessionClick={handleSessionClick}
           filters={filters}
           filteredCount={filteredCount}
+          // Phase 6: Additional props for enhanced functionality
+          sortState={sortState}
+          onSortChange={handleSortChange}
+          pagination={pagination}
+          onPageChange={handlePageChange}
+          onPageSizeChange={handlePageSizeChange}
         />
       </Box>
     </Container>

@@ -600,15 +600,14 @@ class HistoryRepository:
                 .where(AlertSession.alert_type.is_not(None))
             ).all()
             
-            # Get distinct statuses from the database
-            statuses = self.session.exec(
-                select(AlertSession.status).distinct()
-            ).all()
+            # Always return all possible status options for consistent filtering,
+            # even if some statuses don't currently exist in the database
+            from tarsy.models.constants import AlertSessionStatus
             
             return {
                 "agent_types": sorted(list(agent_types)) if agent_types else [],
                 "alert_types": sorted(list(alert_types)) if alert_types else [],
-                "status_options": sorted(list(statuses)) if statuses else [],
+                "status_options": AlertSessionStatus.ALL_STATUSES,
                 "time_ranges": [
                     {"label": "Last Hour", "value": "1h"},
                     {"label": "Last 4 Hours", "value": "4h"},

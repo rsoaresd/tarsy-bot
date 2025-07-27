@@ -93,12 +93,14 @@ class APIClient {
    * Fetch historical sessions (completed/failed) - Phase 2
    * Gets sessions with status 'completed' or 'failed'
    */
-  async getHistoricalSessions(): Promise<SessionsResponse> {
+  async getHistoricalSessions(page: number = 1, pageSize: number = 25): Promise<SessionsResponse> {
     try {
       // Build query string manually to ensure proper FastAPI format
       const queryParams = new URLSearchParams();
       queryParams.append('status', 'completed');
       queryParams.append('status', 'failed');
+      queryParams.append('page', page.toString());
+      queryParams.append('page_size', pageSize.toString());
       const url = `/api/v1/history/sessions?${queryParams.toString()}`;
       
       console.log('🔍 Historical sessions - Full URL:', url);
@@ -237,7 +239,7 @@ class APIClient {
    * Fetch sessions with advanced filtering (Phase 4)
    * Enhanced version of getSessions with comprehensive filtering support
    */
-  async getFilteredSessions(filters: SessionFilter): Promise<SessionsResponse> {
+  async getFilteredSessions(filters: SessionFilter, page: number = 1, pageSize: number = 25): Promise<SessionsResponse> {
     try {
       const queryParams = new URLSearchParams();
       
@@ -253,27 +255,31 @@ class APIClient {
         });
       }
       
-      // Add agent type filters (multiple values)
+      // Add agent type filter (single value)
       if (filters.agent_type && filters.agent_type.length > 0) {
-        filters.agent_type.forEach(agentType => {
-          queryParams.append('agent_type', agentType);
-        });
+        // Backend expects single value, take the first selected value
+        queryParams.append('agent_type', filters.agent_type[0]);
       }
       
-      // Add alert type filters (multiple values) 
+      // Add alert type filter (single value) 
       if (filters.alert_type && filters.alert_type.length > 0) {
-        filters.alert_type.forEach(alertType => {
-          queryParams.append('alert_type', alertType);
-        });
+        // Backend expects single value, take the first selected value
+        queryParams.append('alert_type', filters.alert_type[0]);
       }
       
-      // Add date range filters
+      // Add date range filters (convert ISO strings to microseconds)
       if (filters.start_date) {
-        queryParams.append('start_date', filters.start_date);
+        const startDateUs = new Date(filters.start_date).getTime() * 1000; // Convert to microseconds
+        queryParams.append('start_date_us', startDateUs.toString());
       }
       if (filters.end_date) {
-        queryParams.append('end_date', filters.end_date);
+        const endDateUs = new Date(filters.end_date).getTime() * 1000; // Convert to microseconds
+        queryParams.append('end_date_us', endDateUs.toString());
       }
+      
+      // Add pagination parameters
+      queryParams.append('page', page.toString());
+      queryParams.append('page_size', pageSize.toString());
       
       const url = `/api/v1/history/sessions?${queryParams.toString()}`;
       

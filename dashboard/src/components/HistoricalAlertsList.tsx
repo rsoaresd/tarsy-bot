@@ -12,17 +12,19 @@ import {
   Alert,
   Box,
   Button,
+  TableSortLabel,
 } from '@mui/material';
 import { Refresh, SearchOff } from '@mui/icons-material';
 import AlertListItem from './AlertListItem';
+import PaginationControls from './PaginationControls';
 import { hasActiveFilters } from '../utils/search';
-import type { HistoricalAlertsListProps } from '../types';
+import type { EnhancedHistoricalAlertsListProps } from '../types';
 
 /**
  * HistoricalAlertsList component displays completed and failed alerts
- * in a table format, enhanced for Phase 4 with filtering and search support
+ * in a table format, enhanced for Phase 6 with advanced filtering, sorting, and pagination
  */
-const HistoricalAlertsList: React.FC<HistoricalAlertsListProps> = ({
+const HistoricalAlertsList: React.FC<EnhancedHistoricalAlertsListProps> = ({
   sessions = [],
   loading = false,
   error = null,
@@ -31,6 +33,13 @@ const HistoricalAlertsList: React.FC<HistoricalAlertsListProps> = ({
   // Phase 4: Filter props
   filters,
   filteredCount,
+  searchTerm,
+  // Phase 6: Sorting and pagination props
+  sortState,
+  onSortChange,
+  pagination,
+  onPageChange,
+  onPageSizeChange,
 }) => {
   // Handle session row click
   const handleSessionClick = (sessionId: string) => {
@@ -52,6 +61,22 @@ const HistoricalAlertsList: React.FC<HistoricalAlertsListProps> = ({
       onRefresh();
     }
   };
+
+  // Phase 6: Handle sort column click
+  const handleSortClick = (field: string) => {
+    if (onSortChange) {
+      onSortChange(field);
+    }
+  };
+
+  // Phase 6: Sortable columns configuration
+  const sortableColumns = [
+    { field: 'status', label: 'Status' },
+    { field: 'alert_type', label: 'Type' },
+    { field: 'agent_type', label: 'Agent' },
+    { field: 'started_at_us', label: 'Time' },
+    { field: 'duration_ms', label: 'Duration' },
+  ];
 
   return (
     <Paper sx={{ p: 3 }}>
@@ -108,11 +133,21 @@ const HistoricalAlertsList: React.FC<HistoricalAlertsListProps> = ({
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>Type</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>Agent</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>Time</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>Duration</TableCell>
+                  {sortableColumns.map((column) => (
+                    <TableCell key={column.field} sx={{ fontWeight: 600 }}>
+                      {onSortChange ? (
+                        <TableSortLabel
+                          active={sortState?.field === column.field}
+                          direction={sortState?.field === column.field ? sortState.direction : 'asc'}
+                          onClick={() => handleSortClick(column.field)}
+                        >
+                          {column.label}
+                        </TableSortLabel>
+                      ) : (
+                        column.label
+                      )}
+                    </TableCell>
+                  ))}
                   <TableCell sx={{ fontWeight: 600, width: 60, textAlign: 'center' }}></TableCell>
                 </TableRow>
               </TableHead>
@@ -146,12 +181,13 @@ const HistoricalAlertsList: React.FC<HistoricalAlertsListProps> = ({
                     </TableCell>
                   </TableRow>
                 ) : (
+                  // Backend handles pagination, so display all returned sessions
                   sessions.map((session) => (
                     <AlertListItem
                       key={session.session_id || `session-${Math.random()}`}
                       session={session}
                       onClick={handleSessionClick}
-                      searchTerm={filters?.search}
+                      searchTerm={searchTerm || filters?.search}
                     />
                   ))
                 )}
@@ -159,8 +195,18 @@ const HistoricalAlertsList: React.FC<HistoricalAlertsListProps> = ({
             </Table>
           </TableContainer>
 
+          {/* Phase 6: Pagination Controls */}
+          {pagination && onPageChange && onPageSizeChange && (
+            <PaginationControls
+              pagination={pagination}
+              onPageChange={onPageChange}
+              onPageSizeChange={onPageSizeChange}
+              disabled={loading}
+            />
+          )}
+
           {/* Summary */}
-          {sessions.length > 0 && (
+          {sessions.length > 0 && !pagination && (
             <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
               <Typography variant="body2" color="text.secondary">
                 Showing {sessions.length} historical alert{sessions.length !== 1 ? 's' : ''} (completed/failed)

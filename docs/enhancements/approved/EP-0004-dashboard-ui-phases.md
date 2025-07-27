@@ -1436,7 +1436,6 @@ const formatDuration = (durationMs: number | null): string => {
 - Filter state persistence
 
 ### API Integration
-- `GET /api/v1/history/sessions/{session_id}/export?format={json|csv}` - Export individual session data
 - Enhanced filtering with date ranges and multiple criteria
 - Pagination support for large datasets
 - Filter state persistence in localStorage
@@ -1703,16 +1702,6 @@ const formatDuration = (durationMs: number | null): string => {
         )}
       </Typography>
       
-      {/* Export Button */}
-      <Button
-        startIcon={<FileDownload />}
-        variant="outlined"
-        size="small"
-        onClick={handleExport}
-        disabled={filteredCount === 0}
-      >
-        Export Results
-      </Button>
     </Box>
 
     {filteredCount === 0 ? (
@@ -1832,7 +1821,6 @@ const formatDuration = (durationMs: number | null): string => {
 - [ ] Multi-select filters display as Material-UI Chips
 - [ ] Sort functionality works with Material-UI TableSortLabel
 - [ ] Filter summary shows active filters as dismissible Chips
-- [ ] Export functionality integrated with Material-UI Button
 - [ ] Advanced filters collapse/expand using Material-UI Collapse component
 
 ---

@@ -6,7 +6,7 @@ import type { DashboardLayoutProps } from '../types';
 
 /**
  * DashboardLayout component provides the main two-section layout
- * for Phase 2: Active alerts at the top, historical alerts below
+ * for Phase 6: Active alerts at the top, historical alerts below with advanced features
  */
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   activeAlerts,
@@ -21,6 +21,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   // Phase 4: Filter props
   filters,
   filteredCount,
+  // Phase 6: Sorting and pagination props
+  sortState,
+  onSortChange,
+  pagination,
+  onPageChange,
+  onPageSizeChange,
 }) => {
   return (
     <Box sx={{ width: '100%' }}>
@@ -42,6 +48,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         onSessionClick={onSessionClick}
         filters={filters}
         filteredCount={filteredCount}
+        // Phase 6: Enhanced functionality props
+        sortState={sortState}
+        onSortChange={onSortChange}
+        pagination={pagination}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
       />
     </Box>
   );

@@ -169,7 +169,7 @@ export interface HistoricalAlertsListProps {
   filteredCount?: number;
 }
 
-// Dashboard layout props (Phase 2, enhanced for Phase 4)
+// Dashboard layout props (Phase 2, enhanced for Phase 6)
 export interface DashboardLayoutProps {
   activeAlerts: Session[];
   historicalAlerts: Session[];
@@ -183,6 +183,12 @@ export interface DashboardLayoutProps {
   // Phase 4: Filter-related props
   filters?: SessionFilter;
   filteredCount?: number;
+  // Phase 6: Sorting and pagination props
+  sortState?: SortState;
+  onSortChange?: (field: string) => void;
+  pagination?: PaginationState;
+  onPageChange?: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
 }
 
 // Phase 3: Session detail page props
@@ -221,10 +227,11 @@ export interface BackButtonProps {
 export interface SessionFilter {
   search?: string; // Text search across alert types and error messages
   status?: ('completed' | 'failed' | 'in_progress' | 'pending')[]; // Status filter (multiple selection)
-  agent_type?: string[]; // Agent type filter (multiple selection) 
-  alert_type?: string[]; // Alert type filter (multiple selection)
+  agent_type?: string[]; // Agent type filter (backend expects single value, but UI can select multiple - first is used) 
+  alert_type?: string[]; // Alert type filter (backend expects single value, but UI can select multiple - first is used)
   start_date?: string | null; // Start date filter (ISO string)
   end_date?: string | null; // End date filter (ISO string)
+  time_range_preset?: string | null; // Preset time range (e.g., '1h', '1d', '7d')
 }
 
 // Phase 4: Filter options from backend
@@ -269,6 +276,12 @@ export interface EnhancedHistoricalAlertsListProps extends HistoricalAlertsListP
   filters?: SessionFilter;
   filteredCount?: number;
   searchTerm?: string;
+  // Phase 6: Sorting and pagination
+  sortState?: SortState;
+  onSortChange?: (field: string) => void;
+  pagination?: PaginationState;
+  onPageChange?: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
 }
 
 // Phase 5: Enhanced timeline and interaction components
@@ -298,4 +311,59 @@ export interface CopyButtonProps {
   size?: 'small' | 'medium' | 'large';
   label?: string;
   tooltip?: string;
+}
+
+// Phase 6: Advanced filtering and pagination types
+export interface PaginationState {
+  page: number; // Current page (1-based)
+  pageSize: number; // Items per page
+  totalPages: number; // Total number of pages
+  totalItems: number; // Total number of items
+}
+
+export interface SortState {
+  field: string; // Field to sort by
+  direction: 'asc' | 'desc'; // Sort direction
+}
+
+export interface FilterPanelProps {
+  filters: SessionFilter;
+  onFiltersChange: (filters: SessionFilter) => void;
+  onClearFilters: () => void;
+  filterOptions?: FilterOptions;
+  loading?: boolean;
+  showAdvanced?: boolean;
+  onToggleAdvanced?: (show: boolean) => void;
+}
+
+export interface DateRangePickerProps {
+  startDate?: Date | null;
+  endDate?: Date | null;
+  onStartDateChange: (date: Date | null) => void;
+  onEndDateChange: (date: Date | null) => void;
+  label?: string;
+  disabled?: boolean;
+}
+
+export interface PaginationControlsProps {
+  pagination: PaginationState;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  disabled?: boolean;
+}
+
+export interface MultiSelectFilterProps {
+  options: string[];
+  value: string[];
+  onChange: (values: string[]) => void;
+  label: string;
+  placeholder?: string;
+  disabled?: boolean;
+}
+
+export interface FilterChipProps {
+  label: string;
+  onDelete: () => void;
+  color?: 'default' | 'primary' | 'secondary' | 'success' | 'error' | 'info' | 'warning';
+  variant?: 'filled' | 'outlined';
 }
