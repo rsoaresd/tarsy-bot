@@ -906,12 +906,11 @@ const formatDuration = (durationMs: number | null): string => {
 
 ---
 
-## Phase 5: Enhanced Timeline & Real-time Detail Updates
-**Goal:** Improve session detail page with better timeline and live updates
+## Phase 5: Enhanced Timeline & Interaction Details
+**Goal:** Improve session detail page with better timeline and expandable interactions
 
 ### Scope
 - Enhanced timeline visualization
-- Real-time updates for active session details
 - Interaction details expansion
 - Copy/export basic functionality
 
@@ -927,7 +926,6 @@ const formatDuration = (durationMs: number | null): string => {
 ### Features
 - Visual timeline with timestamps
 - Expandable interaction details
-- Real-time updates for active sessions
 - Copy interaction details to clipboard
 - Progress indicators for active processing
 
@@ -1393,21 +1391,20 @@ const formatDuration = (durationMs: number | null): string => {
 
 
 ### Success Criteria
-- [ ] **Original Alert Data** displays in structured Material-UI Cards with proper field organization
-- [ ] **Severity and Environment** indicators use appropriate Material-UI Chip colors
-- [ ] **Final AI Analysis** renders markdown content using react-markdown with proper styling
-- [ ] **Analysis expand/collapse** functionality works with smooth transitions (400px initial height)
-- [ ] **Copy Analysis** button successfully copies markdown content to clipboard
-- [ ] **Enhanced Timeline** shows clear progression using Material-UI Timeline components
-- [ ] **Expandable Timeline Interactions** provide detailed LLM/MCP information with Material-UI Collapse
-- [ ] **Real-time Updates** for active sessions with WebSocket integration and progress indicators
-- [ ] **Copy Timeline** functionality works with Material-UI Button components
-- [ ] Progress indicators are accurate using LinearProgress and CircularProgress
-- [ ] Timeline uses Material-UI TimelineItem, TimelineDot, and TimelineConnector
-- [ ] **Runbook links** open in new tab with proper security attributes
-- [ ] **Error states** display for failed sessions within Final Analysis section
-- [ ] All Material Icons render correctly (Warning, Psychology, Build, Timeline, etc.)
-- [ ] Real-time updates show live indicator in AppBar for active sessions
+- [ ] **Original Alert Data** displays in structured Material-UI Cards with proper field organization *(already implemented in phase 3, keep it)*
+- [ ] **Severity and Environment** indicators use appropriate Material-UI Chip colors *(already implemented in phase 3, keep it)*
+- [ ] **Final AI Analysis** renders markdown content using react-markdown with proper styling *(already implemented in phase 3, keep it)*
+- [ ] **Analysis expand/collapse** functionality works with smooth transitions (400px initial height) *(already implemented in phase 3, keep it)*
+- [ ] **Copy Analysis** button successfully copies markdown content to clipboard *(already implemented in phase 3, keep it)*
+- [ ] **Enhanced Timeline** shows clear progression using Material-UI Timeline components *(new - phase 3 used Material-UI List)*
+- [ ] **Expandable Timeline Interactions** provide detailed LLM/MCP information with Material-UI Collapse *(new)*
+- [ ] **Copy Timeline** functionality works with Material-UI Button components *(new)*
+- [ ] **Copy Individual Timeline Elements** allows copying specific LLM/MCP interactions separately *(new)*
+- [ ] Progress indicators are accurate using LinearProgress and CircularProgress *(new)*
+- [ ] Timeline uses Material-UI TimelineItem, TimelineDot, and TimelineConnector *(new - phase 3 used Material-UI List)*
+- [ ] **Runbook links** open in new tab with proper security attributes *(already implemented in phase 3, keep it)*
+- [ ] **Error states** display for failed sessions within Final Analysis section *(already implemented in phase 3, keep it)*
+- [ ] All Material Icons render correctly (Warning, Psychology, Build, Timeline, etc.) *(already implemented in phase 3, keep it)*
 
 ---
 

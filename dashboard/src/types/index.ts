@@ -270,3 +270,32 @@ export interface EnhancedHistoricalAlertsListProps extends HistoricalAlertsListP
   filteredCount?: number;
   searchTerm?: string;
 }
+
+// Phase 5: Enhanced timeline and interaction components
+export interface TimelineVisualizationProps {
+  timelineItems: TimelineItem[];
+  isActive?: boolean;
+}
+
+export interface InteractionDetailsProps {
+  type: 'llm' | 'mcp' | 'system';
+  details: LLMInteraction | MCPInteraction | SystemEvent;
+  expanded?: boolean;
+}
+
+export interface ProgressIndicatorProps {
+  status: 'completed' | 'failed' | 'in_progress' | 'pending';
+  startedAt?: number; // Unix timestamp in microseconds
+  duration?: number | null; // Duration in milliseconds
+  variant?: 'linear' | 'circular';
+  showDuration?: boolean;
+  size?: 'small' | 'medium' | 'large';
+}
+
+export interface CopyButtonProps {
+  text: string;
+  variant?: 'button' | 'icon';
+  size?: 'small' | 'medium' | 'large';
+  label?: string;
+  tooltip?: string;
+}

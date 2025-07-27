@@ -4,7 +4,7 @@ import {
   CardContent,
   Typography,
   Box,
-  LinearProgress,
+
   Chip,
   IconButton,
   Tooltip,
@@ -18,6 +18,7 @@ import {
 } from '@mui/icons-material';
 import type { ActiveAlertCardProps } from '../types';
 import { formatTimestamp, formatDuration, getCurrentTimestampUs } from '../utils/timestamp';
+import ProgressIndicator from './ProgressIndicator';
 
 // Helper function to get status chip configuration
 const getStatusChipConfig = (status: string) => {
@@ -74,7 +75,6 @@ const animationStyles = {
  */
 const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({ 
   session, 
-  progress, 
   onClick 
 }) => {
   const statusConfig = getStatusChipConfig(session.status);
@@ -173,29 +173,21 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
           </Typography>
         </Box>
 
-        {/* Progress Bar for in_progress sessions */}
-        {session.status === 'in_progress' && (
+        {/* Progress Indicator for active sessions */}
+        {(session.status === 'in_progress' || session.status === 'pending') && (
           <Box sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
               <Typography variant="body2" color="text.secondary">
-                Processing Progress
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {progress !== undefined ? `${progress}%` : 'Unknown'}
+                {session.status === 'in_progress' ? 'Processing Progress' : 'Queue Status'}
               </Typography>
             </Box>
-            <LinearProgress 
-              variant={progress !== undefined ? "determinate" : "indeterminate"}
-              value={progress}
-              sx={{
-                height: 3,
-                borderRadius: 2,
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                '& .MuiLinearProgress-bar': {
-                  borderRadius: 2,
-                  backgroundColor: 'rgba(2, 136, 209, 0.6)',
-                },
-              }}
+            <ProgressIndicator 
+              status={session.status}
+              startedAt={session.started_at_us}
+              duration={session.duration_ms}
+              variant="linear"
+              showDuration={false}
+              size="small"
             />
           </Box>
         )}

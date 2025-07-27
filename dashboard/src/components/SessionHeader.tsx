@@ -1,7 +1,8 @@
 import { Paper, Typography, Box } from '@mui/material';
 import StatusBadge from './StatusBadge';
+import ProgressIndicator from './ProgressIndicator';
 import type { SessionHeaderProps } from '../types';
-import { formatTimestamp, formatDurationMs } from '../utils/timestamp';
+import { formatTimestamp } from '../utils/timestamp';
 
 // Animation styles for processing sessions
 const animationStyles = {
@@ -63,15 +64,25 @@ function SessionHeader({ session }: SessionHeaderProps) {
           )}
         </Box>
 
-        {/* Duration and Completion Info */}
-        <Box sx={{ textAlign: 'right', minWidth: 120 }}>
-          <Typography 
-            variant="h6" 
-            color={session.status === 'completed' ? 'success.main' : 'text.primary'}
-            sx={{ fontWeight: 600 }}
-          >
-            Duration: {session.duration_ms ? formatDurationMs(session.duration_ms) : '-'}
-          </Typography>
+        {/* Duration and Progress Info */}
+        <Box sx={{ textAlign: 'right', minWidth: 150 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
+            <Typography 
+              variant="h6" 
+              color={session.status === 'completed' ? 'success.main' : session.status === 'failed' ? 'error.main' : 'text.primary'}
+              sx={{ fontWeight: 600 }}
+            >
+              Duration:
+            </Typography>
+            <ProgressIndicator 
+              status={session.status}
+              startedAt={session.started_at_us}
+              duration={session.duration_ms}
+              variant="linear"
+              showDuration={true}
+              size="medium"
+            />
+          </Box>
           {session.completed_at_us && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
               Completed at {formatTimestamp(session.completed_at_us, 'absolute')}
@@ -79,7 +90,12 @@ function SessionHeader({ session }: SessionHeaderProps) {
           )}
           {session.status === 'in_progress' && (
             <Typography variant="body2" color="info.main" sx={{ mt: 0.5 }}>
-              Currently processing...
+              Live updates enabled
+            </Typography>
+          )}
+          {session.status === 'pending' && (
+            <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
+              Waiting in queue...
             </Typography>
           )}
         </Box>

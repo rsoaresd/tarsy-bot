@@ -19,7 +19,8 @@ import type { DetailedSession, SessionUpdate } from '../types';
 import SessionHeader from './SessionHeader';
 import OriginalAlertCard from './OriginalAlertCard';
 import FinalAnalysisCard from './FinalAnalysisCard';
-import SimpleTimeline from './SimpleTimeline';
+import TimelineVisualization from './TimelineVisualization';
+
 
 /**
  * SessionDetailPage component - Phase 3
@@ -322,6 +323,17 @@ function SessionDetailPage() {
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
             Session Details
           </Typography>
+          
+          {/* Real-time status indicator for active sessions */}
+          {session && (session.status === 'in_progress' || session.status === 'pending') && !loading && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2, color: 'inherit' }}>
+              <CircularProgress size={16} sx={{ color: 'inherit' }} />
+              <Typography variant="body2" sx={{ color: 'inherit' }}>
+                Live Updates
+              </Typography>
+            </Box>
+          )}
+          
           {loading && (
             <CircularProgress size={20} sx={{ color: 'inherit' }} />
           )}
@@ -409,8 +421,12 @@ function SessionDetailPage() {
             {/* Original Alert Data */}
             <OriginalAlertCard alertData={session.alert_data} />
 
-            {/* Processing Timeline */}
-            <SimpleTimeline timelineItems={session.chronological_timeline} />
+            {/* Enhanced Processing Timeline */}
+            <TimelineVisualization 
+              timelineItems={session.chronological_timeline}
+              isActive={session.status === 'in_progress' || session.status === 'pending'}
+              sessionId={session.session_id}
+            />
 
             {/* Final AI Analysis */}
             <FinalAnalysisCard 
