@@ -93,12 +93,13 @@ const HistoricalAlertsList: React.FC<HistoricalAlertsListProps> = ({
                   <TableCell sx={{ fontWeight: 600 }}>Agent</TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>Time</TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>Duration</TableCell>
+                  <TableCell sx={{ fontWeight: 600, width: 60, textAlign: 'center' }}></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {sessions.length === 0 ? (
                   <TableRow key="empty-state">
-                    <TableCell colSpan={5} align="center">
+                    <TableCell colSpan={6} align="center">
                       <Box sx={{ py: 6 }}>
                         <Typography variant="h6" color="text.secondary" gutterBottom>
                           No Historical Alerts

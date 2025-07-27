@@ -6,12 +6,15 @@ import {
   Box,
   LinearProgress,
   Chip,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import {
   Error,
   Warning,
   Refresh,
   Schedule,
+  OpenInNew,
 } from '@mui/icons-material';
 import type { ActiveAlertCardProps } from '../types';
 import { formatTimestamp, formatDuration, getCurrentTimestampUs } from '../utils/timestamp';
@@ -81,67 +84,90 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
     ? formatDuration(session.started_at_us, session.completed_at_us)
     : formatDuration(session.started_at_us, getCurrentTimestampUs());
 
+  // Handle card click (same tab navigation)
   const handleCardClick = () => {
     if (onClick && session.session_id) {
       onClick(session.session_id);
     }
   };
 
-  // Apply breathing glow animation for processing alerts
-  const getAnimationStyle = () => {
-    if (session.status !== 'in_progress') return {};
-    return animationStyles.breathingGlow;
+  // Handle new tab icon click
+  const handleNewTabClick = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card click
+    if (session.session_id) {
+      const url = `${window.location.origin}/sessions/${session.session_id}`;
+      window.open(url, '_blank');
+    }
   };
 
   return (
-    <Card 
-      variant="outlined" 
-      sx={{ 
+    <Card
+      sx={{
         cursor: onClick ? 'pointer' : 'default',
         transition: 'all 0.2s ease-in-out',
         '&:hover': onClick ? {
-          boxShadow: 2,
-          transform: 'translateY(-2px)',
+          transform: 'translateY(-1px)',
+          boxShadow: 4,
         } : {},
-        ...getAnimationStyle(), // Apply animation for in-progress status
+        ...(session.status === 'in_progress' ? animationStyles.breathingGlow : {}),
+        position: 'relative',
       }}
       onClick={handleCardClick}
     >
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {/* Status Chip */}
-          <Chip
-            color={statusConfig.color}
-            icon={statusConfig.icon}
-            label={statusConfig.label}
-            size="small"
-            sx={{ 
-              fontWeight: 500,
-              minWidth: 120,
-            }}
-          />
+      <CardContent sx={{ pb: 2 }}>
+        {/* Header with status and new tab icon */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
+            <Chip
+              icon={statusConfig.icon}
+              label={statusConfig.label}
+              color={statusConfig.color}
+              size="small"
+              sx={{ fontWeight: 500 }}
+            />
+            <Typography variant="body2" color="text.secondary">
+              {session.agent_type}
+            </Typography>
+          </Box>
+          
+          {/* New Tab Icon */}
+          <Tooltip title="Open in new tab">
+            <IconButton
+              size="small"
+              onClick={handleNewTabClick}
+              sx={{
+                opacity: 0.7,
+                '&:hover': {
+                  opacity: 1,
+                  backgroundColor: 'action.hover',
+                },
+              }}
+            >
+              <OpenInNew fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
 
-          {/* Alert Type */}
-          <Typography 
-            variant="h6" 
-            sx={{ 
-              fontWeight: 600,
-              flex: 1,
-              textAlign: 'center',
-            }}
-          >
-            {session.alert_type}
+        {/* Alert Type Title */}
+        <Typography 
+          variant="h6" 
+          sx={{ 
+            fontWeight: 600,
+            mb: 1,
+          }}
+        >
+          {session.alert_type}
+        </Typography>
+
+        {/* Time and Duration */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            Started: {formatTimestamp(session.started_at_us, 'time-only')}
           </Typography>
-
-          {/* Duration */}
           <Typography 
             variant="body2" 
             color="text.secondary"
-            sx={{ 
-              fontFamily: 'monospace',
-              minWidth: 60,
-              textAlign: 'right',
-            }}
+            sx={{ fontFamily: 'monospace' }}
           >
             {currentDuration}
           </Typography>
@@ -149,7 +175,7 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
 
         {/* Progress Bar for in_progress sessions */}
         {session.status === 'in_progress' && (
-          <Box sx={{ mt: 2 }}>
+          <Box sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
               <Typography variant="body2" color="text.secondary">
                 Processing Progress
@@ -174,19 +200,9 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
           </Box>
         )}
 
-        {/* Agent Type */}
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="body2" color="text.secondary">
-            Agent: {session.agent_type}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Started: {formatTimestamp(session.started_at_us, 'time-only')}
-          </Typography>
-        </Box>
-
         {/* Error Message (for failed sessions) */}
         {session.status === 'failed' && session.error_message && (
-          <Box sx={{ mt: 2, p: 1, bgcolor: 'error.light', borderRadius: 1, border: '1px solid', borderColor: 'error.main' }}>
+          <Box sx={{ mt: 1, p: 1, bgcolor: 'error.light', borderRadius: 1, border: '1px solid', borderColor: 'error.main' }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
               Error:
             </Typography>
