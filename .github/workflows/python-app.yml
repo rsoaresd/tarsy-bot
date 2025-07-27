@@ -30,7 +30,7 @@ jobs:
       run: uv sync --extra test
     - name: Run unit tests
       working-directory: ./backend
-      run: uv run python tests/run_unit_tests.py
+      run: make test-unit
     - name: Run integration tests
       working-directory: ./backend
-      run: uv run python tests/run_integration_tests.py
+      run: make test-integration
