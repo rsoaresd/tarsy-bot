@@ -1,5 +1,5 @@
 import axios, { type AxiosInstance, AxiosError } from 'axios';
-import type { SessionsResponse, Session, DetailedSession } from '../types';
+import type { SessionsResponse, Session, DetailedSession, SessionFilter, FilterOptions, SearchResult } from '../types';
 
 // API base URL configuration
 // In development with Vite proxy, use relative URLs
@@ -167,6 +167,140 @@ class APIClient {
     } catch (error) {
       console.error('Health check failed:', error);
       throw error instanceof Error ? error : new Error('Health check failed');
+    }
+  }
+
+  // Phase 4: Search and filtering methods
+
+  /**
+   * Search sessions by content (Phase 4)
+   * Searches across alert types, error messages, and other session content
+   */
+  async searchSessions(searchTerm: string, limit?: number): Promise<SearchResult> {
+    try {
+      const params = new URLSearchParams();
+      params.append('q', searchTerm);
+      if (limit) {
+        params.append('limit', limit.toString());
+      }
+      
+      const response = await this.client.get<SessionsResponse>(`/api/v1/history/search?${params.toString()}`);
+      
+      console.log('Search sessions API response:', {
+        searchTerm,
+        totalResults: response.data?.sessions?.length || 0,
+        limit,
+        url: response.config?.url
+      });
+      
+      if (response.data && typeof response.data === 'object' && 'sessions' in response.data) {
+        return {
+          sessions: response.data.sessions,
+          total_count: response.data.sessions.length,
+          search_term: searchTerm
+        };
+      } else {
+        throw new Error('Invalid search response format');
+      }
+    } catch (error) {
+      console.error('Failed to search sessions:', error);
+      throw error instanceof Error ? error : new Error('Failed to search sessions');
+    }
+  }
+
+  /**
+   * Get available filter options (Phase 4)
+   * Returns available values for agent types, alert types, and status options
+   */
+  async getFilterOptions(): Promise<FilterOptions> {
+    try {
+      const response = await this.client.get<FilterOptions>('/api/v1/history/filter-options');
+      
+      console.log('Filter options API response:', {
+        agentTypes: response.data?.agent_types?.length || 0,
+        alertTypes: response.data?.alert_types?.length || 0,
+        statusOptions: response.data?.status_options?.length || 0
+      });
+      
+      if (response.data && typeof response.data === 'object') {
+        return response.data;
+      } else {
+        throw new Error('Invalid filter options response format');
+      }
+    } catch (error) {
+      console.error('Failed to fetch filter options:', error);
+      throw error instanceof Error ? error : new Error('Failed to fetch filter options');
+    }
+  }
+
+  /**
+   * Fetch sessions with advanced filtering (Phase 4)
+   * Enhanced version of getSessions with comprehensive filtering support
+   */
+  async getFilteredSessions(filters: SessionFilter): Promise<SessionsResponse> {
+    try {
+      const queryParams = new URLSearchParams();
+      
+      // Add search parameter (only if 3+ characters to match backend validation)
+      if (filters.search && filters.search.trim() && filters.search.trim().length >= 3) {
+        queryParams.append('search', filters.search.trim());
+      }
+      
+      // Add status filters (multiple values)
+      if (filters.status && filters.status.length > 0) {
+        filters.status.forEach(status => {
+          queryParams.append('status', status);
+        });
+      }
+      
+      // Add agent type filters (multiple values)
+      if (filters.agent_type && filters.agent_type.length > 0) {
+        filters.agent_type.forEach(agentType => {
+          queryParams.append('agent_type', agentType);
+        });
+      }
+      
+      // Add alert type filters (multiple values) 
+      if (filters.alert_type && filters.alert_type.length > 0) {
+        filters.alert_type.forEach(alertType => {
+          queryParams.append('alert_type', alertType);
+        });
+      }
+      
+      // Add date range filters
+      if (filters.start_date) {
+        queryParams.append('start_date', filters.start_date);
+      }
+      if (filters.end_date) {
+        queryParams.append('end_date', filters.end_date);
+      }
+      
+      const url = `/api/v1/history/sessions?${queryParams.toString()}`;
+      
+      console.log('Filtered sessions API request:', {
+        filters,
+        url,
+        queryParams: queryParams.toString(),
+        searchSkipped: filters.search && filters.search.trim() && filters.search.trim().length < 3 ? 
+          `Search term "${filters.search.trim()}" too short (< 3 chars)` : false
+      });
+      
+      const response = await this.client.get<SessionsResponse>(url);
+      
+      console.log('Filtered sessions API response:', {
+        totalSessions: response.data?.sessions?.length || 0,
+        appliedFilters: filters,
+        url: response.config?.url
+      });
+      
+      if (response.data && typeof response.data === 'object' && 'sessions' in response.data) {
+        return response.data;
+      } else {
+        throw new Error('Invalid filtered sessions response format');
+      }
+    } catch (error) {
+      console.error('Failed to fetch filtered sessions:', error);
+      throw error instanceof Error ? error : new Error('Failed to fetch filtered sessions');
     }
   }
 }

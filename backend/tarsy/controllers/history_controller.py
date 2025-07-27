@@ -48,7 +48,9 @@ router = APIRouter(prefix="/api/v1/history", tags=["history"])
     1. Recent completed alerts: `status=completed&start_date_us=1734476400000000`
     2. Kubernetes alerts: `agent_type=kubernetes&status=completed`
     3. Specific alert types: `alert_type=NamespaceTerminating`
-    4. Time range analysis: `start_date_us=1734476400000000&end_date_us=1734562799999999`
+    4. Search error messages: `search=connection refused&status=failed`
+    5. Search analysis content: `search=namespace terminating`
+    6. Time range analysis: `start_date_us=1734476400000000&end_date_us=1734562799999999`
     
     **Timestamp Format:**
     - All timestamps are Unix timestamps in microseconds since epoch (UTC)
@@ -58,6 +60,7 @@ async def list_sessions(
     status: Optional[List[str]] = Query(None, description="Filter by session status(es) - supports multiple values"),
     agent_type: Optional[str] = Query(None, description="Filter by agent type"),
     alert_type: Optional[str] = Query(None, description="Filter by alert type"),
+    search: Optional[str] = Query(None, description="Text search across alert messages, error messages, and analysis results", min_length=3),
     start_date_us: Optional[int] = Query(None, description="Filter sessions started after this timestamp (microseconds since epoch UTC)"),
     end_date_us: Optional[int] = Query(None, description="Filter sessions started before this timestamp (microseconds since epoch UTC)"),
     page: int = Query(1, ge=1, description="Page number for pagination"),
@@ -71,6 +74,7 @@ async def list_sessions(
         status: Optional status filter(s) (e.g., ['completed', 'failed'] or ['in_progress'])
         agent_type: Optional agent type filter (e.g., 'kubernetes')
         alert_type: Optional alert type filter (e.g., 'NamespaceTerminating')
+        search: Optional text search across alert messages, errors, and analysis (minimum 3 characters)
         start_date_us: Optional start timestamp filter (microseconds since epoch UTC, inclusive)
         end_date_us: Optional end timestamp filter (microseconds since epoch UTC, inclusive)
         page: Page number (starting from 1)
@@ -92,6 +96,8 @@ async def list_sessions(
             filters['agent_type'] = agent_type
         if alert_type is not None:
             filters['alert_type'] = alert_type
+        if search is not None and search.strip():
+            filters['search'] = search.strip()
         if start_date_us is not None:
             filters['start_date_us'] = start_date_us
         if end_date_us is not None:

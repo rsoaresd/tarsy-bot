@@ -2,15 +2,16 @@ import React from 'react';
 import { TableRow, TableCell, Typography, IconButton, Tooltip } from '@mui/material';
 import { OpenInNew } from '@mui/icons-material';
 import StatusBadge from './StatusBadge';
+import { highlightSearchTerm } from '../utils/search';
 import type { AlertListItemProps } from '../types';
 import { formatTimestamp, formatDurationMs, formatDuration } from '../utils/timestamp';
 
 /**
  * AlertListItem component represents a single session row in the alerts table
- * Displays basic session information: status, type, agent, time, and duration
+ * Displays basic session information with Phase 4 search highlighting support
  * Uses Unix timestamp utilities for optimal performance and consistent formatting
  */
-const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick }) => {
+const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick, searchTerm }) => {
   const handleRowClick = () => {
     if (onClick) {
       if (!session.session_id) {
@@ -49,9 +50,13 @@ const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick }) => {
         <StatusBadge status={session.status} />
       </TableCell>
       <TableCell>
-        <Typography variant="body2" sx={{ fontWeight: 500 }}>
-          {session.alert_type}
-        </Typography>
+        <Typography 
+          variant="body2" 
+          sx={{ fontWeight: 500 }}
+          dangerouslySetInnerHTML={{
+            __html: highlightSearchTerm(session.alert_type, searchTerm || '')
+          }}
+        />
       </TableCell>
       <TableCell>
         <Typography variant="body2">

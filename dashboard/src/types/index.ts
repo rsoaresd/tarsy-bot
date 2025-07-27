@@ -133,10 +133,12 @@ export interface AlertListProps {
   onRefresh?: () => void;
 }
 
-// Individual alert list item props (Phase 1)
+// Individual alert list item props (Phase 1, enhanced for Phase 4)
 export interface AlertListItemProps {
   session: Session;
   onClick?: (sessionId: string) => void;
+  // Phase 4: Search highlighting
+  searchTerm?: string;
 }
 
 // Active alerts panel props (Phase 2)
@@ -155,16 +157,19 @@ export interface ActiveAlertCardProps {
   onClick?: (sessionId: string) => void;
 }
 
-// Historical alerts list props (Phase 2)
+// Historical alerts list props (Phase 2, enhanced for Phase 4)
 export interface HistoricalAlertsListProps {
   sessions?: Session[];
   loading?: boolean;
   error?: string | null;
   onRefresh?: () => void;
   onSessionClick?: (sessionId: string) => void;
+  // Phase 4: Filter-related props
+  filters?: SessionFilter;
+  filteredCount?: number;
 }
 
-// Dashboard layout props (Phase 2)
+// Dashboard layout props (Phase 2, enhanced for Phase 4)
 export interface DashboardLayoutProps {
   activeAlerts: Session[];
   historicalAlerts: Session[];
@@ -175,6 +180,9 @@ export interface DashboardLayoutProps {
   onRefreshActive?: () => void;
   onRefreshHistorical?: () => void;
   onSessionClick?: (sessionId: string) => void;
+  // Phase 4: Filter-related props
+  filters?: SessionFilter;
+  filteredCount?: number;
 }
 
 // Phase 3: Session detail page props
@@ -207,4 +215,58 @@ export interface SimpleTimelineProps {
 // Phase 3: Back button props
 export interface BackButtonProps {
   onClick: () => void;
-} 
+}
+
+// Phase 4: Search and filtering types
+export interface SessionFilter {
+  search?: string; // Text search across alert types and error messages
+  status?: ('completed' | 'failed' | 'in_progress' | 'pending')[]; // Status filter (multiple selection)
+  agent_type?: string[]; // Agent type filter (multiple selection) 
+  alert_type?: string[]; // Alert type filter (multiple selection)
+  start_date?: string | null; // Start date filter (ISO string)
+  end_date?: string | null; // End date filter (ISO string)
+}
+
+// Phase 4: Filter options from backend
+export interface FilterOptions {
+  agent_types: string[]; // Available agent types
+  alert_types: string[]; // Available alert types
+  status_options: ('completed' | 'failed' | 'in_progress' | 'pending')[]; // Available status options
+}
+
+// Phase 4: Search results with highlighting
+export interface SearchResult {
+  sessions: Session[];
+  total_count: number;
+  search_term?: string;
+  highlighted_results?: Record<string, string>; // session_id -> highlighted content
+}
+
+// Phase 4Component props for filtering
+export interface SearchBarProps {
+  value: string;
+  onChange: (value: string) => void;
+  onSearch: (searchTerm: string) => void;
+  placeholder?: string;
+  debounceMs?: number;
+}
+
+export interface StatusFilterProps {
+  value: string[];
+  onChange: (statuses: string[]) => void;
+  options?: string[];
+}
+
+export interface FilterBarProps {
+  filters: SessionFilter;
+  onFiltersChange: (filters: SessionFilter) => void;
+  onClearFilters: () => void;
+  loading?: boolean;
+}
+
+// Phase 4: Enhanced historical alerts list with filtering
+export interface EnhancedHistoricalAlertsListProps extends HistoricalAlertsListProps {
+  filters?: SessionFilter;
+  filteredCount?: number;
+  searchTerm?: string;
+}

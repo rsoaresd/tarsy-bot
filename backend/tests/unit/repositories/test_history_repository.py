@@ -273,6 +273,277 @@ class TestHistoryRepository:
         assert result["pagination"]["page"] == 3
     
     @pytest.mark.unit
+    def test_get_alert_sessions_with_search_error_message(self, repository):
+        """Test search functionality in error_message field."""
+        from tarsy.models.history import now_us
+        
+        # Create sessions with different error messages
+        session1 = AlertSession(
+            session_id="test-session-search-1",
+            alert_id="alert-search-1",
+            alert_data={"alert_type": "NetworkError"},
+            agent_type="NetworkAgent",
+            alert_type="NetworkError",
+            status="failed",
+            started_at_us=now_us(),
+            error_message="Connection refused by kubernetes API server"
+        )
+        repository.create_alert_session(session1)
+        
+        session2 = AlertSession(
+            session_id="test-session-search-2", 
+            alert_id="alert-search-2",
+            alert_data={"alert_type": "DatabaseError"},
+            agent_type="DatabaseAgent",
+            alert_type="DatabaseError",
+            status="failed",
+            started_at_us=now_us(),
+            error_message="Timeout occurred while querying database"
+        )
+        repository.create_alert_session(session2)
+        
+        # Test search in error messages
+        result = repository.get_alert_sessions(search="kubernetes")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session1.session_id
+        
+        result = repository.get_alert_sessions(search="timeout")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session2.session_id
+        
+        result = repository.get_alert_sessions(search="connection")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session1.session_id
+    
+    @pytest.mark.unit
+    def test_get_alert_sessions_with_search_final_analysis(self, repository):
+        """Test search functionality in final_analysis field."""
+        from tarsy.models.history import now_us
+        
+        # Create sessions with different analyses
+        session1 = AlertSession(
+            session_id="test-session-analysis-1",
+            alert_id="alert-analysis-1", 
+            alert_data={"alert_type": "NamespaceTerminating"},
+            agent_type="KubernetesAgent",
+            alert_type="NamespaceTerminating",
+            status="completed",
+            started_at_us=now_us(),
+            final_analysis="The namespace is stuck because of finalizer blocking deletion. Use kubectl patch to remove finalizer."
+        )
+        repository.create_alert_session(session1)
+        
+        session2 = AlertSession(
+            session_id="test-session-analysis-2",
+            alert_id="alert-analysis-2",
+            alert_data={"alert_type": "PodCrashLoop"},
+            agent_type="KubernetesAgent", 
+            alert_type="PodCrashLoop",
+            status="completed",
+            started_at_us=now_us(),
+            final_analysis="Pod is crashing due to memory limits. Increase resource requests and limits in deployment."
+        )
+        repository.create_alert_session(session2)
+        
+        # Test search in final analysis
+        result = repository.get_alert_sessions(search="finalizer")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session1.session_id
+        
+        result = repository.get_alert_sessions(search="memory")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session2.session_id
+        
+        result = repository.get_alert_sessions(search="kubectl")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session1.session_id
+    
+    @pytest.mark.unit
+    def test_get_alert_sessions_with_search_alert_data_fields(self, repository):
+        """Test search functionality in JSON alert_data fields."""
+        from tarsy.models.history import now_us
+        
+        # Create sessions with different alert data
+        session1 = AlertSession(
+            session_id="test-session-json-1",
+            alert_id="alert-json-1",
+            alert_data={
+                "alert_type": "NamespaceTerminating",
+                "message": "Namespace superman-dev is stuck in terminating state",
+                "context": "This usually happens when resources have finalizers",
+                "namespace": "superman-dev",
+                "environment": "production",
+                "severity": "critical",
+                "cluster": "k8s-prod-cluster"
+            },
+            agent_type="KubernetesAgent",
+            alert_type="NamespaceTerminating", 
+            status="completed",
+            started_at_us=now_us()
+        )
+        repository.create_alert_session(session1)
+        
+        session2 = AlertSession(
+            session_id="test-session-json-2",
+            alert_id="alert-json-2",
+            alert_data={
+                "alert_type": "UnidledPods", 
+                "message": "High CPU usage detected on worker nodes",
+                "context": "Multiple pods showing high resource consumption",
+                "pod": "high-cpu-pod-123",
+                "environment": "staging",
+                "severity": "medium",
+                "cluster": "k8s-staging-cluster"
+            },
+            agent_type="KubernetesAgent",
+            alert_type="UnidledPods",
+            status="completed", 
+            started_at_us=now_us()
+        )
+        repository.create_alert_session(session2)
+        
+        # Test search in different JSON fields
+        result = repository.get_alert_sessions(search="superman")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session1.session_id
+        
+        result = repository.get_alert_sessions(search="finalizers")  
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session1.session_id
+        
+        result = repository.get_alert_sessions(search="cpu")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session2.session_id
+        
+        result = repository.get_alert_sessions(search="production")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session1.session_id
+        
+        result = repository.get_alert_sessions(search="critical")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session1.session_id
+        
+        result = repository.get_alert_sessions(search="staging")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session2.session_id
+    
+    @pytest.mark.unit
+    def test_get_alert_sessions_with_search_case_insensitive(self, repository):
+        """Test that search is case-insensitive."""
+        from tarsy.models.history import now_us
+        
+        session = AlertSession(
+            session_id="test-session-case-1",
+            alert_id="alert-case-1",
+            alert_data={
+                "message": "Kubernetes Namespace Problem",
+                "environment": "Production"
+            },
+            agent_type="KubernetesAgent",
+            alert_type="NamespaceTerminating",
+            status="completed",
+            started_at_us=now_us(),
+            error_message="Connection failed to API Server"
+        )
+        repository.create_alert_session(session)
+        
+        # Test case insensitive search
+        result = repository.get_alert_sessions(search="kubernetes")  # lowercase
+        assert len(result["sessions"]) == 1
+        
+        result = repository.get_alert_sessions(search="KUBERNETES")  # uppercase
+        assert len(result["sessions"]) == 1
+        
+        result = repository.get_alert_sessions(search="KuBeRnEtEs")  # mixed case
+        assert len(result["sessions"]) == 1
+        
+        result = repository.get_alert_sessions(search="production")  # lowercase environment
+        assert len(result["sessions"]) == 1
+        
+        result = repository.get_alert_sessions(search="api server")  # lowercase error message
+        assert len(result["sessions"]) == 1
+    
+    @pytest.mark.unit
+    def test_get_alert_sessions_with_search_combined_with_filters(self, repository):
+        """Test search functionality combined with other filters."""
+        from tarsy.models.history import now_us
+        
+        session1 = AlertSession(
+            session_id="test-session-combined-1",
+            alert_id="alert-combined-1",
+            alert_data={"message": "Kubernetes namespace issue"},
+            agent_type="KubernetesAgent",
+            alert_type="NamespaceTerminating",
+            status="completed",
+            started_at_us=now_us()
+        )
+        repository.create_alert_session(session1)
+        
+        session2 = AlertSession(
+            session_id="test-session-combined-2", 
+            alert_id="alert-combined-2",
+            alert_data={"message": "Kubernetes pod issue"},
+            agent_type="KubernetesAgent",
+            alert_type="UnidledPods",
+            status="failed",
+            started_at_us=now_us()
+        )
+        repository.create_alert_session(session2)
+        
+        session3 = AlertSession(
+            session_id="test-session-combined-3",
+            alert_id="alert-combined-3", 
+            alert_data={"message": "Database connection issue"},
+            agent_type="DatabaseAgent",
+            alert_type="ConnectionTimeout",
+            status="completed",
+            started_at_us=now_us()
+        )
+        repository.create_alert_session(session3)
+        
+        # Test search + status filter
+        result = repository.get_alert_sessions(search="kubernetes", status="completed")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session1.session_id
+        
+        # Test search + agent_type filter
+        result = repository.get_alert_sessions(search="issue", agent_type="KubernetesAgent")
+        assert len(result["sessions"]) == 2
+        session_ids = [s.session_id for s in result["sessions"]]
+        assert session1.session_id in session_ids
+        assert session2.session_id in session_ids
+        
+        # Test search + alert_type filter
+        result = repository.get_alert_sessions(search="kubernetes", alert_type="UnidledPods")
+        assert len(result["sessions"]) == 1
+        assert result["sessions"][0].session_id == session2.session_id
+    
+    @pytest.mark.unit
+    def test_get_alert_sessions_with_search_no_matches(self, repository):
+        """Test search functionality when no matches are found."""
+        from tarsy.models.history import now_us
+        
+        session = AlertSession(
+            session_id="test-session-nomatch-1",
+            alert_id="alert-nomatch-1",
+            alert_data={"message": "Simple alert message"},
+            agent_type="SimpleAgent",
+            alert_type="SimpleAlert",
+            status="completed",
+            started_at_us=now_us()
+        )
+        repository.create_alert_session(session)
+        
+        # Test search that should return no results
+        result = repository.get_alert_sessions(search="nonexistent")
+        assert len(result["sessions"]) == 0
+        assert result["pagination"]["total_items"] == 0
+        
+        result = repository.get_alert_sessions(search="kubernetes")  # Not in any field
+        assert len(result["sessions"]) == 0
+        assert result["pagination"]["total_items"] == 0
+    
+    @pytest.mark.unit
     def test_get_session_timeline_chronological_order(self, repository, sample_alert_session):
         """Test session timeline reconstruction with chronological ordering."""
         # Create session

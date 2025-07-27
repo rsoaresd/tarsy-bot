@@ -379,6 +379,153 @@ class TestHistoryControllerEndpoints:
         assert isinstance(filters["end_date_us"], int)
     
     @pytest.mark.unit
+    def test_get_sessions_list_with_search_parameter(self, app, client, mock_history_service):
+        """Test sessions list with search parameter."""
+        mock_history_service.get_sessions_list.return_value = ([], 0)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params={"search": "namespace"}
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        
+        # Verify that search filter was passed to service
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert filters["search"] == "namespace"
+    
+    @pytest.mark.unit
+    def test_get_sessions_list_search_with_other_filters(self, app, client, mock_history_service):
+        """Test search parameter combined with other filters."""
+        mock_history_service.get_sessions_list.return_value = ([], 0)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params={
+                "search": "kubernetes",
+                "status": "completed",
+                "agent_type": "KubernetesAgent"
+            }
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        
+        # Verify all filters were passed to service
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert filters["search"] == "kubernetes"
+        assert filters["status"] == ["completed"]
+        assert filters["agent_type"] == "KubernetesAgent"
+    
+    @pytest.mark.unit
+    def test_get_sessions_list_search_too_short(self, app, client, mock_history_service):
+        """Test search parameter with less than 3 characters (should fail validation)."""
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params={"search": "ab"}  # Only 2 characters
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Should return 422 validation error
+        assert response.status_code == 422
+        error_details = response.json()["detail"]
+        assert isinstance(error_details, list)
+        assert any("string_too_short" in error.get("type", "") for error in error_details)
+        assert any("at least 3 characters" in error.get("msg", "") for error in error_details)
+    
+    @pytest.mark.unit
+    def test_get_sessions_list_search_empty_string(self, app, client, mock_history_service):
+        """Test search parameter with empty string (should fail validation)."""
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params={"search": ""}  # Empty string
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        # Should return 422 validation error
+        assert response.status_code == 422
+        error_details = response.json()["detail"]
+        assert isinstance(error_details, list)
+        assert any("string_too_short" in error.get("type", "") for error in error_details)
+    
+    @pytest.mark.unit
+    def test_get_sessions_list_search_minimum_length(self, app, client, mock_history_service):
+        """Test search parameter with exactly 3 characters (should pass validation)."""
+        mock_history_service.get_sessions_list.return_value = ([], 0)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params={"search": "pod"}  # Exactly 3 characters
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        
+        # Verify search filter was passed to service
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert filters["search"] == "pod"
+    
+    @pytest.mark.unit
+    def test_get_sessions_list_search_whitespace_handling(self, app, client, mock_history_service):
+        """Test search parameter with whitespace (should be trimmed)."""
+        mock_history_service.get_sessions_list.return_value = ([], 0)
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get(
+            "/api/v1/history/sessions",
+            params={"search": "  namespace  "}  # Whitespace around search term
+        )
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        
+        # Verify search filter was trimmed and passed to service
+        mock_history_service.get_sessions_list.assert_called_once()
+        call_args = mock_history_service.get_sessions_list.call_args
+        filters = call_args.kwargs["filters"]
+        
+        assert filters["search"] == "namespace"  # Should be trimmed
+    
+    @pytest.mark.unit
     def test_get_sessions_list_invalid_date_format(self, app, client, mock_history_service):
         """Test sessions list with invalid Unix timestamp format."""
         # Override FastAPI dependency

@@ -500,6 +500,7 @@ class HistoryService:
                     status=filters.get('status'),
                     agent_type=filters.get('agent_type'),
                     alert_type=filters.get('alert_type'),
+                    search=filters.get('search'),
                     start_date=filters.get('start_date'),
                     end_date=filters.get('end_date'),
                     page=page,

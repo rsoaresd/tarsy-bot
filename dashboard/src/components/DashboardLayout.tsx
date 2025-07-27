@@ -18,6 +18,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   onRefreshActive,
   onRefreshHistorical,
   onSessionClick,
+  // Phase 4: Filter props
+  filters,
+  filteredCount,
 }) => {
   return (
     <Box sx={{ width: '100%' }}>
@@ -37,6 +40,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         error={historicalError}
         onRefresh={onRefreshHistorical}
         onSessionClick={onSessionClick}
+        filters={filters}
+        filteredCount={filteredCount}
       />
     </Box>
   );

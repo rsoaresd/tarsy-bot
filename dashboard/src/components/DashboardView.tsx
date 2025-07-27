@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { Container, AppBar, Toolbar, Typography, Box, Tooltip, CircularProgress, IconButton } from '@mui/material';
 import { FiberManualRecord, Refresh } from '@mui/icons-material';
 import DashboardLayout from './DashboardLayout';
+import FilterBar from './FilterBar';
 import { apiClient, handleAPIError } from '../services/api';
 import { webSocketService } from '../services/websocket';
-import type { Session, SessionUpdate } from '../types';
+import type { Session, SessionUpdate, SessionFilter } from '../types';
 
 /**
- * DashboardView component for the Tarsy Dashboard - Phase 3
- * Contains the main dashboard logic moved from App.tsx with navigation support
+ * DashboardView component for the Tarsy Dashboard - Phase 4
+ * Contains the main dashboard logic with search and filtering capabilities
  */
 function DashboardView() {
   const navigate = useNavigate();
@@ -22,6 +23,13 @@ function DashboardView() {
   const [activeError, setActiveError] = useState<string | null>(null);
   const [historicalError, setHistoricalError] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
+
+  // Phase 4: Filter state
+  const [filters, setFilters] = useState<SessionFilter>({
+    search: '',
+    status: []
+  });
+  const [filteredCount, setFilteredCount] = useState<number>(0);
 
   // Throttling state for API calls
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -52,13 +60,37 @@ function DashboardView() {
     }
   };
 
-  // Fetch historical sessions
-  const fetchHistoricalAlerts = async () => {
+  // Fetch historical sessions with optional filtering (Phase 4)
+  const fetchHistoricalAlerts = async (applyFilters: boolean = false) => {
     try {
       setHistoricalLoading(true);
       setHistoricalError(null);
-      const response = await apiClient.getHistoricalSessions();
+      
+      let response;
+      if (applyFilters && (filters.search || (filters.status && filters.status.length > 0))) {
+        // Use filtered API if filters are active
+        console.log('🔍 Fetching filtered historical sessions:', filters);
+        const historicalFilters: SessionFilter = {
+          ...filters,
+          // For historical view, include completed and failed by default unless specific status filter is applied
+          status: filters.status && filters.status.length > 0 
+            ? filters.status 
+            : ['completed', 'failed'] as ('completed' | 'failed' | 'in_progress' | 'pending')[]
+        };
+        response = await apiClient.getFilteredSessions(historicalFilters);
+      } else {
+        // Use the original historical API (completed + failed sessions only)
+        response = await apiClient.getHistoricalSessions();
+      }
+      
       setHistoricalAlerts(response.sessions);
+      setFilteredCount(response.sessions.length);
+      
+      console.log('📊 Historical alerts updated:', {
+        totalSessions: response.sessions.length,
+        filtersApplied: applyFilters,
+        activeFilters: filters
+      });
     } catch (err) {
       const errorMessage = handleAPIError(err);
       setHistoricalError(errorMessage);
@@ -77,16 +109,49 @@ function DashboardView() {
     refreshTimeoutRef.current = setTimeout(() => {
       console.log('🔄 Executing throttled dashboard refresh');
       fetchActiveAlerts();
-      fetchHistoricalAlerts();
+      fetchHistoricalAlerts(true); // Use filtering on refresh
       refreshTimeoutRef.current = null;
     }, REFRESH_THROTTLE_MS);
-  }, []);
+  }, [filters]); // Add filters as dependency
+
+  // Phase 4: Filter handlers
+  const handleFiltersChange = (newFilters: SessionFilter) => {
+    console.log('🔄 Filters changed:', newFilters);
+    setFilters(newFilters);
+  };
+
+  const handleClearFilters = () => {
+    console.log('🧹 Clearing all filters');
+    const clearedFilters: SessionFilter = {
+      search: '',
+      status: []
+    };
+    setFilters(clearedFilters);
+  };
 
   // Initial load
   useEffect(() => {
     fetchActiveAlerts();
     fetchHistoricalAlerts();
   }, []);
+
+  // Phase 4: Re-fetch when filters change (with debouncing)
+  useEffect(() => {
+    // Debounce filter changes to prevent excessive API calls
+    const filterTimeout = setTimeout(() => {
+      // Skip the initial load (empty filters)
+      if (filters.search || (filters.status && filters.status.length > 0)) {
+        console.log('🔍 Filters changed - refetching historical alerts:', filters);
+        fetchHistoricalAlerts(true);
+      } else if (filters.search === '' && (!filters.status || filters.status.length === 0)) {
+        // When filters are cleared, fetch without filtering
+        console.log('🧹 Filters cleared - fetching unfiltered historical alerts');
+        fetchHistoricalAlerts(false);
+      }
+    }, 300); // 300ms debounce for filter API calls
+
+    return () => clearTimeout(filterTimeout);
+  }, [filters]);
 
   // Set up WebSocket event handlers for real-time updates
   useEffect(() => {
@@ -314,6 +379,14 @@ function DashboardView() {
         </Toolbar>
       </AppBar>
 
+      {/* Phase 4: Search and Filter Bar */}
+      <FilterBar
+        filters={filters}
+        onFiltersChange={handleFiltersChange}
+        onClearFilters={handleClearFilters}
+        loading={historicalLoading}
+      />
+
       {/* Main content area with two-section layout */}
       <Box sx={{ mt: 2 }}>
         <DashboardLayout
@@ -326,6 +399,8 @@ function DashboardView() {
           onRefreshActive={handleRefreshActive}
           onRefreshHistorical={handleRefreshHistorical}
           onSessionClick={handleSessionClick}
+          filters={filters}
+          filteredCount={filteredCount}
         />
       </Box>
     </Container>

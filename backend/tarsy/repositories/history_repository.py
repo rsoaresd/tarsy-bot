@@ -99,6 +99,7 @@ class HistoryRepository:
         status: Optional[Union[str, List[str]]] = None,
         agent_type: Optional[str] = None,
         alert_type: Optional[str] = None,
+        search: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         page: int = 1,
@@ -108,12 +109,14 @@ class HistoryRepository:
         Retrieve alert sessions with filtering and pagination.
         
         Supports complex filter combinations using AND logic as specified
-        in the design document.
+        in the design document. Search functionality uses OR logic across
+        multiple text fields.
         
         Args:
             status: Filter by processing status (single value or list of values)
             agent_type: Filter by agent type
             alert_type: Filter by alert type
+            search: Text search across error messages, analysis, and alert content
             start_date: Filter sessions after this date
             end_date: Filter sessions before this date
             page: Page number for pagination
@@ -137,6 +140,82 @@ class HistoryRepository:
                 conditions.append(AlertSession.agent_type == agent_type)
             if alert_type:
                 conditions.append(AlertSession.alert_type == alert_type)
+            
+            # Search functionality using OR logic across multiple text fields
+            if search:
+                search_term = f"%{search.lower()}%"
+                search_conditions = []
+                
+                # Search in error_message field
+                search_conditions.append(
+                    func.lower(AlertSession.error_message).like(search_term)
+                )
+                
+                # Search in final_analysis field
+                search_conditions.append(
+                    func.lower(AlertSession.final_analysis).like(search_term)
+                )
+                
+                # Search in alert_type field (NamespaceTerminating, UnidledPods, etc.)
+                search_conditions.append(
+                    func.lower(AlertSession.alert_type).like(search_term)
+                )
+                
+                # Search in agent_type field (kubernetes, base, etc.)
+                search_conditions.append(
+                    func.lower(AlertSession.agent_type).like(search_term)
+                )
+                
+                # Search in JSON alert_data fields (SQLite JSON support)
+                # Search alert message
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.alert_data, '$.message')).like(search_term)
+                )
+                
+                # Search alert context 
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.alert_data, '$.context')).like(search_term)
+                )
+                
+                # Search namespace, pod, cluster for Kubernetes alerts
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.alert_data, '$.namespace')).like(search_term)
+                )
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.alert_data, '$.pod')).like(search_term)
+                )
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.alert_data, '$.cluster')).like(search_term)
+                )
+                
+                # Search severity (high, critical, medium, low)
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.alert_data, '$.severity')).like(search_term)
+                )
+                
+                # Search environment (production, staging, development)
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.alert_data, '$.environment')).like(search_term)
+                )
+                
+                # Search runbook URL (might contain useful keywords)
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.alert_data, '$.runbook')).like(search_term)
+                )
+                
+                # Search external alert ID
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.alert_data, '$.id')).like(search_term)
+                )
+                
+                # Search session metadata (additional context)
+                search_conditions.append(
+                    func.lower(func.json_extract(AlertSession.session_metadata, '$')).like(search_term)
+                )
+                
+                # Combine all search conditions with OR logic
+                conditions.append(or_(*search_conditions))
+            
             if start_date:
                 conditions.append(AlertSession.started_at_us >= start_date.timestamp() * 1_000_000)
             if end_date:
