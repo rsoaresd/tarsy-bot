@@ -93,10 +93,13 @@ export interface SessionsResponse {
 
 // WebSocket message types (Phase 2)
 export interface WebSocketMessage {
-  type: 'session_update' | 'session_completed' | 'session_failed' | 'ping' | 'pong' | 'connection_established' | 'subscription_response' | 'dashboard_update';
+  type: 'session_update' | 'session_completed' | 'session_failed' | 'ping' | 'pong' | 'connection_established' | 'subscription_response' | 'dashboard_update' | 'message_batch' | 'session_status_change' | 'batched_session_updates';
   data?: SessionUpdate | any; // Allow any data type for dashboard_update messages
   timestamp_us?: number; // Unix timestamp (microseconds since epoch)
   channel?: string; // Dashboard updates include channel info
+  messages?: WebSocketMessage[]; // For message_batch type
+  count?: number; // For message_batch type
+  timestamp?: string; // Alternative timestamp format for batches
 }
 
 export interface SessionUpdate {
@@ -106,6 +109,7 @@ export interface SessionUpdate {
   duration_ms?: number;
   error_message?: string | null;
   completed_at_us?: number | null; // Unix timestamp (microseconds since epoch)
+  data?: any; // Additional update data containing interaction_type, etc.
 }
 
 // API response wrapper format (for other endpoints)

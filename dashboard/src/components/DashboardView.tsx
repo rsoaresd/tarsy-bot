@@ -116,7 +116,7 @@ function DashboardView() {
     const handleDashboardUpdate = (update: any) => {
       console.log('📊 Real-time dashboard update received:', update);
       
-      // Only refresh data if there are actual changes to sessions
+      // Handle different types of updates
       if (update.type === 'system_metrics' && update.active_sessions_list) {
         const newActiveCount = update.active_sessions_list.length;
         const currentActiveCount = activeAlerts.length;
@@ -129,9 +129,17 @@ function DashboardView() {
         } else {
           console.log('📊 System metrics update - no session changes, skipping refresh');
         }
+      } else if (update.type === 'session_status_change') {
+        // Session status changes affect the main dashboard
+        console.log('🔄 Session status change - refreshing dashboard data');
+        fetchActiveAlerts();
+        fetchHistoricalAlerts();
+      } else if (update.type === 'llm_interaction' || update.type === 'mcp_communication') {
+        // Session-specific updates don't require dashboard refresh - these are for detail views
+        console.log('📊 Session-specific update - no dashboard refresh needed');
       } else {
-        // For non-system-metrics updates, always refresh
-        console.log('🔄 Non-metrics update - refreshing dashboard data');
+        // For other unknown updates, refresh to be safe
+        console.log('🔄 Unknown update type - refreshing dashboard data');
         fetchActiveAlerts();
         fetchHistoricalAlerts();
       }

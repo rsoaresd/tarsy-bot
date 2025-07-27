@@ -373,7 +373,28 @@ class DashboardUpdateService:
     async def _broadcast_update(self, update: Dict[str, Any]) -> int:
         """Broadcast single update via broadcaster."""
         try:
-            return await self.broadcaster.broadcast_dashboard_update(update)
+            # Add debug logging to understand message routing
+            logger.info(f"_broadcast_update called with update: {update}")
+            
+            # If this update is session-specific (contains session_id), send to both channels
+            if 'session_id' in update:
+                session_id = update['session_id']
+                logger.info(f"Broadcasting session-specific update for session {session_id}: {update['type']}")
+                
+                # Send to session-specific channel for detail views
+                session_count = await self.broadcaster.broadcast_session_update(session_id, update)
+                
+                # For session status changes and batched updates, also send to dashboard channel
+                if update['type'] in ['session_status_change', 'batched_session_updates']:
+                    logger.info(f"Also broadcasting session update to dashboard channel: {update['type']}")
+                    dashboard_count = await self.broadcaster.broadcast_dashboard_update(update)
+                    return session_count + dashboard_count
+                else:
+                    return session_count
+            else:
+                # Send general updates to dashboard channel
+                logger.info(f"Broadcasting general dashboard update: {update['type']}")
+                return await self.broadcaster.broadcast_dashboard_update(update)
         except Exception as e:
             logger.error(f"Failed to broadcast dashboard update: {str(e)}")
             return 0

@@ -248,6 +248,7 @@ class TestLLMInteractionProcessing:
         """Mock broadcaster."""
         broadcaster = AsyncMock()
         broadcaster.broadcast_dashboard_update = AsyncMock(return_value=3)
+        broadcaster.broadcast_session_update = AsyncMock(return_value=2)
         return broadcaster
     
     @pytest.fixture
@@ -335,8 +336,9 @@ class TestLLMInteractionProcessing:
             session_id, interaction_data, broadcast_immediately=True
         )
         
-        assert sent_count == 3  # Broadcaster returned 3
-        mock_broadcaster.broadcast_dashboard_update.assert_called_once()
+        assert sent_count == 2  # Broadcaster returned 2 from session-specific broadcast
+        mock_broadcaster.broadcast_session_update.assert_called_once()
+        mock_broadcaster.broadcast_dashboard_update.assert_not_called()
         
         # Verify update was NOT added to batch
         assert session_id not in update_service.pending_session_updates
@@ -441,7 +443,8 @@ class TestSessionStatusManagement:
     def mock_broadcaster(self):
         """Mock broadcaster."""
         broadcaster = AsyncMock()
-        broadcaster.broadcast_dashboard_update = AsyncMock(return_value=5)
+        broadcaster.broadcast_dashboard_update = AsyncMock(return_value=3)
+        broadcaster.broadcast_session_update = AsyncMock(return_value=2)
         return broadcaster
     
     @pytest.fixture
@@ -463,8 +466,9 @@ class TestSessionStatusManagement:
         
         sent_count = await update_service.process_session_status_change(session_id, status, details)
         
-        assert sent_count == 5  # Broadcaster returned 5
+        assert sent_count == 5  # Broadcaster returned 3 + 2 = 5 (dual-channel broadcasting)
         mock_broadcaster.broadcast_dashboard_update.assert_called_once()
+        mock_broadcaster.broadcast_session_update.assert_called_once()
         
         # Verify session was created
         assert session_id in update_service.active_sessions
@@ -740,7 +744,7 @@ class TestErrorHandling:
     async def test_broadcaster_failure_handling(self, update_service, mock_broadcaster):
         """Test handling broadcaster failures gracefully."""
         # Configure broadcaster to fail
-        mock_broadcaster.broadcast_dashboard_update.side_effect = Exception("Broadcast failed")
+        mock_broadcaster.broadcast_session_update.side_effect = Exception("Broadcast failed")
         
         session_id = "broadcast_fail_session"
         interaction_data = {
@@ -778,6 +782,129 @@ class TestErrorHandling:
         
         sent_count = await update_service.process_mcp_communication("invalid_session", invalid_data)
         assert sent_count == 0
+
+
+class TestDualChannelBroadcasting:
+    """Test dual-channel broadcasting for session-specific updates."""
+    
+    @pytest.fixture
+    def mock_broadcaster(self):
+        """Mock broadcaster configured for dual-channel testing."""
+        broadcaster = AsyncMock()
+        broadcaster.broadcast_dashboard_update = AsyncMock(return_value=3)
+        broadcaster.broadcast_session_update = AsyncMock(return_value=2)
+        return broadcaster
+    
+    @pytest.fixture  
+    def update_service(self, mock_broadcaster):
+        """Create service instance."""
+        return DashboardUpdateService(mock_broadcaster)
+    
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_session_status_change_dual_channel_broadcast(self, update_service, mock_broadcaster):
+        """Test that session status changes are broadcast to both channels."""
+        session_id = "dual_broadcast_session"
+        status = "completed"
+        details = {"final_analysis": "Test analysis completed"}
+        
+        sent_count = await update_service.process_session_status_change(session_id, status, details)
+        
+        # Should return sum of both broadcasts (3 + 2 = 5)
+        assert sent_count == 5
+        
+        # Both broadcast methods should be called
+        mock_broadcaster.broadcast_session_update.assert_called_once()
+        mock_broadcaster.broadcast_dashboard_update.assert_called_once()
+        
+        # Verify the update data structure for session-specific broadcast
+        session_call_args = mock_broadcaster.broadcast_session_update.call_args
+        assert session_call_args[0][0] == session_id  # First arg is session_id
+        session_update_data = session_call_args[0][1]  # Second arg is update data
+        assert session_update_data['type'] == 'session_status_change'
+        assert session_update_data['session_id'] == session_id
+        assert session_update_data['status'] == status
+        
+        # Verify the update data structure for dashboard broadcast  
+        dashboard_call_args = mock_broadcaster.broadcast_dashboard_update.call_args
+        dashboard_update_data = dashboard_call_args[0][0]  # First arg is update data
+        assert dashboard_update_data['type'] == 'session_status_change'
+        assert dashboard_update_data['session_id'] == session_id
+        assert dashboard_update_data['status'] == status
+    
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_broadcast_update_method_dual_channel_logic(self, update_service, mock_broadcaster):
+        """Test that the _broadcast_update method correctly routes session status changes to both channels."""
+        session_id = "broadcast_method_test_session"
+        
+        # Create a session status change update (should go to both channels)
+        status_update = {
+            "type": "session_status_change",
+            "session_id": session_id,
+            "status": "completed",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        sent_count = await update_service._broadcast_update(status_update)
+        
+        # Should return sum of both broadcasts (3 + 2 = 5)
+        assert sent_count == 5
+        
+        # Both broadcast methods should be called
+        mock_broadcaster.broadcast_session_update.assert_called_once()
+        mock_broadcaster.broadcast_dashboard_update.assert_called_once()
+        
+        # Create a batched session updates (should also go to both channels)
+        mock_broadcaster.reset_mock()
+        batched_update = {
+            "type": "batched_session_updates",
+            "session_id": session_id,
+            "updates": [{"type": "llm_interaction", "session_id": session_id}],
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        sent_count = await update_service._broadcast_update(batched_update)
+        
+        # Should return sum of both broadcasts (3 + 2 = 5)
+        assert sent_count == 5
+        
+        # Both broadcast methods should be called for batched updates too
+        mock_broadcaster.broadcast_session_update.assert_called_once()
+        mock_broadcaster.broadcast_dashboard_update.assert_called_once()
+    
+    @pytest.mark.asyncio
+    @pytest.mark.unit 
+    async def test_llm_interaction_single_channel_broadcast(self, update_service, mock_broadcaster):
+        """Test that LLM interactions only go to session-specific channel (not dual-channel)."""
+        session_id = "single_channel_session"
+        llm_data = {
+            'interaction_type': 'llm',
+            'session_id': session_id,
+            'step_description': 'Test LLM interaction',
+            'model_used': 'gpt-4',
+            'success': True,
+            'duration_ms': 1000,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        sent_count = await update_service.process_llm_interaction(
+            session_id, llm_data, broadcast_immediately=True
+        )
+        
+        # Should only return session broadcast count (2)
+        assert sent_count == 2
+        
+        # Only session-specific broadcast should be called
+        mock_broadcaster.broadcast_session_update.assert_called_once()
+        mock_broadcaster.broadcast_dashboard_update.assert_not_called()
+        
+        # Verify the update data structure  
+        call_args = mock_broadcaster.broadcast_session_update.call_args
+        assert call_args[0][0] == session_id  # First arg is session_id
+        update_data = call_args[0][1]  # Second arg is update data
+        assert update_data['type'] == 'llm_interaction'
+        assert update_data['session_id'] == session_id
 
 
 if __name__ == "__main__":

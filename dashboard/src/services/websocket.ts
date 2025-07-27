@@ -3,6 +3,7 @@ import type { WebSocketMessage, SessionUpdate } from '../types';
 type WebSocketEventHandler = (data: SessionUpdate) => void;
 type WebSocketErrorHandler = (error: Event) => void;
 type WebSocketCloseHandler = (event: CloseEvent) => void;
+type SessionSpecificHandler = (data: any) => void; // For session-specific timeline updates
 
 class WebSocketService {
   private ws: WebSocket | null = null;
@@ -15,6 +16,7 @@ class WebSocketService {
   private permanentlyDisabled = false;
   private lastConnectionAttempt = 0;
   private userId: string;
+  private subscribedChannels = new Set<string>(); // Track subscribed channels
   private eventHandlers: {
     sessionUpdate: WebSocketEventHandler[];
     sessionCompleted: WebSocketEventHandler[];
@@ -23,6 +25,7 @@ class WebSocketService {
     connectionChange: Array<(connected: boolean) => void>; // Add connection change handler
     error: WebSocketErrorHandler[];
     close: WebSocketCloseHandler[];
+    sessionSpecific: Map<string, SessionSpecificHandler[]>; // New: session-specific handlers
   } = {
     sessionUpdate: [],
     sessionCompleted: [],
@@ -31,6 +34,7 @@ class WebSocketService {
     connectionChange: [], // Initialize connection change handlers
     error: [],
     close: [],
+    sessionSpecific: new Map(), // Initialize session-specific handlers
   };
 
   constructor() {
@@ -249,27 +253,109 @@ class WebSocketService {
   private handleMessage(message: WebSocketMessage): void {
     console.log('🔄 Processing WebSocket message:', message);
     
-    if (!message.data) {
-      console.log('⚠️  Message has no data property, skipping handlers');
+    // Handle message batches first
+    if (message.type === 'message_batch' && message.messages) {
+      console.log(`📦 Processing message batch with ${message.count} messages`);
+      const batchedMessages = message.messages;
+      batchedMessages.forEach(batchedMessage => {
+        console.log('📥 Processing batched message:', batchedMessage);
+        this.handleMessage(batchedMessage);
+      });
       return;
     }
 
     switch (message.type) {
       case 'session_update':
+        if (!message.data) {
+          console.log('⚠️  session_update message has no data property, skipping');
+          return;
+        }
         console.log('📈 Handling session_update, calling', this.eventHandlers.sessionUpdate.length, 'handlers');
         this.eventHandlers.sessionUpdate.forEach(handler => handler(message.data!));
+        
+        // Also handle session-specific updates if this message has a channel
+        if (message.channel && message.channel.startsWith('session_')) {
+          console.log(`📈 Handling session-specific update for channel: ${message.channel}`);
+          const handlers = this.eventHandlers.sessionSpecific.get(message.channel);
+          if (handlers) {
+            handlers.forEach(handler => handler(message.data!));
+          }
+        }
+        break;
+      case 'session_status_change':
+        console.log('🔄 Handling session_status_change from session channel');
+        // Handle session status changes from session-specific channels
+        if (message.channel && message.channel.startsWith('session_')) {
+          console.log(`🔄 Session status change for channel: ${message.channel}`);
+          const handlers = this.eventHandlers.sessionSpecific.get(message.channel);
+          if (handlers) {
+            handlers.forEach(handler => handler(message.data || message));
+          }
+        }
+        break;
+      case 'batched_session_updates':
+        console.log('📦 Handling batched_session_updates from session channel');
+        // Handle batched timeline updates from session-specific channels
+        if (message.channel && message.channel.startsWith('session_')) {
+          console.log(`📦 Batched updates for channel: ${message.channel}`);
+          const handlers = this.eventHandlers.sessionSpecific.get(message.channel);
+          if (handlers) {
+            handlers.forEach(handler => handler(message.data || message));
+          }
+        }
         break;
       case 'session_completed':
+        if (!message.data) {
+          console.log('⚠️  session_completed message has no data property, skipping');
+          return;
+        }
         console.log('✅ Handling session_completed, calling', this.eventHandlers.sessionCompleted.length, 'handlers');
         this.eventHandlers.sessionCompleted.forEach(handler => handler(message.data!));
         break;
       case 'session_failed':
+        if (!message.data) {
+          console.log('⚠️  session_failed message has no data property, skipping');
+          return;
+        }
         console.log('❌ Handling session_failed, calling', this.eventHandlers.sessionFailed.length, 'handlers');
         this.eventHandlers.sessionFailed.forEach(handler => handler(message.data!));
         break;
       case 'dashboard_update':
-        console.log('📊 Handling dashboard_update, calling', this.eventHandlers.dashboardUpdate.length, 'handlers');
-        this.eventHandlers.dashboardUpdate.forEach(handler => handler(message.data!));
+        if (!message.data) {
+          console.log('⚠️  dashboard_update message has no data property, skipping');
+          return;
+        }
+        
+        // Check if this is a session-specific update (has channel property or session data)
+        if (message.channel && message.channel.startsWith('session_')) {
+          console.log(`📈 Handling session-specific dashboard_update for channel: ${message.channel}`);
+          const handlers = this.eventHandlers.sessionSpecific.get(message.channel);
+          if (handlers && handlers.length > 0) {
+            console.log(`📈 Calling ${handlers.length} session-specific handlers for ${message.channel}`);
+            handlers.forEach(handler => handler(message.data!));
+          } else {
+            console.log(`⚠️  No handlers registered for session-specific channel: ${message.channel}`);
+          }
+        } else if (message.data?.session_id) {
+          // Check if the data contains session_id and route to session-specific handlers
+          const sessionChannel = `session_${message.data.session_id}`;
+          console.log(`📈 Handling dashboard_update with session data for channel: ${sessionChannel}`);
+          const handlers = this.eventHandlers.sessionSpecific.get(sessionChannel);
+          if (handlers && handlers.length > 0) {
+            console.log(`📈 Calling ${handlers.length} session-specific handlers for ${sessionChannel}`);
+            handlers.forEach(handler => handler(message.data!));
+          } else {
+            console.log(`⚠️  No handlers registered for session channel: ${sessionChannel}`);
+          }
+          
+          // Also call regular dashboard handlers
+          console.log('📊 Also handling as regular dashboard_update, calling', this.eventHandlers.dashboardUpdate.length, 'handlers');
+          this.eventHandlers.dashboardUpdate.forEach(handler => handler(message.data!));
+        } else {
+          // Regular dashboard update
+          console.log('📊 Handling dashboard_update, calling', this.eventHandlers.dashboardUpdate.length, 'handlers');
+          this.eventHandlers.dashboardUpdate.forEach(handler => handler(message.data!));
+        }
         break;
       case 'ping':
         console.log('🏓 Received ping, responding with pong');
@@ -280,10 +366,19 @@ class WebSocketService {
         console.log('🔗 Connection established message received');
         break;
       case 'subscription_response':
-        console.log('📋 Subscription response received:', message.data);
+        console.log('📋 Subscription response received:', message.data || 'no data');
         break;
       default:
-        console.log('❓ Unknown message type:', message.type);
+        // Handle session-specific messages that might not match standard types
+        if (message.channel && message.channel.startsWith('session_') && message.data) {
+          console.log(`📈 Handling session-specific message for channel: ${message.channel}`);
+          const handlers = this.eventHandlers.sessionSpecific.get(message.channel);
+          if (handlers) {
+            handlers.forEach(handler => handler(message.data!));
+          }
+        } else {
+          console.log('❓ Unknown message type:', message.type, 'Data present:', !!message.data);
+        }
     }
   }
 
@@ -356,6 +451,68 @@ class WebSocketService {
         this.eventHandlers.dashboardUpdate.splice(index, 1);
       }
     };
+  }
+
+  /**
+   * Add event listener for session-specific updates
+   */
+  onSessionSpecificUpdate(channel: string, handler: SessionSpecificHandler): () => void {
+    if (!this.eventHandlers.sessionSpecific.has(channel)) {
+      this.eventHandlers.sessionSpecific.set(channel, []);
+    }
+    this.eventHandlers.sessionSpecific.get(channel)!.push(handler);
+    return () => {
+      const handlers = this.eventHandlers.sessionSpecific.get(channel);
+      if (handlers) {
+        const index = handlers.indexOf(handler);
+        if (index > -1) {
+          handlers.splice(index, 1);
+        }
+      }
+    };
+  }
+
+  /**
+   * Subscribe to a session-specific channel
+   */
+  subscribeToSessionChannel(sessionId: string): void {
+    const channel = `session_${sessionId}`;
+    if (this.subscribedChannels.has(channel)) {
+      console.log(`Already subscribed to ${channel}`);
+      return;
+    }
+
+    const subscribeMessage = {
+      type: 'subscribe',
+      channel: channel
+    };
+    
+    console.log(`📤 Subscribing to session channel: ${channel}`);
+    this.send(subscribeMessage);
+    this.subscribedChannels.add(channel);
+  }
+
+  /**
+   * Unsubscribe from a session-specific channel
+   */
+  unsubscribeFromSessionChannel(sessionId: string): void {
+    const channel = `session_${sessionId}`;
+    if (!this.subscribedChannels.has(channel)) {
+      console.log(`Not subscribed to ${channel}`);
+      return;
+    }
+
+    const unsubscribeMessage = {
+      type: 'unsubscribe',
+      channel: channel
+    };
+    
+    console.log(`📤 Unsubscribing from session channel: ${channel}`);
+    this.send(unsubscribeMessage);
+    this.subscribedChannels.delete(channel);
+
+    // Clean up event handlers for this channel
+    this.eventHandlers.sessionSpecific.delete(channel);
   }
 
   /**
