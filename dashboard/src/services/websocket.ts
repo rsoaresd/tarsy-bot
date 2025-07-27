@@ -8,10 +8,12 @@ class WebSocketService {
   private ws: WebSocket | null = null;
   private url: string;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 3;
+  private maxReconnectAttempts = 10; // Increased from 3 to 10
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
   private isConnecting = false;
   private permanentlyDisabled = false;
+  private lastConnectionAttempt = 0;
   private userId: string;
   private eventHandlers: {
     sessionUpdate: WebSocketEventHandler[];
@@ -48,6 +50,43 @@ class WebSocketService {
       const wsBaseUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000';
       this.url = `${wsBaseUrl}/ws/dashboard/${this.userId}`;
     }
+
+    // Start periodic health check to recover from permanently disabled state
+    this.startHealthCheck();
+  }
+
+  /**
+   * Start periodic health check to detect when backend becomes available again
+   */
+  private startHealthCheck(): void {
+    // Check every 30 seconds if we should attempt to reconnect
+    this.healthCheckInterval = setInterval(() => {
+      const now = Date.now();
+      const timeSinceLastAttempt = now - this.lastConnectionAttempt;
+      
+      // If permanently disabled and it's been more than 2 minutes since last attempt
+      if (this.permanentlyDisabled && timeSinceLastAttempt > 120000) {
+        console.log('🔄 Health check: Attempting to recover from permanently disabled state');
+        this.resetConnectionState();
+        this.connect();
+      }
+      
+      // If not connected and not connecting, try to reconnect
+      if (!this.isConnected && !this.isConnecting && !this.permanentlyDisabled) {
+        console.log('🔄 Health check: Connection lost, attempting to reconnect');
+        this.connect();
+      }
+    }, 30000);
+  }
+
+  /**
+   * Reset connection state to allow reconnection attempts
+   */
+  private resetConnectionState(): void {
+    this.permanentlyDisabled = false;
+    this.reconnectAttempts = 0;
+    this.isConnecting = false;
+    console.log('🔄 Connection state reset - ready for new connection attempts');
   }
 
   /**
@@ -64,6 +103,7 @@ class WebSocketService {
     }
 
     this.isConnecting = true;
+    this.lastConnectionAttempt = Date.now();
     console.log('🔌 Connecting to WebSocket:', this.url);
 
     try {
@@ -73,6 +113,7 @@ class WebSocketService {
         console.log('🎉 WebSocket connected successfully!');
         this.isConnecting = false;
         this.reconnectAttempts = 0;
+        this.permanentlyDisabled = false; // Reset permanently disabled state on successful connection
 
         // Notify connection change handlers
         this.eventHandlers.connectionChange.forEach(handler => handler(true));
@@ -117,7 +158,7 @@ class WebSocketService {
           if (this.reconnectAttempts === 0) {
             this.checkEndpointExists().then(exists => {
               if (!exists) {
-                console.log('WebSocket endpoint not available, disabling WebSocket features');
+                console.log('WebSocket endpoint not available, will retry later via health check');
                 this.permanentlyDisabled = true;
                 return;
               }
@@ -125,13 +166,16 @@ class WebSocketService {
               // Endpoint exists but connection failed, try to reconnect
               if (this.reconnectAttempts < this.maxReconnectAttempts) {
                 this.scheduleReconnect();
+              } else {
+                console.log('Max WebSocket reconnection attempts reached, will retry later via health check');
+                this.permanentlyDisabled = true;
               }
             });
           } else if (this.reconnectAttempts < this.maxReconnectAttempts) {
             // Subsequent failures - just retry
             this.scheduleReconnect();
           } else {
-            console.log('Max WebSocket reconnection attempts reached, disabling');
+            console.log('Max WebSocket reconnection attempts reached, will retry later via health check');
             this.permanentlyDisabled = true;
           }
         }
@@ -175,6 +219,11 @@ class WebSocketService {
       this.reconnectTimeout = null;
     }
 
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+
     if (this.ws) {
       this.ws.close(1000, 'Manual disconnect');
       this.ws = null;
@@ -182,6 +231,7 @@ class WebSocketService {
 
     this.isConnecting = false;
     this.reconnectAttempts = 0;
+    this.lastConnectionAttempt = 0; // Reset last connection attempt on manual disconnect
   }
 
   /**
@@ -245,7 +295,8 @@ class WebSocketService {
       return;
     }
 
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000); // Exponential backoff, max 10s
+    // Longer delays for backend restart scenarios: exponential backoff up to 30s
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
     
     console.log(`WebSocket reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
     
@@ -372,6 +423,34 @@ class WebSocketService {
    */
   get currentUserId(): string {
     return this.userId;
+  }
+
+  /**
+   * Manually retry connection - useful for UI controls
+   */
+  retry(): void {
+    console.log('🔄 Manual retry requested');
+    this.resetConnectionState();
+    this.connect();
+  }
+
+  /**
+   * Cleanup all timers and connections - useful for component unmounting
+   */
+  cleanup(): void {
+    console.log('🧹 Cleaning up WebSocket service');
+    
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+
+    this.disconnect();
   }
 }
 

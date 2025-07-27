@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Container, AppBar, Toolbar, Typography, Box, Tooltip, CircularProgress } from '@mui/material';
-import { FiberManualRecord } from '@mui/icons-material';
+import { Container, AppBar, Toolbar, Typography, Box, Tooltip, CircularProgress, IconButton } from '@mui/material';
+import { FiberManualRecord, Refresh } from '@mui/icons-material';
 import DashboardLayout from './DashboardLayout';
 import { apiClient, handleAPIError } from '../services/api';
 import { webSocketService } from '../services/websocket';
@@ -192,6 +192,12 @@ function DashboardView() {
     fetchHistoricalAlerts();
   };
 
+  // Handle WebSocket retry
+  const handleWebSocketRetry = () => {
+    console.log('🔄 Manual WebSocket retry requested');
+    webSocketService.retry();
+  };
+
   return (
     <Container maxWidth={false} sx={{ px: 2 }}>
       {/* AppBar with dashboard title and live indicator */}
@@ -205,7 +211,7 @@ function DashboardView() {
             <Tooltip 
               title={wsConnected 
                 ? "Connected - Real-time updates active" 
-                : "Disconnected - Use manual refresh buttons"
+                : "Disconnected - Use manual refresh buttons or retry connection"
               }
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -226,6 +232,24 @@ function DashboardView() {
                 </Typography>
               </Box>
             </Tooltip>
+
+            {/* WebSocket Retry Button - only show when disconnected */}
+            {!wsConnected && (
+              <Tooltip title="Retry WebSocket connection">
+                <IconButton
+                  size="small"
+                  onClick={handleWebSocketRetry}
+                  sx={{ 
+                    color: 'inherit',
+                    '&:hover': {
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                    }
+                  }}
+                >
+                  <Refresh fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
 
             {/* Loading indicator for active refreshes */}
             {(activeLoading || historicalLoading) && (
