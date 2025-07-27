@@ -57,6 +57,11 @@ class TestLLMHooksExecution:
     @pytest.mark.unit
     async def test_execute_successful_interaction(self, llm_hooks, mock_history_service):
         """Test successful LLM interaction execution and logging."""
+        # Use Unix timestamps in microseconds
+        from tarsy.models.history import now_us
+        start_time_us = now_us()
+        end_time_us = start_time_us + 1500000  # 1500ms later in microseconds
+        
         event_data = {
             'session_id': 'test_session_123',
             'args': {
@@ -67,8 +72,8 @@ class TestLLMHooksExecution:
                 'content': 'Test response from LLM',
                 'usage': {'prompt_tokens': 10, 'completion_tokens': 20}
             },
-            'start_time': datetime.now(),
-            'end_time': datetime.now() + timedelta(milliseconds=1500)
+            'start_time_us': start_time_us,
+            'end_time_us': end_time_us
         }
         
         with patch('tarsy.hooks.base_hooks.generate_step_description', return_value="LLM analysis using gpt-4"):
@@ -202,6 +207,11 @@ class TestMCPHooksExecution:
     @pytest.mark.unit
     async def test_execute_successful_tool_call(self, mcp_hooks, mock_history_service):
         """Test successful MCP tool call execution and logging."""
+        # Use Unix timestamps in microseconds
+        from tarsy.models.history import now_us
+        start_time_us = now_us()
+        end_time_us = start_time_us + 2500000  # 2500ms later in microseconds
+        
         event_data = {
             'session_id': 'mcp_session_123',
             'method': 'call_tool',
@@ -211,8 +221,8 @@ class TestMCPHooksExecution:
                 'tool_arguments': {'namespace': 'default'}
             },
             'result': {'output': 'pod1 Running\npod2 Pending'},
-            'start_time': datetime.now(),
-            'end_time': datetime.now() + timedelta(milliseconds=2500)
+            'start_time_us': start_time_us,
+            'end_time_us': end_time_us
         }
         
         await mcp_hooks.execute('mcp.post', **event_data)

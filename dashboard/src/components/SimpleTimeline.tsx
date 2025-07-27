@@ -1,6 +1,7 @@
-import { Paper, Typography, List, ListItem, ListItemIcon, ListItemText, Box } from '@mui/material';
-import { Psychology, Build, Settings, Circle } from '@mui/icons-material';
+import { Paper, Typography, Box, List, ListItem, ListItemText, Avatar } from '@mui/material';
+import { Psychology, Build, Settings } from '@mui/icons-material';
 import type { SimpleTimelineProps } from '../types';
+import { formatTimestamp, formatDurationMs } from '../utils/timestamp';
 
 /**
  * Get icon for interaction type
@@ -8,30 +9,29 @@ import type { SimpleTimelineProps } from '../types';
 const getInteractionIcon = (type: string) => {
   switch (type) {
     case 'llm':
-      return <Psychology sx={{ color: 'primary.main' }} />;
+      return <Psychology sx={{ fontSize: 18 }} />;
     case 'mcp':
-      return <Build sx={{ color: 'secondary.main' }} />;
+      return <Build sx={{ fontSize: 18 }} />;
     case 'system':
-      return <Settings sx={{ color: 'info.main' }} />;
+      return <Settings sx={{ fontSize: 18 }} />;
     default:
-      return <Circle sx={{ color: 'grey.500', fontSize: 12 }} />;
+      return <Settings sx={{ fontSize: 18 }} />;
   }
 };
 
 /**
- * Format timestamp for timeline display
+ * Get color for interaction type
  */
-const formatTimestamp = (timestamp: string): string => {
-  try {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-  } catch (error) {
-    return timestamp;
+const getInteractionColor = (type: string): string => {
+  switch (type) {
+    case 'llm':
+      return '#1976d2'; // primary blue
+    case 'mcp':
+      return '#9c27b0'; // purple
+    case 'system':
+      return '#ed6c02'; // orange
+    default:
+      return '#757575'; // grey
   }
 };
 
@@ -40,92 +40,99 @@ const formatTimestamp = (timestamp: string): string => {
  */
 const formatDuration = (durationMs: number | null): string => {
   if (!durationMs) return '';
-  
-  if (durationMs < 1000) {
-    return `${durationMs}ms`;
-  } else if (durationMs < 60000) {
-    return `${(durationMs / 1000).toFixed(1)}s`;
-  } else {
-    const minutes = Math.floor(durationMs / 60000);
-    const seconds = Math.floor((durationMs % 60000) / 1000);
-    return `${minutes}m ${seconds}s`;
-  }
+  return formatDurationMs(durationMs);
 };
 
 /**
  * SimpleTimeline component - Phase 3
- * Displays a basic timeline of LLM/MCP interactions with icons and timestamps
+ * Displays chronological timeline of processing events with timestamps and durations
  */
 function SimpleTimeline({ timelineItems }: SimpleTimelineProps) {
   if (!timelineItems || timelineItems.length === 0) {
     return (
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Settings color="primary" />
+        <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
           Processing Timeline
         </Typography>
-        <Box sx={{ textAlign: 'center', py: 4 }}>
-          <Typography variant="body2" color="text.secondary">
-            No timeline data available
-          </Typography>
-        </Box>
+        <Typography variant="body2" color="text.secondary">
+          No timeline data available
+        </Typography>
       </Paper>
     );
   }
 
   return (
     <Paper sx={{ p: 3 }}>
-      <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Settings color="primary" />
+      <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
         Processing Timeline
       </Typography>
       
-      <List sx={{ width: '100%' }}>
+      <List sx={{ pt: 1 }}>
         {timelineItems.map((item, index) => (
           <ListItem 
-            key={item.id}
+            key={item.id || index} 
             sx={{ 
               alignItems: 'flex-start',
-              borderLeft: index < timelineItems.length - 1 ? '2px solid' : 'none',
-              borderColor: 'divider',
-              ml: 2,
-              pl: 2,
+              pl: 0,
+              pb: index === timelineItems.length - 1 ? 0 : 2,
               position: 'relative',
-              '&::before': index < timelineItems.length - 1 ? {
-                content: '""',
-                position: 'absolute',
-                left: -9,
-                top: 48,
-                bottom: 0,
-                width: 2,
-                backgroundColor: 'divider',
-              } : {},
+              // Timeline connector line
+              ...(index < timelineItems.length - 1 && {
+                '&::after': {
+                  content: '""',
+                  position: 'absolute',
+                  left: '19px', // Center of the avatar
+                  top: '48px',
+                  bottom: '-8px',
+                  width: '2px',
+                  backgroundColor: 'divider',
+                  zIndex: 0,
+                }
+              })
             }}
           >
-            <ListItemIcon sx={{ minWidth: 40, mt: 0.5 }}>
+            {/* Timeline Icon */}
+            <Avatar 
+              sx={{ 
+                width: 38, 
+                height: 38, 
+                mr: 2, 
+                mt: 0.5,
+                backgroundColor: getInteractionColor(item.type),
+                zIndex: 1,
+              }}
+            >
               {getInteractionIcon(item.type)}
-            </ListItemIcon>
-            
+            </Avatar>
+
+            {/* Timeline Content */}
             <ListItemText
+              sx={{ m: 0 }}
               primary={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
                   <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
                     {item.step_description}
                   </Typography>
                   {item.duration_ms && (
-                    <Typography variant="caption" color="text.secondary">
-                      ({formatDuration(item.duration_ms)})
+                    <Typography variant="caption" color="text.secondary" sx={{ 
+                      backgroundColor: 'grey.100', 
+                      px: 1, 
+                      py: 0.25, 
+                      borderRadius: 1,
+                      fontWeight: 500 
+                    }}>
+                      {formatDuration(item.duration_ms)}
                     </Typography>
                   )}
                 </Box>
               }
               secondary={
                 <Box>
-                  <Typography variant="caption" color="text.secondary">
-                    {formatTimestamp(item.timestamp)} • {item.type.toUpperCase()}
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
+                    {formatTimestamp(item.timestamp_us, 'time-only')} • {item.type.toUpperCase()}
                   </Typography>
                   {item.details && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, fontStyle: 'italic' }}>
                       {item.type === 'llm' && 'details' in item.details && 
                         `Model: ${(item.details as any).model_name || 'Unknown'}`
                       }

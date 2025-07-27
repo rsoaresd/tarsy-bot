@@ -130,8 +130,8 @@ class TestHookContext:
         assert context.method_name == "test_method"
         assert context.session_id == "test_session_123"
         assert context.method_args == {"param1": "value1", "param2": "value2"}
-        assert context.start_time is None
-        assert context.end_time is None
+        assert context.start_time_us is None
+        assert context.end_time_us is None
         assert len(context.request_id) == 8  # UUID truncated to 8 chars
         assert context.hook_context == {}
         assert context.hook_manager is None
@@ -160,10 +160,10 @@ class TestHookContext:
             
             async with context as ctx:
                 assert ctx is context
-                assert context.start_time is not None
+                assert context.start_time_us is not None
                 assert context.hook_manager == mock_hook_manager
                 assert "session_id" in context.hook_context
-                assert "start_time" in context.hook_context
+                assert "start_time_us" in context.hook_context
                 assert context.hook_context["session_id"] == "session123"
                 
                 # Verify pre-hooks were triggered (check immediately after context entry)
@@ -172,7 +172,7 @@ class TestHookContext:
                 assert pre_call[0][0] == "test.pre"
                 pre_context = pre_call[1]
                 assert pre_context["session_id"] == "session123"
-                assert "start_time" in pre_context
+                assert "start_time_us" in pre_context
                 
                 # Simulate some work
                 result_data = {"status": "success", "data": "processed"}
@@ -234,7 +234,7 @@ class TestHookContext:
         result_data = {"result": "success"}
         await context.complete_success(result_data)
         
-        assert context.end_time is not None
+        assert context.end_time_us is not None
         assert context.hook_context["result"] == result_data
         assert context.hook_context["success"] is True
         mock_hook_manager.trigger_hooks.assert_called_once_with("test.post", **context.hook_context)
@@ -718,10 +718,10 @@ class TestBaseLLMHookUtilityMethods:
 
     @pytest.mark.unit
     def test_calculate_duration_with_valid_times(self, llm_hook):
-        """Test duration calculation with valid start and end times."""
-        start_time = datetime(2023, 1, 1, 12, 0, 0)
-        end_time = datetime(2023, 1, 1, 12, 0, 1, 500000)  # 1.5 seconds later
-        duration = llm_hook._calculate_duration(start_time, end_time)
+        """Test duration calculation with valid start and end times (Unix timestamps)."""
+        start_time_us = 1672574400000000  # 2023-01-01T12:00:00Z in microseconds
+        end_time_us = 1672574401500000    # 1.5 seconds later
+        duration = llm_hook._calculate_duration(start_time_us, end_time_us)
         assert duration == 1500  # 1500 milliseconds
 
     @pytest.mark.unit
@@ -938,10 +938,10 @@ class TestBaseMCPHookUtilityMethods:
 
     @pytest.mark.unit
     def test_calculate_duration_with_valid_times(self, mcp_hook):
-        """Test duration calculation with valid start and end times."""
-        start_time = datetime(2023, 1, 1, 12, 0, 0)
-        end_time = datetime(2023, 1, 1, 12, 0, 0, 750000)  # 750ms later
-        duration = mcp_hook._calculate_duration(start_time, end_time)
+        """Test duration calculation with valid start and end times (Unix timestamps)."""
+        start_time_us = 1672574400000000  # 2023-01-01T12:00:00Z in microseconds
+        end_time_us = 1672574400750000    # 750ms later
+        duration = mcp_hook._calculate_duration(start_time_us, end_time_us)
         assert duration == 750
 
     @pytest.mark.unit

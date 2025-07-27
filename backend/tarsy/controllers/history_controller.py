@@ -4,11 +4,12 @@ History Controller
 FastAPI controller for alert processing history endpoints.
 Provides REST API for querying historical data with filtering, pagination,
 and chronological timeline reconstruction.
+Uses Unix timestamps (microseconds since epoch) throughout for optimal
+performance and consistency with the rest of the system.
 """
 
 import csv
 import io
-from datetime import UTC, datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -23,6 +24,7 @@ from tarsy.models.api_models import (
     SessionSummary,
     TimelineEvent,
 )
+from tarsy.models.history import now_us
 from tarsy.services.history_service import HistoryService, get_history_service
 
 router = APIRouter(prefix="/api/v1/history", tags=["history"])
@@ -43,18 +45,21 @@ router = APIRouter(prefix="/api/v1/history", tags=["history"])
     - Combine filters for precise queries (e.g., alert_type + status + time_range)
     
     **Common Use Cases:**
-    1. Recent completed alerts: `status=completed&start_date=2024-12-18T00:00:00Z`
+    1. Recent completed alerts: `status=completed&start_date_us=1734476400000000`
     2. Kubernetes alerts: `agent_type=kubernetes&status=completed`
     3. Specific alert types: `alert_type=NamespaceTerminating`
-    4. Time range analysis: `start_date=2024-12-18T00:00:00Z&end_date=2024-12-19T23:59:59Z`
+    4. Time range analysis: `start_date_us=1734476400000000&end_date_us=1734562799999999`
+    
+    **Timestamp Format:**
+    - All timestamps are Unix timestamps in microseconds since epoch (UTC)
     """
 )
 async def list_sessions(
     status: Optional[List[str]] = Query(None, description="Filter by session status(es) - supports multiple values"),
     agent_type: Optional[str] = Query(None, description="Filter by agent type"),
     alert_type: Optional[str] = Query(None, description="Filter by alert type"),
-    start_date: Optional[datetime] = Query(None, description="Filter sessions started after this date"),
-    end_date: Optional[datetime] = Query(None, description="Filter sessions started before this date"),
+    start_date_us: Optional[int] = Query(None, description="Filter sessions started after this timestamp (microseconds since epoch UTC)"),
+    end_date_us: Optional[int] = Query(None, description="Filter sessions started before this timestamp (microseconds since epoch UTC)"),
     page: int = Query(1, ge=1, description="Page number for pagination"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page (1-100)"),
     history_service: HistoryService = Depends(get_history_service)
@@ -66,8 +71,8 @@ async def list_sessions(
         status: Optional status filter(s) (e.g., ['completed', 'failed'] or ['in_progress'])
         agent_type: Optional agent type filter (e.g., 'kubernetes')
         alert_type: Optional alert type filter (e.g., 'NamespaceTerminating')
-        start_date: Optional start date filter (inclusive)
-        end_date: Optional end date filter (inclusive)
+        start_date_us: Optional start timestamp filter (microseconds since epoch UTC, inclusive)
+        end_date_us: Optional end timestamp filter (microseconds since epoch UTC, inclusive)
         page: Page number (starting from 1)
         page_size: Number of items per page (1-100)
         history_service: Injected history service
@@ -87,16 +92,16 @@ async def list_sessions(
             filters['agent_type'] = agent_type
         if alert_type is not None:
             filters['alert_type'] = alert_type
-        if start_date is not None:
-            filters['start_date'] = start_date
-        if end_date is not None:
-            filters['end_date'] = end_date
+        if start_date_us is not None:
+            filters['start_date_us'] = start_date_us
+        if end_date_us is not None:
+            filters['end_date_us'] = end_date_us
             
-        # Validate date range
-        if start_date and end_date and start_date >= end_date:
+        # Validate timestamp range
+        if start_date_us and end_date_us and start_date_us >= end_date_us:
             raise HTTPException(
                 status_code=400,
-                detail="start_date must be before end_date"
+                detail="start_date_us must be before end_date_us"
             )
         
         # Get sessions from history service with pagination
@@ -111,8 +116,8 @@ async def list_sessions(
         for session in sessions:
             # Calculate duration if completed
             duration_ms = None
-            if session.completed_at and session.started_at:
-                duration_ms = int((session.completed_at - session.started_at).total_seconds() * 1000)
+            if session.completed_at_us and session.started_at_us:
+                duration_ms = int((session.completed_at_us - session.started_at_us) / 1000)
             
             # Get interaction/communication counts (from repository subqueries)
             llm_count = getattr(session, 'llm_interaction_count', 0)
@@ -124,8 +129,8 @@ async def list_sessions(
                 agent_type=session.agent_type,
                 alert_type=session.alert_type,
                 status=session.status,
-                started_at=session.started_at,
-                completed_at=session.completed_at,
+                started_at_us=session.started_at_us,
+                completed_at_us=session.completed_at_us,
                 error_message=session.error_message,
                 duration_ms=duration_ms,
                 llm_interaction_count=llm_count,
@@ -171,6 +176,9 @@ async def list_sessions(
     - Complete session metadata and processing details
     - Chronological timeline of all LLM interactions and MCP communications
     - Full audit trail with microsecond-precision timing
+    
+    **Timestamp Format:**
+    - All timestamps are Unix timestamps in microseconds since epoch (UTC)
     """
 )
 async def get_session_detail(
@@ -208,14 +216,10 @@ async def get_session_detail(
         
         # Calculate total duration if completed
         duration_ms = None
-        started_at = session_info.get('started_at')
-        completed_at = session_info.get('completed_at')
-        if completed_at and started_at:
-            if isinstance(started_at, str):
-                started_at = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
-            if isinstance(completed_at, str):
-                completed_at = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
-            duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+        started_at_us = session_info.get('started_at_us')
+        completed_at_us = session_info.get('completed_at_us')
+        if completed_at_us and started_at_us:
+            duration_ms = int((completed_at_us - started_at_us) / 1000)
         
         # Convert timeline to response models
         timeline_events = []
@@ -223,7 +227,7 @@ async def get_session_detail(
             timeline_event = TimelineEvent(
                 event_id=event.get('event_id', event.get('interaction_id', event.get('communication_id', 'unknown'))),
                 type=event.get('type', 'unknown'),
-                timestamp=event['timestamp'],
+                timestamp_us=event['timestamp_us'],
                 step_description=event.get('step_description', 'No description available'),
                 details=event.get('details', {}),
                 duration_ms=event.get('duration_ms')
@@ -237,8 +241,8 @@ async def get_session_detail(
             agent_type=session_info['agent_type'],
             alert_type=session_info.get('alert_type'),
             status=session_info['status'],
-            started_at=started_at,
-            completed_at=completed_at,
+            started_at_us=started_at_us,
+            completed_at_us=completed_at_us,
             error_message=session_info.get('error_message'),
             final_analysis=session_info.get('final_analysis'),
             duration_ms=duration_ms,
@@ -266,6 +270,9 @@ async def get_session_detail(
     - `healthy`: Service is operational and database is accessible
     - `unhealthy`: Service has issues (e.g., database connection failed)
     - `disabled`: Service is disabled via configuration (HISTORY_ENABLED=false)
+    
+    **Timestamp Format:**
+    - All timestamps are Unix timestamps in microseconds since epoch (UTC)
     """
 )
 async def health_check(
@@ -286,7 +293,7 @@ async def health_check(
             return HealthCheckResponse(
                 service="alert_processing_history",
                 status="disabled",
-                timestamp=datetime.now(timezone.utc),
+                timestamp_us=now_us(),
                 details={
                     "message": "History service is disabled via configuration",
                     "history_enabled": False
@@ -300,7 +307,7 @@ async def health_check(
             return HealthCheckResponse(
                 service="alert_processing_history",
                 status="healthy",
-                timestamp=datetime.now(timezone.utc),
+                timestamp_us=now_us(),
                 details={
                     "database_connection": "ok",
                     "history_enabled": True,
@@ -311,7 +318,7 @@ async def health_check(
             return HealthCheckResponse(
                 service="alert_processing_history",
                 status="unhealthy",
-                timestamp=datetime.now(timezone.utc),
+                timestamp_us=now_us(),
                 details={
                     "database_connection": "failed",
                     "history_enabled": True,
@@ -323,7 +330,7 @@ async def health_check(
         return HealthCheckResponse(
             service="alert_processing_history",
             status="unhealthy",
-            timestamp=datetime.now(timezone.utc),
+            timestamp_us=now_us(),
             details={
                 "error": str(e),
                 "message": "Health check failed with exception"
@@ -365,13 +372,13 @@ async def get_active_sessions(
                 "agent_type": session.agent_type,
                 "alert_type": session.alert_type,
                 "status": session.status,
-                "started_at": session.started_at.isoformat(),
-                "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+                "started_at_us": session.started_at_us,
+                "completed_at_us": session.completed_at_us,
                 "error_message": session.error_message,
                 "duration_seconds": (
-                    (session.completed_at - session.started_at).total_seconds() 
-                    if session.completed_at else 
-                    (datetime.now(UTC) - (session.started_at.replace(tzinfo=UTC) if session.started_at.tzinfo is None else session.started_at)).total_seconds()
+                    (session.completed_at_us - session.started_at_us) / 1000000
+                    if session.completed_at_us else 
+                    (now_us() - session.started_at_us) / 1000000
                 )
             }
             for session in active_sessions
@@ -428,18 +435,18 @@ async def export_session_data(
             writer.writerow(["Agent Type", export_data["session"]["agent_type"]])
             writer.writerow(["Alert Type", export_data["session"]["alert_type"]])
             writer.writerow(["Status", export_data["session"]["status"]])
-            writer.writerow(["Started At", export_data["session"]["started_at"]])
-            writer.writerow(["Completed At", export_data["session"]["completed_at"] or "N/A"])
+            writer.writerow(["Started At (us)", export_data["session"]["started_at_us"]])
+            writer.writerow(["Completed At (us)", export_data["session"]["completed_at_us"] or "N/A"])
             writer.writerow(["Error Message", export_data["session"]["error_message"] or "None"])
             writer.writerow([])
             
             # Write timeline interactions
             writer.writerow(["Timeline Interactions"])
-            writer.writerow(["Timestamp", "Type", "Description", "Duration (ms)", "Success"])
+            writer.writerow(["Timestamp (us)", "Type", "Description", "Duration (ms)", "Success"])
             
             for interaction in export_data["timeline"].get("interactions", []):
                 writer.writerow([
-                    interaction.get("timestamp", ""),
+                    interaction.get("timestamp_us", ""),
                     interaction.get("type", ""),
                     interaction.get("description", "")[:100] + "..." if len(interaction.get("description", "")) > 100 else interaction.get("description", ""),
                     interaction.get("duration_ms", ""),

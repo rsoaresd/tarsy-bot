@@ -4,6 +4,8 @@ Base event hook infrastructure for transparent service integration.
 Provides the foundation for event hooks that capture data from existing services
 without modifying their core logic, with comprehensive error handling to prevent
 hooks from breaking parent operations.
+Uses Unix timestamps (microseconds since epoch) throughout for optimal
+performance and consistency with the rest of the system.
 """
 
 import asyncio
@@ -12,8 +14,9 @@ import inspect
 import logging
 import uuid
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+
+from tarsy.models.history import now_us
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +46,8 @@ class HookContext:
         
         # Generate unique request ID and timing
         self.request_id = str(uuid.uuid4())[:8]
-        self.start_time: Optional[datetime] = None
-        self.end_time: Optional[datetime] = None
+        self.start_time_us: Optional[int] = None
+        self.end_time_us: Optional[int] = None
         
         # Hook context and manager
         self.hook_context: Dict[str, Any] = {}
@@ -52,7 +55,7 @@ class HookContext:
         
     async def __aenter__(self) -> 'HookContext':
         """Enter the hook context and trigger pre-execution hooks."""
-        self.start_time = datetime.now(timezone.utc)
+        self.start_time_us = now_us()
         self.hook_manager = get_hook_manager()
         
         # Prepare hook context for pre-execution
@@ -63,8 +66,8 @@ class HookContext:
                 'request_id': self.request_id,
                 **self.method_args
             },
-            'start_time': self.start_time,
-            'timestamp': self.start_time
+            'start_time_us': self.start_time_us,
+            'timestamp_us': self.start_time_us
         }
         
         # Trigger pre-execution hooks
@@ -74,7 +77,7 @@ class HookContext:
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Exit the hook context and trigger post/error hooks based on outcome."""
-        self.end_time = datetime.now(timezone.utc)
+        self.end_time_us = now_us()
         
         if exc_type is None:
             # Success case - will be updated with result via complete_success()
@@ -83,7 +86,7 @@ class HookContext:
             # Error case - trigger error hooks
             self.hook_context.update({
                 'error': str(exc_val) if exc_val else 'Unknown error',
-                'end_time': self.end_time,
+                'end_time_us': self.end_time_us,
                 'success': False
             })
             
@@ -100,12 +103,12 @@ class HookContext:
         Args:
             result: The result of the operation
         """
-        if not self.end_time:
-            self.end_time = datetime.now(timezone.utc)
+        if not self.end_time_us:
+            self.end_time_us = now_us()
             
         self.hook_context.update({
             'result': result,
-            'end_time': self.end_time,
+            'end_time_us': self.end_time_us,
             'success': True
         })
         
@@ -237,7 +240,7 @@ class HookManager:
             self.execution_stats[event_type] = {"total": 0, "success": 0, "failed": 0}
         
         results = {}
-        start_time = datetime.now(timezone.utc)
+        start_time_us = now_us()
         
         # Execute all hooks concurrently for better performance
         tasks = []
@@ -273,8 +276,8 @@ class HookManager:
                 for hook_name in hook_names:
                     results[hook_name] = False
         
-        duration = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
-        logger.debug(f"Triggered {len(results)} hooks for '{event_type}' in {duration:.1f}ms")
+        duration_ms = (now_us() - start_time_us) / 1000  # Convert microseconds to milliseconds
+        logger.debug(f"Triggered {len(results)} hooks for '{event_type}' in {duration_ms:.1f}ms")
         
         return results
     
@@ -386,7 +389,7 @@ class BaseLLMHook(BaseEventHook):
         tool_calls = self._extract_tool_calls(method_args, result) if success else None
         tool_results = self._extract_tool_results(result) if success else None
         token_usage = self._extract_token_usage(result) if success else None
-        duration_ms = self._calculate_duration(kwargs.get('start_time'), kwargs.get('end_time'))
+        duration_ms = self._calculate_duration(kwargs.get('start_time_us'), kwargs.get('end_time_us'))
         
         # Generate human-readable step description
         step_description = generate_step_description("llm_interaction", {
@@ -407,9 +410,9 @@ class BaseLLMHook(BaseEventHook):
             "duration_ms": duration_ms,
             "success": success,
             "error_message": str(error) if error else None,
-            "start_time": kwargs.get('start_time'),
-            "end_time": kwargs.get('end_time'),
-            "timestamp": kwargs.get('end_time', datetime.now())
+            "start_time_us": kwargs.get('start_time_us'),
+            "end_time_us": kwargs.get('end_time_us'),
+            "timestamp_us": kwargs.get('end_time_us', now_us())
         }
         
         # Delegate to concrete implementation
@@ -469,10 +472,10 @@ class BaseLLMHook(BaseEventHook):
                 return str(usage)
         return None
     
-    def _calculate_duration(self, start_time: Optional[datetime], end_time: Optional[datetime]) -> int:
+    def _calculate_duration(self, start_time_us: Optional[int], end_time_us: Optional[int]) -> int:
         """Calculate interaction duration in milliseconds."""
-        if start_time and end_time:
-            return int((end_time - start_time).total_seconds() * 1000)
+        if start_time_us and end_time_us:
+            return int((end_time_us - start_time_us) / 1000)  # Convert microseconds to milliseconds
         return 0
     
     def _infer_purpose(self, prompt_text: str) -> str:
@@ -546,7 +549,7 @@ class BaseMCPHook(BaseEventHook):
         available_tools = self._extract_available_tools(result) if communication_type == "tool_list" else None
         
         # Calculate timing
-        duration_ms = self._calculate_duration(kwargs.get('start_time'), kwargs.get('end_time'))
+        duration_ms = self._calculate_duration(kwargs.get('start_time_us'), kwargs.get('end_time_us'))
         
         # Generate human-readable step description
         step_description = self._generate_step_description(communication_type, server_name, tool_name, method_args)
@@ -563,9 +566,9 @@ class BaseMCPHook(BaseEventHook):
             "duration_ms": duration_ms,
             "success": success,
             "error_message": str(error) if error else None,
-            "start_time": kwargs.get('start_time'),
-            "end_time": kwargs.get('end_time'),
-            "timestamp": kwargs.get('end_time', datetime.now())
+            "start_time_us": kwargs.get('start_time_us'),
+            "end_time_us": kwargs.get('end_time_us'),
+            "timestamp_us": kwargs.get('end_time_us', now_us())
         }
         
         # Delegate to concrete implementation
@@ -607,10 +610,10 @@ class BaseMCPHook(BaseEventHook):
             return {"tools": result}
         return None
     
-    def _calculate_duration(self, start_time: Optional[datetime], end_time: Optional[datetime]) -> int:
+    def _calculate_duration(self, start_time_us: Optional[int], end_time_us: Optional[int]) -> int:
         """Calculate communication duration in milliseconds."""
-        if start_time and end_time:
-            return int((end_time - start_time).total_seconds() * 1000)
+        if start_time_us and end_time_us:
+            return int((end_time_us - start_time_us) / 1000)  # Convert microseconds to milliseconds
         return 0
     
     def _generate_step_description(self, comm_type: str, server_name: str, tool_name: Optional[str], args: Dict) -> str:

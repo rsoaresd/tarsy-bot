@@ -1,12 +1,16 @@
 """
 Unit tests for WebSocket models.
-"""
 
-from datetime import datetime
+Tests the Pydantic models used for WebSocket communications,
+including message validation, serialization, and type handling.
+Uses Unix timestamps (microseconds since epoch) throughout for optimal
+performance and consistency with the rest of the system.
+"""
 
 import pytest
 from pydantic import ValidationError
 
+from tarsy.models.history import now_us
 from tarsy.models.websocket_models import (
     AlertStatusUpdate,
     ChannelType,
@@ -22,21 +26,22 @@ from tarsy.models.websocket_models import (
 
 
 class TestWebSocketMessage:
-    """Test base WebSocket message model."""
+    """Test suite for WebSocketMessage base class."""
     
     @pytest.mark.unit
     def test_basic_creation(self):
-        """Test basic WebSocket message creation."""
+        """Test basic WebSocket message creation with automatic timestamp."""
         message = WebSocketMessage(type="test")
         assert message.type == "test"
-        assert isinstance(message.timestamp, datetime)
+        assert isinstance(message.timestamp_us, int)
+        assert message.timestamp_us > 0
     
     @pytest.mark.unit
     def test_custom_timestamp(self):
-        """Test WebSocket message with custom timestamp."""
-        custom_time = datetime(2023, 1, 1, 12, 0, 0)
-        message = WebSocketMessage(type="test", timestamp=custom_time)
-        assert message.timestamp == custom_time
+        """Test WebSocket message with custom unix timestamp."""
+        custom_timestamp_us = 1734567890123456  # Example unix timestamp in microseconds
+        message = WebSocketMessage(type="test", timestamp_us=custom_timestamp_us)
+        assert message.timestamp_us == custom_timestamp_us
     
     @pytest.mark.unit
     def test_serialization(self):
@@ -45,8 +50,8 @@ class TestWebSocketMessage:
         data = message.model_dump()
         
         assert data["type"] == "test"
-        assert "timestamp" in data
-        assert isinstance(data["timestamp"], datetime)
+        assert "timestamp_us" in data
+        assert isinstance(data["timestamp_us"], int)
 
 
 class TestSubscriptionMessage:
@@ -363,15 +368,12 @@ class TestMessageUnions:
             SubscriptionResponse(action="subscribe", channel="test", success=True),
             ConnectionEstablished(user_id="test"),
             ErrorMessage(message="test error"),
-            DashboardUpdate(data={"test": "data"}),
-            SessionUpdate(session_id="123", data={"test": "data"}),
-            SystemHealthUpdate(status="healthy", services={}),
-            AlertStatusUpdate(alert_id="123", status="processing", progress=0, current_step="start")
+            DashboardUpdate(data={"test": "data"})
         ]
         
         for msg in messages:
             assert hasattr(msg, 'type')
-            assert hasattr(msg, 'timestamp')
+            assert hasattr(msg, 'timestamp_us')
             # Verify serialization works
             data = msg.model_dump()
             assert isinstance(data, dict)

@@ -1,16 +1,20 @@
 """
 WebSocket message models for dashboard communications.
+
+Uses Unix timestamps (microseconds since epoch) throughout for optimal
+performance and consistency with the rest of the system.
 """
 
-from datetime import datetime
 from typing import Any, Dict, Literal, Optional, Union
 from pydantic import BaseModel, Field
+
+from tarsy.models.history import now_us
 
 
 class WebSocketMessage(BaseModel):
     """Base WebSocket message model."""
     type: str
-    timestamp: Optional[datetime] = Field(default_factory=datetime.now)
+    timestamp_us: int = Field(default_factory=now_us, description="Message timestamp (microseconds since epoch UTC)")
 
 
 class SubscriptionMessage(WebSocketMessage):

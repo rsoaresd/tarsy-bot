@@ -240,9 +240,9 @@ class TestHistoryServiceIntegration:
         
         # Verify events are in chronological order
         for i in range(len(events) - 1):
-            current_time = datetime.fromisoformat(events[i]["timestamp"].replace("Z", "+00:00"))
-            next_time = datetime.fromisoformat(events[i + 1]["timestamp"].replace("Z", "+00:00"))
-            assert current_time <= next_time, f"Event {i} timestamp is after event {i+1}"
+            current_time_us = events[i]["timestamp_us"]
+            next_time_us = events[i + 1]["timestamp_us"]
+            assert current_time_us <= next_time_us, f"Event {i} timestamp is after event {i+1}"
         
         # Verify event types in expected order
         assert events[0]["type"] == "llm"
@@ -281,13 +281,13 @@ class TestHistoryServiceIntegration:
                     # Get the created session
                     session = repo.get_alert_session(sid)
                     if session:
-                        # Update with custom timestamp
-                        session.started_at = started_at
+                        # Update with custom timestamp (convert to microseconds since epoch)
+                        session.started_at_us = int(started_at.timestamp() * 1000000)
                         # Update status if needed
                         if status != "pending":
                             session.status = status
                             if status == "completed":
-                                session.completed_at = started_at + timedelta(minutes=30)
+                                session.completed_at_us = int((started_at + timedelta(minutes=30)).timestamp() * 1000000)
                         repo.session.commit()
             
             # Add some interactions for variety
@@ -555,7 +555,10 @@ class TestHistoryAPIIntegration:
         service = Mock()
         service.enabled = True
         
-        # Mock sessions data with all required attributes
+        # Mock sessions data with all required attributes (using Unix timestamps)
+        from tarsy.models.history import now_us
+        current_time_us = now_us()
+        
         mock_sessions = [
             Mock(
                 session_id="api-session-1",
@@ -563,8 +566,8 @@ class TestHistoryAPIIntegration:
                 alert_type="NamespaceTerminating",
                 agent_type="KubernetesAgent",
                 status="completed",
-                started_at=datetime.now(timezone.utc),
-                completed_at=datetime.now(timezone.utc),
+                started_at_us=current_time_us - 300000000,  # Started 5 minutes ago
+                completed_at_us=current_time_us,  # Completed now
                 error_message=None,
                 llm_interactions=[],  # Add missing attributes
                 mcp_communications=[],
@@ -575,7 +578,7 @@ class TestHistoryAPIIntegration:
         ]
         service.get_sessions_list.return_value = (mock_sessions, 1)
         
-        # Mock timeline data with correct structure (session instead of session_info)
+        # Mock timeline data with correct structure (session instead of session_info) using Unix timestamps
         service.get_session_timeline.return_value = {
             "session": {
                 "session_id": "api-session-1",
@@ -583,15 +586,15 @@ class TestHistoryAPIIntegration:
                 "alert_type": "NamespaceTerminating",
                 "agent_type": "KubernetesAgent",
                 "status": "completed",
-                "started_at": "2024-01-15T10:00:00Z",
-                "completed_at": "2024-01-15T10:05:00Z",
+                "started_at_us": current_time_us - 300000000,  # Started 5 minutes ago
+                "completed_at_us": current_time_us,  # Completed now
                 "error_message": None
             },
             "chronological_timeline": [
                 {
                     "interaction_id": "int-1",
                     "type": "llm_interaction",
-                    "timestamp": "2024-01-15T10:00:00Z",
+                    "timestamp_us": current_time_us - 240000000,  # 4 minutes ago
                     "step_description": "Analysis",
                     "details": {
                         "prompt_text": "Analyze issue",
@@ -639,8 +642,11 @@ class TestHistoryAPIIntegration:
     @pytest.mark.integration
     def test_api_session_detail_integration(self, client, mock_history_service_for_api):
         """Test session detail API endpoint integration."""
-        # Ensure the mock returns the timeline for the specific session ID
+        # Ensure the mock returns the timeline for the specific session ID (using Unix timestamps)
+        from tarsy.models.history import now_us
+        current_time_us = now_us()
         expected_session_id = "api-session-1"
+        
         mock_history_service_for_api.get_session_timeline.return_value = {
             "session": {
                 "session_id": expected_session_id,
@@ -648,15 +654,15 @@ class TestHistoryAPIIntegration:
                 "alert_type": "NamespaceTerminating",
                 "agent_type": "KubernetesAgent", 
                 "status": "completed",
-                "started_at": "2024-01-15T10:00:00Z",
-                "completed_at": "2024-01-15T10:05:00Z",
+                "started_at_us": current_time_us - 300000000,  # Started 5 minutes ago
+                "completed_at_us": current_time_us,  # Completed now
                 "error_message": None
             },
             "chronological_timeline": [
                 {
                     "interaction_id": "int-1",
                     "type": "llm_interaction",
-                    "timestamp": "2024-01-15T10:00:00Z",
+                    "timestamp_us": current_time_us - 240000000,  # 4 minutes ago
                     "step_description": "Analysis",
                     "details": {
                         "prompt_text": "Analyze issue",
@@ -709,7 +715,7 @@ class TestHistoryAPIIntegration:
             
             assert data["service"] == "alert_processing_history"
             assert data["status"] == "healthy"
-            assert "timestamp" in data
+            assert "timestamp_us" in data
             assert "details" in data
             
         finally:

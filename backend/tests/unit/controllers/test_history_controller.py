@@ -7,13 +7,13 @@ to ensure proper request/response handling and API contract compliance.
 
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
-from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tarsy.controllers.history_controller import HistoryService, router
+from tarsy.models.history import now_us
 from tarsy.services.history_service import get_history_service
 
 
@@ -67,8 +67,9 @@ class TestHistoryControllerEndpoints:
         session1.alert_type = "NamespaceTerminating"
         session1.agent_type = "KubernetesAgent"
         session1.status = "completed"
-        session1.started_at = datetime.now(timezone.utc)
-        session1.completed_at = datetime.now(timezone.utc)
+        now_us_time = now_us()
+        session1.started_at_us = now_us_time - 60000000  # 1 minute ago in microseconds
+        session1.completed_at_us = now_us_time
         session1.error_message = None
         session1.llm_interactions = []
         session1.mcp_communications = []
@@ -82,8 +83,8 @@ class TestHistoryControllerEndpoints:
         session2.alert_type = "HighCPU"
         session2.agent_type = "KubernetesAgent"
         session2.status = "in_progress"
-        session2.started_at = datetime.now(timezone.utc)
-        session2.completed_at = None
+        session2.started_at_us = now_us_time - 300000000  # 5 minutes ago in microseconds
+        session2.completed_at_us = None
         session2.error_message = None
         session2.llm_interactions = []
         session2.mcp_communications = []
@@ -121,7 +122,7 @@ class TestHistoryControllerEndpoints:
         assert "alert_type" in session
         assert "agent_type" in session
         assert "status" in session
-        assert "started_at" in session
+        assert "started_at_us" in session
     
     @pytest.mark.unit
     def test_get_sessions_list_with_filters(self, app, client, mock_history_service):
@@ -348,17 +349,18 @@ class TestHistoryControllerEndpoints:
         """Test sessions list with date range filters."""
         mock_history_service.get_sessions_list.return_value = ([], 0)
         
-        start_date = "2024-01-01T00:00:00Z"
-        end_date = "2024-01-31T23:59:59Z"
-        
+        # Convert dates to unix timestamps in microseconds
+        start_date_us = int(datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000000)
+        end_date_us = int(datetime(2024, 1, 31, 23, 59, 59, tzinfo=timezone.utc).timestamp() * 1000000)
+
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
-        
+
         response = client.get(
             "/api/v1/history/sessions",
             params={
-                "start_date": start_date,
-                "end_date": end_date
+                "start_date_us": start_date_us,
+                "end_date_us": end_date_us
             }
         )
         
@@ -370,21 +372,21 @@ class TestHistoryControllerEndpoints:
         # Verify date filters were parsed and passed correctly
         call_args = mock_history_service.get_sessions_list.call_args
         filters = call_args.kwargs["filters"]
-        
-        assert "start_date" in filters
-        assert "end_date" in filters
-        assert isinstance(filters["start_date"], datetime)
-        assert isinstance(filters["end_date"], datetime)
+
+        assert "start_date_us" in filters
+        assert "end_date_us" in filters
+        assert isinstance(filters["start_date_us"], int)
+        assert isinstance(filters["end_date_us"], int)
     
     @pytest.mark.unit
     def test_get_sessions_list_invalid_date_format(self, app, client, mock_history_service):
-        """Test sessions list with invalid date format."""
+        """Test sessions list with invalid Unix timestamp format."""
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
         
         response = client.get(
             "/api/v1/history/sessions",
-            params={"start_date": "invalid-date"}
+            params={"start_date_us": "invalid-timestamp"}
         )
         
         # Clean up
@@ -393,10 +395,10 @@ class TestHistoryControllerEndpoints:
         # FastAPI returns 422 for validation errors, not 400
         assert response.status_code == 422
         
-        # Check that the error is about datetime parsing
+        # Check that the error is about integer parsing
         error_details = response.json()["detail"]
         assert isinstance(error_details, list)
-        assert any("datetime" in error.get("type", "") for error in error_details)
+        assert any("int_parsing" in error.get("type", "") for error in error_details)
     
     @pytest.mark.unit
     def test_get_sessions_list_service_disabled(self, app, client, mock_history_service):
@@ -437,7 +439,7 @@ class TestHistoryControllerEndpoints:
     @pytest.mark.unit
     def test_get_session_detail_success(self, app, client, mock_history_service):
         """Test successful session detail retrieval."""
-        # Mock timeline data with correct structure (matches repository output)
+        # Mock timeline data with correct structure (matches repository output) using Unix timestamps
         mock_timeline = {
             "session": {
                 "session_id": "test-session-123",
@@ -445,15 +447,15 @@ class TestHistoryControllerEndpoints:
                 "alert_type": "NamespaceTerminating",
                 "agent_type": "KubernetesAgent",
                 "status": "completed",
-                "started_at": "2024-01-15T10:00:00Z",
-                "completed_at": "2024-01-15T10:05:00Z",
+                "started_at_us": 1705314000000000,  # 2024-01-15T10:00:00Z in microseconds
+                "completed_at_us": 1705314300000000,  # 2024-01-15T10:05:00Z in microseconds
                 "error_message": None
             },
             "chronological_timeline": [
                 {
                     "interaction_id": "int-1",
                     "type": "llm_interaction",
-                    "timestamp": "2024-01-15T10:00:00Z",
+                    "timestamp_us": 1705314000000000,  # 2024-01-15T10:00:00Z in microseconds
                     "step_description": "Initial analysis",
                     "details": {
                         "prompt_text": "Analyze the issue",
@@ -464,7 +466,7 @@ class TestHistoryControllerEndpoints:
                 {
                     "communication_id": "comm-1",
                     "type": "mcp_communication",
-                    "timestamp": "2024-01-15T10:00:01Z",
+                    "timestamp_us": 1705314001000000,  # 2024-01-15T10:00:01Z in microseconds
                     "step_description": "Check namespace status",
                     "details": {
                         "server_name": "kubernetes-server",
@@ -583,7 +585,7 @@ class TestHistoryControllerEndpoints:
         
         assert data["service"] == "alert_processing_history"
         assert data["status"] == "healthy"
-        assert "timestamp" in data
+        assert "timestamp_us" in data
         assert "details" in data
         
         details = data["details"]
@@ -741,21 +743,21 @@ class TestHistoryControllerValidation:
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
         
-        # Test only dates that will actually trigger validation errors
-        invalid_dates = [
-            "not-a-date",           # Completely invalid
-            "2024-13-01",           # Invalid month, missing time
-            "invalid-format"        # Invalid format
+        # Test timestamps that will actually trigger validation errors
+        invalid_timestamps = [
+            "not-a-number",         # Completely invalid
+            "12.34",                # Float instead of int
+            "invalid-timestamp"     # Invalid format
         ]
         
-        for invalid_date in invalid_dates:
-            response = client.get(f"/api/v1/history/sessions?start_date={invalid_date}")
+        for invalid_timestamp in invalid_timestamps:
+            response = client.get(f"/api/v1/history/sessions?start_date_us={invalid_timestamp}")
             # FastAPI returns 422 for validation errors, not 400
             assert response.status_code == 422
-            # Check that the error is about datetime parsing
+            # Check that the error is about integer parsing
             error_details = response.json()["detail"]
             assert isinstance(error_details, list)
-            assert any("datetime" in error.get("type", "") for error in error_details)
+            assert any("int_parsing" in error.get("type", "") for error in error_details)
         
         # Clean up
         app.dependency_overrides.clear()
@@ -789,8 +791,9 @@ class TestHistoryControllerResponseFormat:
         mock_session.alert_type = "TestAlert"
         mock_session.agent_type = "TestAgent"
         mock_session.status = "completed"
-        mock_session.started_at = datetime.now(timezone.utc)
-        mock_session.completed_at = datetime.now(timezone.utc)
+        current_time_us = now_us()
+        mock_session.started_at_us = current_time_us - 300000000  # Started 5 minutes ago
+        mock_session.completed_at_us = current_time_us
         mock_session.error_message = None
         mock_session.llm_interactions = []  # Add missing attributes
         mock_session.mcp_communications = []
@@ -826,7 +829,7 @@ class TestHistoryControllerResponseFormat:
         session = data["sessions"][0]
         required_fields = {
             "session_id", "alert_id", "alert_type", "agent_type", 
-            "status", "started_at", "completed_at", "error_message"
+            "status", "started_at_us", "completed_at_us", "error_message"
         }
         # Allow additional fields that are actually returned
         optional_fields = {
@@ -851,7 +854,7 @@ class TestHistoryControllerResponseFormat:
         mock_service = Mock(spec=HistoryService)
         mock_service.enabled = True
         
-        # Mock timeline with correct structure (session instead of session_info)
+        # Mock timeline with correct structure (session instead of session_info) using Unix timestamps
         mock_timeline = {
             "session": {
                 "session_id": "test-session",
@@ -859,15 +862,15 @@ class TestHistoryControllerResponseFormat:
                 "alert_type": "TestAlert",
                 "agent_type": "TestAgent",
                 "status": "completed",
-                "started_at": "2024-01-15T10:00:00Z",
-                "completed_at": "2024-01-15T10:05:00Z",
+                "started_at_us": 1705314000000000,  # 2024-01-15T10:00:00Z in microseconds
+                "completed_at_us": 1705314300000000,  # 2024-01-15T10:05:00Z in microseconds
                 "error_message": None
             },
             "chronological_timeline": [
                 {
                     "interaction_id": "int-1",
                     "type": "llm_interaction",
-                    "timestamp": "2024-01-15T10:00:00Z",
+                    "timestamp_us": 1705314000000000,  # 2024-01-15T10:00:00Z in microseconds
                     "step_description": "Test step",
                     "details": {
                         "prompt_text": "Test prompt",
@@ -893,7 +896,7 @@ class TestHistoryControllerResponseFormat:
         # Validate top-level structure (SessionDetailResponse fields)
         expected_fields = {
             "session_id", "alert_id", "alert_type", "agent_type",
-            "status", "started_at", "completed_at", "error_message",
+            "status", "started_at_us", "completed_at_us", "error_message",
             "chronological_timeline", "summary", "duration_ms", "session_metadata", "alert_data"
         }
         assert expected_fields.issubset(set(data.keys()))
@@ -910,7 +913,7 @@ class TestHistoryControllerResponseFormat:
         
         event = timeline[0]
         assert "type" in event
-        assert "timestamp" in event
+        assert "timestamp_us" in event
         assert "step_description" in event
         
         # Validate summary exists
@@ -941,13 +944,13 @@ class TestHistoryControllerResponseFormat:
         data = response.json()
         
         # Validate top-level structure
-        required_fields = {"service", "status", "timestamp", "details"}
+        required_fields = {"service", "status", "timestamp_us", "details"}
         assert set(data.keys()) == required_fields
         
         # Validate field types
         assert isinstance(data["service"], str)
         assert isinstance(data["status"], str)
-        assert isinstance(data["timestamp"], str)
+        assert isinstance(data["timestamp_us"], int)
         assert isinstance(data["details"], dict)
         
         # Validate status values
@@ -984,14 +987,18 @@ class TestHistoryControllerIntegration:
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_service
         
+        # Convert dates to unix timestamps in microseconds
+        start_date_us = int(datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000000)
+        end_date_us = int(datetime(2024, 1, 31, 23, 59, 59, tzinfo=timezone.utc).timestamp() * 1000000)
+        
         response = client.get(
             "/api/v1/history/sessions",
             params={
                 "status": "completed",
                 "agent_type": "KubernetesAgent",
                 "alert_type": "NamespaceTerminating",
-                "start_date": "2024-01-01T00:00:00Z",
-                "end_date": "2024-01-31T23:59:59Z",
+                "start_date_us": start_date_us,
+                "end_date_us": end_date_us,
                 "page": 1,
                 "page_size": 20
             }
@@ -1009,8 +1016,8 @@ class TestHistoryControllerIntegration:
         assert filters["status"] == ["completed"]  # Now expects list due to multiple status support
         assert filters["agent_type"] == "KubernetesAgent"
         assert filters["alert_type"] == "NamespaceTerminating"
-        assert "start_date" in filters
-        assert "end_date" in filters
+        assert "start_date_us" in filters
+        assert "end_date_us" in filters
     
     @pytest.mark.unit
     def test_real_world_error_scenarios(self, app, client):
@@ -1098,8 +1105,8 @@ class TestDashboardEndpoints:
         mock_session.agent_type = "kubernetes"
         mock_session.alert_type = "PodCrashLooping"
         mock_session.status = "in_progress"
-        mock_session.started_at = datetime.now(timezone.utc)
-        mock_session.completed_at = None
+        mock_session.started_at_us = now_us() - 300000000  # 5 minutes ago
+        mock_session.completed_at_us = None
         mock_session.error_message = None
         
         service.get_active_sessions.return_value = [mock_session]
@@ -1177,7 +1184,7 @@ class TestDashboardEndpoints:
             agent_type="kubernetes",
             alert_type="PodCrashLooping",
             status="in_progress",
-            started_at=datetime.now(timezone.utc),
+            started_at_us=now_us(),
             alert_data={}
         )
         
@@ -1201,9 +1208,9 @@ class TestDashboardEndpoints:
         assert data[0]["agent_type"] == "kubernetes"
         assert data[0]["alert_type"] == "PodCrashLooping"
         assert data[0]["status"] == "in_progress"
-        assert "started_at" in data[0]
+        assert "started_at_us" in data[0]
         assert "duration_seconds" in data[0]
-        assert data[0]["completed_at"] is None
+        assert data[0]["completed_at_us"] is None
         
         # Verify service was called
         mock_service.get_active_sessions.assert_called_once()
@@ -1364,8 +1371,8 @@ class TestExportAndSearchEndpoints:
                     "agent_type": "KubernetesAgent",
                     "alert_type": "TestAlert",
                     "status": "completed",
-                    "started_at": "2025-01-25T00:00:00Z",
-                    "completed_at": "2025-01-25T00:01:00Z",
+                    "started_at_us": 1737849600000000,  # 2025-01-25T00:00:00Z in microseconds
+                    "completed_at_us": 1737849660000000,  # 2025-01-25T00:01:00Z in microseconds
                     "error_message": None
                 },
                 "timeline": {"interactions": []},
@@ -1543,14 +1550,16 @@ class TestExportAndSearchEndpoints:
 
 def create_mock_session(session_id: str, status: str) -> Mock:
     """Helper to create a mock session object with a specific status."""
+    current_time_us = now_us()
+    
     mock_session = Mock()
     mock_session.session_id = session_id
     mock_session.alert_id = f"alert-{session_id}"
     mock_session.agent_type = "KubernetesAgent"
     mock_session.alert_type = "NamespaceTerminating"
     mock_session.status = status
-    mock_session.started_at = datetime.now(timezone.utc)
-    mock_session.completed_at = datetime.now(timezone.utc) if status == "completed" else None
+    mock_session.started_at_us = current_time_us - 300000000  # Started 5 minutes ago
+    mock_session.completed_at_us = current_time_us if status == "completed" else None
     mock_session.error_message = None
     mock_session.llm_interactions = []
     mock_session.mcp_communications = []

@@ -4,10 +4,11 @@ Dashboard broadcast hooks for real-time WebSocket updates.
 Implements specialized hooks for broadcasting LLM interactions and MCP communications
 to dashboard clients via WebSocket connections using the same event pipeline as
 history hooks for consistent data and timing.
+Uses Unix timestamps (microseconds since epoch) throughout for optimal
+performance and consistency with the rest of the system.
 """
 
 import logging
-from datetime import datetime
 from typing import Any, Dict
 
 from tarsy.services.websocket_manager import WebSocketManager
@@ -54,7 +55,7 @@ class DashboardLLMHooks(BaseLLMHook):
             "model_used": interaction_data["model_used"],
             "success": interaction_data["success"],
             "duration_ms": interaction_data["duration_ms"],
-            "timestamp": interaction_data["timestamp"].isoformat(),
+            "timestamp_us": interaction_data["timestamp_us"],
             "tool_calls_present": bool(interaction_data["tool_calls"]),
             "error_message": interaction_data["error_message"]
         }
@@ -90,7 +91,7 @@ class DashboardLLMHooks(BaseLLMHook):
                 "model": interaction_data["model_used"],
                 "status": "completed" if interaction_data["success"] else "error",
                 "duration_ms": interaction_data["duration_ms"],
-                "timestamp": interaction_data["timestamp"].isoformat()
+                "timestamp_us": interaction_data["timestamp_us"]
             }
             
             dashboard_sent = await self.websocket_manager.broadcast_dashboard_update_advanced(
@@ -139,7 +140,7 @@ class DashboardMCPHooks(BaseMCPHook):
             "tool_name": communication_data["tool_name"],
             "success": communication_data["success"],
             "duration_ms": communication_data["duration_ms"],
-            "timestamp": communication_data["timestamp"].isoformat(),
+            "timestamp_us": communication_data["timestamp_us"],
             "error_message": communication_data["error_message"]
         }
         
@@ -175,7 +176,7 @@ class DashboardMCPHooks(BaseMCPHook):
                 "tool": communication_data["tool_name"],
                 "status": "completed" if communication_data["success"] else "error",
                 "duration_ms": communication_data["duration_ms"],
-                "timestamp": communication_data["timestamp"].isoformat()
+                "timestamp_us": communication_data["timestamp_us"]
             }
             
             dashboard_sent = await self.websocket_manager.broadcast_dashboard_update_advanced(

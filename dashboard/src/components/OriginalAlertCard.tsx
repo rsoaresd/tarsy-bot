@@ -1,29 +1,29 @@
-import { Paper, Typography, Card, CardContent, Stack, Box, Chip, Link } from '@mui/material';
-import { Warning, Info, OpenInNew } from '@mui/icons-material';
+import { Paper, Typography, Box, Chip } from '@mui/material';
 import type { OriginalAlertCardProps } from '../types';
+import { formatTimestamp } from '../utils/timestamp';
 
 /**
- * Get severity color for chip display
+ * Get severity color for alert severity levels
  */
-const getSeverityColor = (severity: string): 'error' | 'warning' | 'info' | 'success' => {
+const getSeverityColor = (severity: string): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {
   switch (severity.toLowerCase()) {
     case 'critical':
       return 'error';
     case 'high':
-      return 'error';
-    case 'medium':
       return 'warning';
+    case 'medium':
+      return 'info';
     case 'low':
-      return 'info';
+      return 'success';
     default:
-      return 'info';
+      return 'default';
   }
 };
 
 /**
- * Get environment color for chip display
+ * Get environment color for different environments
  */
-const getEnvironmentColor = (environment: string): 'error' | 'warning' | 'info' => {
+const getEnvironmentColor = (environment: string): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {
   switch (environment.toLowerCase()) {
     case 'production':
       return 'error';
@@ -32,26 +32,7 @@ const getEnvironmentColor = (environment: string): 'error' | 'warning' | 'info' 
     case 'development':
       return 'info';
     default:
-      return 'info';
-  }
-};
-
-/**
- * Format timestamp for display
- */
-const formatTimestamp = (timestamp: string): string => {
-  try {
-    const date = new Date(timestamp);
-    return date.toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-  } catch (error) {
-    return timestamp;
+      return 'default';
   }
 };
 
@@ -62,159 +43,109 @@ const formatTimestamp = (timestamp: string): string => {
 function OriginalAlertCard({ alertData }: OriginalAlertCardProps) {
   return (
     <Paper sx={{ p: 3 }}>
-      <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Warning color="warning" />
-        Original Alert Information
+      <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+        Original Alert Data
       </Typography>
       
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {/* Primary and Environment Info */}
-        <Box sx={{ display: 'flex', gap: 3, flexDirection: { xs: 'column', md: 'row' } }}>
-          {/* Primary Alert Info */}
-          <Box sx={{ flex: 1 }}>
-            <Card variant="outlined" sx={{ height: '100%' }}>
-              <CardContent>
-                <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                  Alert Details
-                </Typography>
-                <Stack spacing={2}>
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Alert Type
-                    </Typography>
-                    <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                      {alertData.alert_type}
-                    </Typography>
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Severity
-                    </Typography>
-                    <Chip 
-                      label={alertData.severity} 
-                      color={getSeverityColor(alertData.severity)}
-                      size="small"
-                      sx={{ textTransform: 'capitalize' }}
-                    />
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Message
-                    </Typography>
-                    <Typography variant="body1">
-                      {alertData.message}
-                    </Typography>
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Timestamp
-                    </Typography>
-                    <Typography variant="body1">
-                      {formatTimestamp(alertData.timestamp)}
-                    </Typography>
-                  </Box>
-                </Stack>
-              </CardContent>
-            </Card>
-          </Box>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {/* Alert Header */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Chip 
+            label={alertData.severity.toUpperCase()} 
+            color={getSeverityColor(alertData.severity)} 
+            size="small"
+            sx={{ fontWeight: 600 }}
+          />
+          <Chip 
+            label={alertData.environment.toUpperCase()} 
+            color={getEnvironmentColor(alertData.environment)} 
+            size="small"
+            variant="outlined"
+          />
+          <Typography variant="body2" color="text.secondary">
+            {alertData.alert_type}
+          </Typography>
+        </Box>
 
-          {/* Environment & Infrastructure */}
-          <Box sx={{ flex: 1 }}>
-            <Card variant="outlined" sx={{ height: '100%' }}>
-              <CardContent>
-                <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                  Environment & Infrastructure
-                </Typography>
-                <Stack spacing={2}>
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Environment
-                    </Typography>
-                    <Chip 
-                      label={alertData.environment} 
-                      color={getEnvironmentColor(alertData.environment)}
-                      size="small"
-                      icon={alertData.environment === 'production' ? <Warning /> : <Info />}
-                      sx={{ textTransform: 'capitalize' }}
-                    />
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Cluster
-                    </Typography>
-                    <Typography variant="body1" sx={{ fontFamily: 'monospace', fontSize: '0.875rem' }}>
-                      {alertData.cluster}
-                    </Typography>
-                  </Box>
-                  
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Namespace
-                    </Typography>
-                    <Typography variant="body1" sx={{ fontFamily: 'monospace', fontSize: '0.875rem' }}>
-                      {alertData.namespace}
-                    </Typography>
-                  </Box>
-                  
-                  {alertData.pod && (
-                    <Box>
-                      <Typography variant="body2" color="text.secondary">
-                        Pod
-                      </Typography>
-                      <Typography variant="body1" sx={{ fontFamily: 'monospace', fontSize: '0.875rem' }}>
-                        {alertData.pod}
-                      </Typography>
-                    </Box>
-                  )}
-                </Stack>
-              </CardContent>
-            </Card>
+        {/* Alert Message */}
+        <Box>
+          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+            Message
+          </Typography>
+          <Typography variant="body1" sx={{ 
+            backgroundColor: 'grey.50', 
+            p: 2, 
+            borderRadius: 1,
+            fontFamily: 'monospace',
+            fontSize: '0.875rem',
+            lineHeight: 1.6,
+            whiteSpace: 'pre-wrap',
+            overflowWrap: 'break-word'
+          }}>
+            {alertData.message}
+          </Typography>
+        </Box>
+
+        {/* Metadata */}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            Metadata
+          </Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 1 }}>
+            <Typography variant="body2">
+              <strong>Timestamp:</strong> {formatTimestamp(alertData.timestamp_us, 'absolute')}
+            </Typography>
+            <Typography variant="body2">
+              <strong>Cluster:</strong> {alertData.cluster}
+            </Typography>
+            <Typography variant="body2">
+              <strong>Namespace:</strong> {alertData.namespace}
+            </Typography>
+            {alertData.pod && (
+              <Typography variant="body2">
+                <strong>Pod:</strong> {alertData.pod}
+              </Typography>
+            )}
           </Box>
         </Box>
 
-        {/* Additional Context & Runbook */}
+        {/* Context and Runbook */}
         {(alertData.context || alertData.runbook) && (
-          <Box>
-            <Card variant="outlined">
-              <CardContent>
-                <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                  Additional Information
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {alertData.context && (
+              <Box>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Context
                 </Typography>
-                <Stack spacing={2}>
-                  {alertData.runbook && (
-                    <Box>
-                      <Typography variant="body2" color="text.secondary">
-                        Runbook
-                      </Typography>
-                      <Link 
-                        href={alertData.runbook} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
-                      >
-                        <OpenInNew fontSize="small" />
-                        {alertData.runbook}
-                      </Link>
-                    </Box>
-                  )}
-                  
-                  {alertData.context && (
-                    <Box>
-                      <Typography variant="body2" color="text.secondary">
-                        Context
-                      </Typography>
-                      <Typography variant="body1">
-                        {alertData.context}
-                      </Typography>
-                    </Box>
-                  )}
-                </Stack>
-              </CardContent>
-            </Card>
+                <Typography variant="body2" sx={{ 
+                  backgroundColor: 'grey.50', 
+                  p: 1.5, 
+                  borderRadius: 1,
+                  fontSize: '0.825rem',
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  {alertData.context}
+                </Typography>
+              </Box>
+            )}
+            
+            {alertData.runbook && (
+              <Box>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Runbook Reference
+                </Typography>
+                <Typography variant="body2" sx={{ 
+                  backgroundColor: 'info.50', 
+                  color: 'info.main',
+                  p: 1.5, 
+                  borderRadius: 1,
+                  fontSize: '0.825rem',
+                  fontFamily: 'monospace'
+                }}>
+                  {alertData.runbook}
+                </Typography>
+              </Box>
+            )}
           </Box>
         )}
       </Box>

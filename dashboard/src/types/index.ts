@@ -5,8 +5,8 @@ export interface Session {
   alert_type: string;
   agent_type: string;
   status: 'completed' | 'failed' | 'in_progress' | 'pending';
-  started_at: string; // ISO timestamp
-  completed_at: string | null;
+  started_at_us: number; // Unix timestamp (microseconds since epoch)
+  completed_at_us: number | null; // Unix timestamp (microseconds since epoch)
   duration_ms: number | null;
   summary?: string | object; // Backend may return string or empty object
   error_message: string | null;
@@ -26,7 +26,7 @@ export interface AlertData {
   alert_type: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   message: string;
-  timestamp: string; // ISO timestamp
+  timestamp_us: number; // Unix timestamp (microseconds since epoch)
   environment: 'development' | 'staging' | 'production';
   cluster: string;
   namespace: string;
@@ -40,7 +40,7 @@ export interface TimelineItem {
   id: string;
   event_id: string;
   type: 'llm' | 'mcp' | 'system';
-  timestamp: string; // ISO timestamp with microseconds
+  timestamp_us: number; // Unix timestamp (microseconds since epoch)
   step_description: string;
   duration_ms: number | null;
   details?: LLMInteraction | MCPInteraction | SystemEvent;
@@ -95,7 +95,7 @@ export interface SessionsResponse {
 export interface WebSocketMessage {
   type: 'session_update' | 'session_completed' | 'session_failed' | 'ping' | 'pong' | 'connection_established' | 'subscription_response' | 'dashboard_update';
   data?: SessionUpdate | any; // Allow any data type for dashboard_update messages
-  timestamp?: string;
+  timestamp_us?: number; // Unix timestamp (microseconds since epoch)
   channel?: string; // Dashboard updates include channel info
 }
 
@@ -105,14 +105,14 @@ export interface SessionUpdate {
   progress?: number; // 0-100 for in_progress sessions
   duration_ms?: number;
   error_message?: string | null;
-  completed_at?: string | null;
+  completed_at_us?: number | null; // Unix timestamp (microseconds since epoch)
 }
 
 // API response wrapper format (for other endpoints)
 export interface APIResponse<T> {
   data: T;
   error?: string;
-  timestamp?: string;
+  timestamp_us?: number; // Unix timestamp (microseconds since epoch)
 }
 
 // Status badge props

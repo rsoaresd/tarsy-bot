@@ -14,18 +14,7 @@ import {
   Schedule,
 } from '@mui/icons-material';
 import type { ActiveAlertCardProps } from '../types';
-
-// Helper function to format duration from milliseconds
-const formatDuration = (durationMs: number | null): string => {
-  if (!durationMs) return '0s';
-  
-  if (durationMs < 1000) return `${durationMs}ms`;
-  if (durationMs < 60000) return `${Math.floor(durationMs / 1000)}s`;
-  
-  const minutes = Math.floor(durationMs / 60000);
-  const seconds = Math.floor((durationMs % 60000) / 1000);
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-};
+import { formatTimestamp, formatDuration, getCurrentTimestampUs } from '../utils/timestamp';
 
 // Helper function to get status chip configuration
 const getStatusChipConfig = (status: string) => {
@@ -77,7 +66,8 @@ const animationStyles = {
 
 /**
  * ActiveAlertCard component displays an individual active alert
- * with progress indicators and real-time status updates
+ * with progress indicators and real-time status updates.
+ * Uses Unix timestamp utilities for optimal performance and consistency.
  */
 const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({ 
   session, 
@@ -87,9 +77,9 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
   const statusConfig = getStatusChipConfig(session.status);
   
   // Calculate duration from start time to now (for ongoing sessions)
-  const currentDuration = session.duration_ms || (
-    Date.now() - new Date(session.started_at).getTime()
-  );
+  const currentDuration = session.completed_at_us 
+    ? formatDuration(session.started_at_us, session.completed_at_us)
+    : formatDuration(session.started_at_us, getCurrentTimestampUs());
 
   const handleCardClick = () => {
     if (onClick && session.session_id) {
@@ -153,7 +143,7 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
               textAlign: 'right',
             }}
           >
-            {formatDuration(currentDuration)}
+            {currentDuration}
           </Typography>
         </Box>
 
@@ -190,7 +180,7 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
             Agent: {session.agent_type}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Started: {new Date(session.started_at).toLocaleTimeString()}
+            Started: {formatTimestamp(session.started_at_us, 'time-only')}
           </Typography>
         </Box>
 

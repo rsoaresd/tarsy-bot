@@ -39,6 +39,7 @@ class TestHistoryRepository:
     @pytest.fixture
     def sample_alert_session(self):
         """Create sample AlertSession for testing."""
+        from tarsy.models.history import now_us
         return AlertSession(
             session_id="test-session-123",
             alert_id="alert-456",
@@ -51,7 +52,7 @@ class TestHistoryRepository:
             agent_type="KubernetesAgent",
             alert_type="NamespaceTerminating",
             status="in_progress",
-            started_at=datetime.now(timezone.utc),
+            started_at_us=now_us(),
             session_metadata={"test": "metadata"}
         )
     
@@ -114,7 +115,7 @@ class TestHistoryRepository:
         
         # Update session
         sample_alert_session.status = "completed"
-        sample_alert_session.completed_at = datetime.now(timezone.utc)
+        sample_alert_session.completed_at_us = int(datetime.now(timezone.utc).timestamp() * 1_000_000)
         
         result = repository.update_alert_session(sample_alert_session)
         assert result == True
@@ -122,7 +123,7 @@ class TestHistoryRepository:
         # Verify update
         updated_session = repository.get_alert_session(sample_alert_session.session_id)
         assert updated_session.status == "completed"
-        assert updated_session.completed_at is not None
+        assert updated_session.completed_at_us is not None
     
     @pytest.mark.unit
     def test_create_llm_interaction_success(self, repository, sample_alert_session, sample_llm_interaction):
@@ -195,7 +196,11 @@ class TestHistoryRepository:
     def test_get_alert_sessions_with_date_filters(self, repository):
         """Test getting alert sessions with date range filters."""
         # Create sessions with different timestamps
-        now = datetime.now(timezone.utc)
+        from tarsy.models.history import now_us
+        now_us_time = now_us()
+        five_days_ago_us = now_us_time - (5 * 24 * 60 * 60 * 1000000)  # 5 days in microseconds
+        one_hour_ago_us = now_us_time - (60 * 60 * 1000000)  # 1 hour in microseconds
+        
         old_session = AlertSession(
             session_id="old-session",
             alert_id="old-alert",
@@ -203,8 +208,8 @@ class TestHistoryRepository:
             agent_type="TestAgent",
             alert_type="test",
             status="completed",
-            started_at=now - timedelta(days=5),
-            completed_at=now - timedelta(days=5)
+            started_at_us=five_days_ago_us,
+            completed_at_us=five_days_ago_us
         )
         
         new_session = AlertSession(
@@ -214,20 +219,22 @@ class TestHistoryRepository:
             agent_type="TestAgent",
             alert_type="test",
             status="completed",
-            started_at=now - timedelta(hours=1),
-            completed_at=now - timedelta(hours=1)
+            started_at_us=one_hour_ago_us,
+            completed_at_us=one_hour_ago_us
         )
         
         repository.create_alert_session(old_session)
         repository.create_alert_session(new_session)
         
-        # Test start_date filter
-        result = repository.get_alert_sessions(start_date=now - timedelta(days=2))
+        # Test start_date filter (convert unix timestamp back to datetime for current API)
+        two_days_ago_us = now_us_time - (2 * 24 * 60 * 60 * 1000000)  # 2 days in microseconds
+        two_days_ago_dt = datetime.fromtimestamp(two_days_ago_us / 1000000, tz=timezone.utc)
+        result = repository.get_alert_sessions(start_date=two_days_ago_dt)
         assert len(result["sessions"]) == 1
         assert result["sessions"][0].session_id == new_session.session_id
         
-        # Test end_date filter
-        result = repository.get_alert_sessions(end_date=now - timedelta(days=2))
+        # Test end_date filter (convert unix timestamp back to datetime for current API)
+        result = repository.get_alert_sessions(end_date=two_days_ago_dt)
         assert len(result["sessions"]) == 1
         assert result["sessions"][0].session_id == old_session.session_id
     
@@ -325,10 +332,87 @@ class TestHistoryRepository:
         assert events[1]["type"] == "mcp"
         assert events[2]["type"] == "llm"
         
-        # Verify timeline is ordered by timestamp
+                # Verify timeline is ordered by timestamp_us
         for i in range(len(events) - 1):
-            assert events[i]["timestamp"] <= events[i + 1]["timestamp"]
-    
+            assert events[i]["timestamp_us"] <= events[i + 1]["timestamp_us"]
+
+    @pytest.mark.unit
+    def test_get_session_timeline_unix_timestamp_precision(self, repository, sample_alert_session):
+        """Test session timeline with Unix timestamp precision and chronological ordering."""
+        # Create session
+        repository.create_alert_session(sample_alert_session)
+        
+        # Create interactions with specific Unix timestamps (microseconds since epoch)
+        base_timestamp_us = 1705314645123456  # 2024-01-15T10:30:45.123456Z UTC
+        
+        # Create LLM interaction with precise timestamp
+        llm_interaction = LLMInteraction(
+            interaction_id="llm-precise",
+            session_id=sample_alert_session.session_id,
+            prompt_text="Precise timestamp prompt",
+            response_text="Precise timestamp response",
+            model_used="gpt-4",
+            timestamp_us=base_timestamp_us,
+            step_description="LLM interaction with precise timestamp"
+        )
+        
+        # Create MCP communication 1 second later
+        mcp_communication = MCPCommunication(
+            communication_id="mcp-later",
+            session_id=sample_alert_session.session_id,
+            server_name="kubernetes-server",
+            communication_type="tool_call",
+            tool_name="kubectl_get",
+            timestamp_us=base_timestamp_us + 1_000_000,  # 1 second later
+            step_description="MCP call 1 second later",
+            success=True
+        )
+        
+        # Create another LLM interaction 500ms after first
+        llm_interaction_middle = LLMInteraction(
+            interaction_id="llm-middle",
+            session_id=sample_alert_session.session_id,
+            prompt_text="Middle timestamp prompt",
+            response_text="Middle timestamp response",
+            model_used="gpt-4",
+            timestamp_us=base_timestamp_us + 500_000,  # 500ms later
+            step_description="LLM interaction in middle"
+        )
+        
+        repository.create_llm_interaction(llm_interaction)
+        repository.create_mcp_communication(mcp_communication)
+        repository.create_llm_interaction(llm_interaction_middle)
+        
+        # Get timeline
+        timeline = repository.get_session_timeline(sample_alert_session.session_id)
+        
+        assert timeline is not None
+        events = timeline["chronological_timeline"]
+        assert len(events) == 3
+        
+        # Verify chronological ordering by timestamp_us
+        assert events[0]["id"] == "llm-precise"
+        assert events[1]["id"] == "llm-middle"
+        assert events[2]["id"] == "mcp-later"
+        
+        # Verify Unix timestamps are preserved for sorting
+        assert events[0]["timestamp_us"] == base_timestamp_us
+        assert events[1]["timestamp_us"] == base_timestamp_us + 500_000
+        assert events[2]["timestamp_us"] == base_timestamp_us + 1_000_000
+        
+        # Verify Unix timestamps are returned as integers
+        assert events[0]["timestamp_us"] == base_timestamp_us
+        assert events[1]["timestamp_us"] == base_timestamp_us + 500_000  # +500ms
+        assert events[2]["timestamp_us"] == base_timestamp_us + 1_000_000  # +1s
+        
+        # Verify all timestamp_us values are integers
+        for event in events:
+            assert isinstance(event["timestamp_us"], int)
+            assert event["timestamp_us"] > 0
+            
+            # Verify no ISO string conversion is happening anymore
+            assert "timestamp" not in event or event.get("timestamp") is None
+
     @pytest.mark.unit
     def test_get_active_sessions(self, repository):
         """Test getting active sessions."""
@@ -368,7 +452,10 @@ class TestHistoryRepository:
     def test_cleanup_old_sessions(self, repository):
         """Test cleanup of old sessions."""
         # Create old and new sessions
-        now = datetime.now(timezone.utc)
+        from tarsy.models.history import now_us
+        now_us_time = now_us()
+        hundred_days_ago_us = now_us_time - (100 * 24 * 60 * 60 * 1000000)  # 100 days in microseconds
+        one_day_ago_us = now_us_time - (24 * 60 * 60 * 1000000)  # 1 day in microseconds
         
         old_session = AlertSession(
             session_id="old-session",
@@ -377,8 +464,8 @@ class TestHistoryRepository:
             agent_type="TestAgent",
             alert_type="test",
             status="completed",
-            started_at=now - timedelta(days=100),
-            completed_at=now - timedelta(days=100)
+            started_at_us=hundred_days_ago_us,
+            completed_at_us=hundred_days_ago_us
         )
         
         new_session = AlertSession(
@@ -388,8 +475,8 @@ class TestHistoryRepository:
             agent_type="TestAgent",
             alert_type="test",
             status="completed",
-            started_at=now - timedelta(days=1),
-            completed_at=now - timedelta(days=1)
+            started_at_us=one_day_ago_us,
+            completed_at_us=one_day_ago_us
         )
         
         repository.create_alert_session(old_session)
@@ -806,13 +893,19 @@ class TestHistoryRepositoryPerformance:
         from datetime import datetime, timezone, timedelta
         
         # Session 1: 60 seconds duration
+        from tarsy.models.history import now_us
+        now_us_time = now_us()
+        one_minute_ago_us = now_us_time - (60 * 1000000)  # 1 minute in microseconds
+        two_minutes_ago_us = now_us_time - (2 * 60 * 1000000)  # 2 minutes in microseconds
+        four_minutes_ago_us = now_us_time - (4 * 60 * 1000000)  # 4 minutes in microseconds
+        
         session1 = AlertSession(
             session_id="duration_test_1",
             alert_id="alert_1",
             agent_type="test",
             status="completed",
-            started_at=datetime.now(timezone.utc) - timedelta(minutes=2),
-            completed_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            started_at_us=two_minutes_ago_us,
+            completed_at_us=one_minute_ago_us,
             alert_data={}
         )
         
@@ -822,8 +915,8 @@ class TestHistoryRepositoryPerformance:
             alert_id="alert_2",
             agent_type="test",
             status="completed",
-            started_at=datetime.now(timezone.utc) - timedelta(minutes=4),
-            completed_at=datetime.now(timezone.utc) - timedelta(minutes=2),
+            started_at_us=four_minutes_ago_us,
+            completed_at_us=two_minutes_ago_us,
             alert_data={}
         )
         
@@ -1015,8 +1108,8 @@ class TestHistoryRepositoryPerformance:
         assert "agent_type" in result
         assert "alert_type" in result
         assert "status" in result
-        assert "started_at" in result
-        assert "completed_at" in result
+        assert "started_at_us" in result
+        assert "completed_at_us" in result
         assert "duration_seconds" in result
         
         # Test search by agent_type

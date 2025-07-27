@@ -512,7 +512,7 @@ class TestResponseFormatting:
             agent_name="KubernetesAgent",
             analysis="Detailed analysis result",
             iterations=3,
-            timestamp="2024-01-01T12:00:00Z"
+            timestamp_us=1704110400000000  # 2024-01-01T12:00:00Z in microseconds since epoch
         )
         
         assert "# Alert Analysis Report" in result
@@ -520,7 +520,7 @@ class TestResponseFormatting:
         assert "**Processing Agent:** KubernetesAgent" in result
         assert "**Environment:** production" in result
         assert "**Severity:** critical" in result
-        assert "**Timestamp:** 2024-01-01T12:00:00Z" in result
+        assert "**Timestamp:** 1704110400000000" in result
         assert "## Analysis" in result
         assert "Detailed analysis result" in result
         assert "*Processed by KubernetesAgent in 3 iterations*" in result

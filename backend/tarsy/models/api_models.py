@@ -2,9 +2,10 @@
 API Models for Request/Response Serialization
 
 Defines Pydantic models for API request/response structures.
+Uses Unix timestamps (microseconds since epoch) throughout for optimal
+performance and consistency with the rest of the system.
 """
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -16,8 +17,8 @@ class SessionFilters(BaseModel):
     status: Optional[str] = Field(None, description="Filter by session status (e.g., 'in_progress', 'completed', 'error')")
     agent_type: Optional[str] = Field(None, description="Filter by agent type (e.g., 'kubernetes')")
     alert_type: Optional[str] = Field(None, description="Filter by alert type (e.g., 'NamespaceTerminating')")
-    start_date: Optional[datetime] = Field(None, description="Filter sessions started after this date (ISO format)")
-    end_date: Optional[datetime] = Field(None, description="Filter sessions started before this date (ISO format)")
+    start_date_us: Optional[int] = Field(None, description="Filter sessions started after this timestamp (microseconds since epoch UTC)")
+    end_date_us: Optional[int] = Field(None, description="Filter sessions started before this timestamp (microseconds since epoch UTC)")
     page: int = Field(1, ge=1, description="Page number for pagination")
     page_size: int = Field(20, ge=1, le=100, description="Number of items per page (1-100)")
 
@@ -36,8 +37,8 @@ class SessionSummary(BaseModel):
     agent_type: str = Field(description="Type of agent that processed the alert")
     alert_type: Optional[str] = Field(description="Type/category of the alert")
     status: str = Field(description="Current status of the session")
-    started_at: datetime = Field(description="When the session started")
-    completed_at: Optional[datetime] = Field(description="When the session completed (if finished)")
+    started_at_us: int = Field(description="When the session started (microseconds since epoch UTC)")
+    completed_at_us: Optional[int] = Field(description="When the session completed (microseconds since epoch UTC, null if not finished)")
     error_message: Optional[str] = Field(description="Error message if session failed")
     duration_ms: Optional[int] = Field(description="Session duration in milliseconds (if completed)")
     llm_interaction_count: int = Field(description="Number of LLM interactions in this session")
@@ -53,7 +54,7 @@ class TimelineEvent(BaseModel):
     """Single event in a session timeline."""
     event_id: str = Field(description="Unique event identifier")
     type: str = Field(description="Event type ('llm_interaction' or 'mcp_communication')")
-    timestamp: datetime = Field(description="When the event occurred")
+    timestamp_us: int = Field(description="When the event occurred (microseconds since epoch UTC)")
     step_description: str = Field(description="Human-readable description of this step")
     details: Dict[str, Any] = Field(description="Event-specific details")
     duration_ms: Optional[int] = Field(description="Event duration in milliseconds (if available)")
@@ -66,8 +67,8 @@ class SessionDetailResponse(BaseModel):
     agent_type: str = Field(description="Type of agent that processed the alert")
     alert_type: Optional[str] = Field(description="Type/category of the alert")
     status: str = Field(description="Current status of the session")
-    started_at: datetime = Field(description="When the session started")
-    completed_at: Optional[datetime] = Field(description="When the session completed (if finished)")
+    started_at_us: int = Field(description="When the session started (microseconds since epoch UTC)")
+    completed_at_us: Optional[int] = Field(description="When the session completed (microseconds since epoch UTC, null if not finished)")
     error_message: Optional[str] = Field(description="Error message if session failed")
     final_analysis: Optional[str] = Field(description="Final formatted analysis result if session completed successfully")
     duration_ms: Optional[int] = Field(description="Total session duration in milliseconds (if completed)")
@@ -81,7 +82,7 @@ class HealthCheckResponse(BaseModel):
     """Response for health check endpoints."""
     service: str = Field(description="Service name")
     status: str = Field(description="Service status ('healthy', 'unhealthy', 'disabled')")
-    timestamp: datetime = Field(description="Health check timestamp")
+    timestamp_us: int = Field(description="Health check timestamp (microseconds since epoch UTC)")
     details: Dict[str, Any] = Field(description="Additional health check details")
 
 class ErrorResponse(BaseModel):
@@ -89,4 +90,4 @@ class ErrorResponse(BaseModel):
     error: str = Field(description="Error type or category")
     message: str = Field(description="Human-readable error message")
     details: Optional[Dict[str, Any]] = Field(description="Additional error details")
-    timestamp: datetime = Field(description="When the error occurred") 
+    timestamp_us: int = Field(description="When the error occurred (microseconds since epoch UTC)") 

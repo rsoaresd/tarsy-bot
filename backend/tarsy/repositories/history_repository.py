@@ -1,23 +1,22 @@
 """
-History repository for alert processing audit trail data.
+Repository for Alert Processing History database operations.
 
-Provides specialized database operations for alert sessions, LLM interactions,
-and MCP communications with filtering, pagination, and chronological timeline
-reconstruction capabilities.
+Provides database access layer for alert processing history with SQLModel,
+supporting comprehensive audit trails, chronological timeline reconstruction,
+and advanced querying capabilities using Unix timestamps for optimal performance.
 """
 
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
 
-from sqlalchemy import asc, desc, func
-from sqlmodel import Session, and_, or_, select
+from sqlmodel import Session, asc, desc, func, select, and_, or_
 
-from ..models.constants import AlertSessionStatus
-from ..models.history import AlertSession, LLMInteraction, MCPCommunication
-from .base_repository import BaseRepository
+from tarsy.models.constants import AlertSessionStatus
+from tarsy.models.history import AlertSession, LLMInteraction, MCPCommunication, now_us
+from tarsy.repositories.base_repository import BaseRepository
+from tarsy.utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class HistoryRepository:
@@ -139,16 +138,16 @@ class HistoryRepository:
             if alert_type:
                 conditions.append(AlertSession.alert_type == alert_type)
             if start_date:
-                conditions.append(AlertSession.started_at >= start_date)
+                conditions.append(AlertSession.started_at_us >= start_date.timestamp() * 1_000_000)
             if end_date:
-                conditions.append(AlertSession.started_at <= end_date)
+                conditions.append(AlertSession.started_at_us <= end_date.timestamp() * 1_000_000)
             
             # Apply all conditions with AND logic
             if conditions:
                 statement = statement.where(and_(*conditions))
             
             # Order by started_at descending (most recent first)
-            statement = statement.order_by(desc(AlertSession.started_at))
+            statement = statement.order_by(desc(AlertSession.started_at_us))
             
             # Count total results for pagination
             count_statement = select(func.count(AlertSession.session_id))
@@ -238,9 +237,9 @@ class HistoryRepository:
         """
         return self.llm_interaction_repo.create(llm_interaction)
     
-    def get_session_llm_interactions(self, session_id: str) -> List[LLMInteraction]:
+    def get_llm_interactions_for_session(self, session_id: str) -> List[LLMInteraction]:
         """
-        Get all LLM interactions for a session, ordered chronologically.
+        Get all LLM interactions for a session ordered by timestamp.
         
         Args:
             session_id: The session identifier
@@ -251,13 +250,14 @@ class HistoryRepository:
         try:
             statement = select(LLMInteraction).where(
                 LLMInteraction.session_id == session_id
-            ).order_by(asc(LLMInteraction.timestamp))
+            ).order_by(asc(LLMInteraction.timestamp_us))
             
             return self.session.exec(statement).all()
         except Exception as e:
             logger.error(f"Failed to get LLM interactions for session {session_id}: {str(e)}")
             raise
-    
+
+
     # MCPCommunication operations
     def create_mcp_communication(self, mcp_communication: MCPCommunication) -> MCPCommunication:
         """
@@ -271,9 +271,9 @@ class HistoryRepository:
         """
         return self.mcp_communication_repo.create(mcp_communication)
     
-    def get_session_mcp_communications(self, session_id: str) -> List[MCPCommunication]:
+    def get_mcp_communications_for_session(self, session_id: str) -> List[MCPCommunication]:
         """
-        Get all MCP communications for a session, ordered chronologically.
+        Get all MCP communications for a session ordered by timestamp.
         
         Args:
             session_id: The session identifier
@@ -284,26 +284,27 @@ class HistoryRepository:
         try:
             statement = select(MCPCommunication).where(
                 MCPCommunication.session_id == session_id
-            ).order_by(asc(MCPCommunication.timestamp))
+            ).order_by(asc(MCPCommunication.timestamp_us))
             
             return self.session.exec(statement).all()
         except Exception as e:
             logger.error(f"Failed to get MCP communications for session {session_id}: {str(e)}")
             raise
-    
+
+
     # Timeline reconstruction operations
     def get_session_timeline(self, session_id: str) -> Dict[str, Any]:
         """
         Reconstruct chronological timeline for a session.
         
         Combines LLM interactions and MCP communications in chronological order
-        using microsecond-precision timestamps for exact ordering.
+        using microsecond-precision Unix timestamps for exact ordering.
         
         Args:
             session_id: The session identifier
             
         Returns:
-            Dictionary containing session details and chronological timeline
+            Dictionary containing session details and chronological timeline with raw Unix timestamps
         """
         try:
             # Get the session
@@ -312,8 +313,8 @@ class HistoryRepository:
                 return {}
             
             # Get all interactions and communications
-            llm_interactions = self.get_session_llm_interactions(session_id)
-            mcp_communications = self.get_session_mcp_communications(session_id)
+            llm_interactions = self.get_llm_interactions_for_session(session_id)
+            mcp_communications = self.get_mcp_communications_for_session(session_id)
             
             # Build chronological timeline
             timeline_events = []
@@ -323,7 +324,7 @@ class HistoryRepository:
                 timeline_events.append({
                     "id": interaction.interaction_id,
                     "event_id": interaction.interaction_id,
-                    "timestamp": interaction.timestamp,
+                    "timestamp_us": interaction.timestamp_us,
                     "type": "llm",
                     "step_description": interaction.step_description,
                     "duration_ms": interaction.duration_ms,
@@ -341,7 +342,7 @@ class HistoryRepository:
                 timeline_events.append({
                     "id": communication.communication_id,
                     "event_id": communication.communication_id,
-                    "timestamp": communication.timestamp,
+                    "timestamp_us": communication.timestamp_us,
                     "type": "mcp",
                     "step_description": communication.step_description,
                     "duration_ms": communication.duration_ms,
@@ -355,19 +356,8 @@ class HistoryRepository:
                     }
                 })
             
-            # Sort all events by timestamp for exact chronological ordering
-            timeline_events.sort(key=lambda x: x["timestamp"])
-            
-            # Convert timestamps to ISO format for JSON serialization
-            for event in timeline_events:
-                timestamp = event["timestamp"]
-                if timestamp.tzinfo is not None:
-                    # Convert to UTC and use Z suffix for consistency
-                    utc_timestamp = timestamp.astimezone(datetime.UTC if hasattr(datetime, 'UTC') else timezone.utc)
-                    event["timestamp"] = utc_timestamp.replace(tzinfo=None).isoformat() + "Z"
-                else:
-                    # Assume naive timestamps are UTC
-                    event["timestamp"] = timestamp.isoformat() + "Z"
+            # Sort all events by timestamp_us for exact chronological ordering
+            timeline_events.sort(key=lambda x: x["timestamp_us"])
             
             return {
                 "session": {
@@ -377,20 +367,40 @@ class HistoryRepository:
                     "agent_type": session.agent_type,
                     "alert_type": session.alert_type,
                     "status": session.status,
-                    "started_at": session.started_at.isoformat() + "Z" if session.started_at else None,
-                    "completed_at": session.completed_at.isoformat() + "Z" if session.completed_at else None,
+                    "started_at_us": session.started_at_us,
+                    "completed_at_us": session.completed_at_us,
                     "error_message": session.error_message,
                     "final_analysis": session.final_analysis,
                     "session_metadata": session.session_metadata,
                     "total_interactions": len(llm_interactions) + len(mcp_communications)
                 },
                 "chronological_timeline": timeline_events,
-                "llm_interactions": llm_interactions,
-                "mcp_communications": mcp_communications
+                "llm_interactions": [
+                    {
+                        "interaction_id": interaction.interaction_id,
+                        "timestamp_us": interaction.timestamp_us,
+                        "step_description": interaction.step_description,
+                        "model_used": interaction.model_used,
+                        "duration_ms": interaction.duration_ms
+                    }
+                    for interaction in llm_interactions
+                ],
+                "mcp_communications": [
+                    {
+                        "communication_id": communication.communication_id,
+                        "timestamp_us": communication.timestamp_us,
+                        "step_description": communication.step_description,
+                        "server_name": communication.server_name,
+                        "tool_name": communication.tool_name,
+                        "success": communication.success,
+                        "duration_ms": communication.duration_ms
+                    }
+                    for communication in mcp_communications
+                ]
             }
             
         except Exception as e:
-            logger.error(f"Failed to get session timeline for {session_id}: {str(e)}")
+            logger.error(f"Failed to reconstruct timeline for session {session_id}: {str(e)}")
             return None
     
     # Utility operations
@@ -404,7 +414,7 @@ class HistoryRepository:
         try:
             statement = select(AlertSession).where(
                 AlertSession.status.in_(AlertSessionStatus.ACTIVE_STATUSES)
-            ).order_by(desc(AlertSession.started_at))
+            ).order_by(desc(AlertSession.started_at_us))
             
             return self.session.exec(statement).all()
         except Exception as e:
@@ -451,7 +461,7 @@ class HistoryRepository:
             last_24h = datetime.now(timezone.utc) - timedelta(hours=24)
             last_24h_count = self.session.exec(
                 select(func.count(AlertSession.session_id)).where(
-                    AlertSession.started_at >= last_24h
+                    AlertSession.started_at_us >= last_24h.timestamp() * 1_000_000
                 )
             ).first() or 0
             
@@ -460,7 +470,7 @@ class HistoryRepository:
                 select(AlertSession).where(
                     and_(
                         AlertSession.status == AlertSessionStatus.COMPLETED,
-                        AlertSession.completed_at.is_not(None)
+                        AlertSession.completed_at_us.is_not(None)
                     )
                 )
             ).all()
@@ -468,7 +478,7 @@ class HistoryRepository:
             avg_duration = 0.0
             if completed_sessions_with_duration:
                 total_duration = sum([
-                    (session.completed_at - session.started_at).total_seconds()
+                    (session.completed_at_us - session.started_at_us) / 1_000_000
                     for session in completed_sessions_with_duration
                 ])
                 avg_duration = total_duration / len(completed_sessions_with_duration)
@@ -566,21 +576,21 @@ class HistoryRepository:
                     "agent_type": session.agent_type,
                     "alert_type": session.alert_type,
                     "status": session.status,
-                    "started_at": session.started_at.isoformat(),
-                    "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+                    "started_at_us": session.started_at_us,
+                    "completed_at_us": session.completed_at_us if session.completed_at_us else None,
                     "error_message": session.error_message,
                     "alert_data": session.alert_data,
                     "session_metadata": session.session_metadata
                 },
                 "timeline": timeline_data,
                 "export_metadata": {
-                    "exported_at": datetime.now(timezone.utc).isoformat(),
+                    "exported_at": now_us(),
                     "format": format,
                     "total_interactions": len(timeline_data.get("chronological_timeline", [])),
                     "session_duration_seconds": (
-                        (session.completed_at - session.started_at).total_seconds()
-                        if session.completed_at else
-                        (datetime.now(timezone.utc) - session.started_at).total_seconds()
+                        (session.completed_at_us - session.started_at_us) / 1_000_000
+                        if session.completed_at_us else
+                        (now_us() - session.started_at_us) / 1_000_000
                     )
                 }
             }
@@ -624,7 +634,7 @@ class HistoryRepository:
                     func.json_extract(AlertSession.alert_data, '$.namespace').ilike(search_pattern),
                     func.json_extract(AlertSession.session_metadata, '$.description').ilike(search_pattern)
                 )
-            ).order_by(desc(AlertSession.started_at)).limit(limit)
+            ).order_by(desc(AlertSession.started_at_us)).limit(limit)
             
             sessions = self.session.exec(statement).all()
             
@@ -632,9 +642,9 @@ class HistoryRepository:
             results = []
             for session in sessions:
                 duration_seconds = (
-                    (session.completed_at - session.started_at).total_seconds()
-                    if session.completed_at else
-                    (datetime.now(timezone.utc) - session.started_at).total_seconds()
+                    (session.completed_at_us - session.started_at_us) / 1_000_000
+                    if session.completed_at_us else
+                    (now_us() - session.started_at_us) / 1_000_000
                 )
                 
                 results.append({
@@ -643,8 +653,8 @@ class HistoryRepository:
                     "agent_type": session.agent_type,
                     "alert_type": session.alert_type,
                     "status": session.status,
-                    "started_at": session.started_at.isoformat(),
-                    "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+                    "started_at_us": session.started_at_us,
+                    "completed_at_us": session.completed_at_us if session.completed_at_us else None,
                     "error_message": session.error_message,
                     "duration_seconds": duration_seconds
                 })
@@ -671,7 +681,7 @@ class HistoryRepository:
             # Get sessions to delete
             statement = select(AlertSession).where(
                 and_(
-                    AlertSession.completed_at < cutoff_date,
+                    AlertSession.completed_at_us < cutoff_date.timestamp() * 1_000_000,
                     AlertSession.status.in_(AlertSessionStatus.TERMINAL_STATUSES)
                 )
             )
@@ -704,46 +714,4 @@ class HistoryRepository:
         except Exception as e:
             self.session.rollback()
             logger.error(f"Failed to cleanup old sessions: {str(e)}")
-            return 0
-    
-    def get_llm_interactions_for_session(self, session_id: str) -> List[LLMInteraction]:
-        """
-        Get all LLM interactions for a specific session.
-        
-        Args:
-            session_id: The session identifier
-            
-        Returns:
-            List of LLMInteraction objects for the session
-        """
-        try:
-            statement = select(LLMInteraction).where(
-                LLMInteraction.session_id == session_id
-            ).order_by(LLMInteraction.timestamp)
-            
-            return self.session.exec(statement).all()
-            
-        except Exception as e:
-            logger.error(f"Failed to get LLM interactions for session {session_id}: {str(e)}")
-            return []
-    
-    def get_mcp_communications_for_session(self, session_id: str) -> List[MCPCommunication]:
-        """
-        Get all MCP communications for a specific session.
-        
-        Args:
-            session_id: The session identifier
-            
-        Returns:
-            List of MCPCommunication objects for the session
-        """
-        try:
-            statement = select(MCPCommunication).where(
-                MCPCommunication.session_id == session_id
-            ).order_by(MCPCommunication.timestamp)
-            
-            return self.session.exec(statement).all()
-            
-        except Exception as e:
-            logger.error(f"Failed to get MCP communications for session {session_id}: {str(e)}")
-            return [] 
+            return 0 

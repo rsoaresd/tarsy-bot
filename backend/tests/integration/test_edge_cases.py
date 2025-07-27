@@ -122,8 +122,8 @@ class TestEdgeCases:
         
         # Assert - Should handle old timestamps gracefully
         assert result is not None
-        # Should still contain timestamp information
-        assert str(old_timestamp.year) in result or "2023" in result
+        # Should contain timestamp information (in Unix timestamp format)
+        assert "**Timestamp:**" in result
 
     async def test_malformed_runbook_url(
         self,

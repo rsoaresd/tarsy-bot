@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from tarsy.config.settings import get_settings
 from tarsy.models.constants import AlertSessionStatus
-from tarsy.models.history import AlertSession, LLMInteraction, MCPCommunication
+from tarsy.models.history import AlertSession, LLMInteraction, MCPCommunication, now_us
 from tarsy.repositories.base_repository import DatabaseManager
 from tarsy.repositories.history_repository import HistoryRepository
 
@@ -254,7 +254,7 @@ class HistoryService:
                 if final_analysis:
                     session.final_analysis = final_analysis
                 if status in AlertSessionStatus.TERMINAL_STATUSES:
-                    session.completed_at = datetime.now(timezone.utc)
+                    session.completed_at_us = now_us()
                 
                 success = repo.update_alert_session(session)
                 if success:
@@ -768,7 +768,7 @@ class HistoryService:
                         # Mark session as failed with appropriate error message
                         session.status = AlertSessionStatus.FAILED
                         session.error_message = "Backend was restarted - session terminated unexpectedly"
-                        session.completed_at = datetime.now(timezone.utc)
+                        session.completed_at_us = now_us()
                         
                         success = repo.update_alert_session(session)
                         if success:

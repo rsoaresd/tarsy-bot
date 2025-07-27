@@ -1,14 +1,13 @@
 """
-Database models for Alert Processing History Service.
+History data models for alert processing audit trail.
 
-This module defines SQLModel database models for capturing comprehensive
-audit trails of alert processing workflows, including all LLM interactions
-and MCP communications with microsecond-precision timestamps for exact
-chronological ordering.
+Defines SQLModel classes for storing alert processing sessions,
+LLM interactions, and MCP communications with Unix timestamp
+precision for optimal performance and consistency.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import timezone, datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel, Index
@@ -20,12 +19,18 @@ if TYPE_CHECKING:
     pass
 
 
+def now_us() -> int:
+    """Get current timestamp as microseconds since epoch (UTC)."""
+    return int(datetime.now(timezone.utc).timestamp() * 1000000)
+
+
 class AlertSession(SQLModel, table=True):
     """
     Represents an alert processing session with complete lifecycle tracking.
     
     Captures the full context of alert processing from initiation to completion,
     including session metadata, processing status, and timing information.
+    Uses Unix timestamps (microseconds since epoch) for optimal performance and precision.
     """
     
     __tablename__ = "alert_sessions"
@@ -61,14 +66,15 @@ class AlertSession(SQLModel, table=True):
         description=f"Current processing status ({', '.join(AlertSessionStatus.ALL_STATUSES)})"
     )
     
-    started_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Session start timestamp with microsecond precision"
+    started_at_us: int = Field(
+        default_factory=now_us,
+        description="Session start timestamp (microseconds since epoch UTC)",
+        index=True
     )
     
-    completed_at: Optional[datetime] = Field(
+    completed_at_us: Optional[int] = Field(
         default=None,
-        description="Session completion timestamp with microsecond precision"
+        description="Session completion timestamp (microseconds since epoch UTC)"
     )
     
     error_message: Optional[str] = Field(
@@ -104,7 +110,7 @@ class LLMInteraction(SQLModel, table=True):
     Captures comprehensive LLM interaction data for audit trails.
     
     Records all prompts, responses, tool calls, and performance metrics
-    with microsecond-precision timestamps for exact chronological ordering.
+    with microsecond-precision Unix timestamps for exact chronological ordering.
     """
     
     __tablename__ = "llm_interactions"
@@ -120,9 +126,9 @@ class LLMInteraction(SQLModel, table=True):
         description="Foreign key reference to the parent alert session"
     )
     
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Interaction timestamp with microsecond precision for chronological ordering",
+    timestamp_us: int = Field(
+        default_factory=now_us,
+        description="Interaction timestamp (microseconds since epoch UTC) for chronological ordering",
         index=True
     )
     
@@ -174,7 +180,7 @@ class MCPCommunication(SQLModel, table=True):
     Tracks all MCP (Model Context Protocol) communications and tool interactions.
     
     Captures tool discovery, invocations, and results with microsecond-precision
-    timestamps to maintain exact chronological ordering with LLM interactions.
+    Unix timestamps to maintain exact chronological ordering with LLM interactions.
     """
     
     __tablename__ = "mcp_communications"
@@ -190,9 +196,9 @@ class MCPCommunication(SQLModel, table=True):
         description="Foreign key reference to the parent alert session"
     )
     
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Communication timestamp with microsecond precision for chronological ordering",
+    timestamp_us: int = Field(
+        default_factory=now_us,
+        description="Communication timestamp (microseconds since epoch UTC) for chronological ordering",
         index=True
     )
     

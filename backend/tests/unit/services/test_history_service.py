@@ -254,7 +254,7 @@ class TestHistoryService:
             
             assert result == True
             assert mock_session.status == "completed"
-            assert mock_session.completed_at is not None
+            assert mock_session.completed_at_us is not None
     
     @pytest.mark.unit
     def test_update_session_status_with_final_analysis(self, history_service, mock_repository):
@@ -276,7 +276,7 @@ class TestHistoryService:
             assert result == True
             assert mock_session.status == "completed"
             assert mock_session.final_analysis == analysis
-            assert mock_session.completed_at is not None
+            assert mock_session.completed_at_us is not None
             mock_repository.update_alert_session.assert_called_once_with(mock_session)
     
     @pytest.mark.unit
@@ -1414,7 +1414,7 @@ async def test_cleanup_orphaned_sessions():
     for session in mock_active_sessions:
         assert session.status == AlertSessionStatus.FAILED
         assert session.error_message == "Backend was restarted - session terminated unexpectedly"
-        assert hasattr(session, 'completed_at')
+        assert hasattr(session, 'completed_at_us')
 
 
 @pytest.mark.asyncio
@@ -1481,7 +1481,7 @@ class TestHistoryAPIResponseStructure:
             'alert_type',
             'status',
             'started_at',
-            'completed_at',
+            'completed_at_us',
             'error_message',
             'final_analysis',
             'duration_ms',
@@ -1499,7 +1499,7 @@ class TestHistoryAPIResponseStructure:
             'alert_type': 'TestAlert',
             'status': 'completed',
             'started_at': '2024-01-01T00:00:00Z',
-            'completed_at': '2024-01-01T00:01:00Z',
+            'completed_at_us': 1704067260000000,  # 2024-01-01T00:01:00Z in microseconds
             'error_message': None,
             'final_analysis': 'Test analysis complete',
             'duration_ms': 60000,

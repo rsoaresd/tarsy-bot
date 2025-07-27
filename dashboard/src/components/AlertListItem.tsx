@@ -2,32 +2,12 @@ import React from 'react';
 import { TableRow, TableCell, Typography } from '@mui/material';
 import StatusBadge from './StatusBadge';
 import type { AlertListItemProps } from '../types';
-
-// Format duration helper function
-const formatDuration = (durationMs: number | null): string => {
-  if (!durationMs) return '-';
-  if (durationMs < 1000) return `${durationMs}ms`;
-  if (durationMs < 60000) return `${(durationMs / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(durationMs / 60000);
-  const seconds = Math.floor((durationMs % 60000) / 1000);
-  return `${minutes}m ${seconds}s`;
-};
-
-// Format time helper function
-const formatTime = (timestamp: string): string => {
-  const date = new Date(timestamp);
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  });
-};
+import { formatTimestamp, formatDurationMs, formatDuration } from '../utils/timestamp';
 
 /**
  * AlertListItem component represents a single session row in the alerts table
  * Displays basic session information: status, type, agent, time, and duration
+ * Uses Unix timestamp utilities for optimal performance and consistent formatting
  */
 const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick }) => {
   const handleRowClick = () => {
@@ -39,6 +19,10 @@ const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick }) => {
       onClick(session.session_id);
     }
   };
+
+  // Calculate duration if not provided
+  const duration = session.duration_ms || 
+    (session.completed_at_us ? formatDuration(session.started_at_us, session.completed_at_us) : null);
 
   return (
     <TableRow 
@@ -66,12 +50,13 @@ const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick }) => {
       </TableCell>
       <TableCell>
         <Typography variant="body2" color="text.secondary">
-          {formatTime(session.started_at)}
+          {formatTimestamp(session.started_at_us, 'short')}
         </Typography>
       </TableCell>
       <TableCell>
         <Typography variant="body2" color="text.secondary">
-          {formatDuration(session.duration_ms)}
+          {typeof duration === 'string' ? duration : 
+           duration !== null ? formatDurationMs(duration) : '-'}
         </Typography>
       </TableCell>
     </TableRow>

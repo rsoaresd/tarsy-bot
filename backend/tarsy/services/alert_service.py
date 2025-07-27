@@ -4,12 +4,13 @@ Alert Service for multi-layer agent architecture.
 This module provides the service that delegates alert processing to
 specialized agents based on alert type. It implements the multi-layer
 agent architecture for alert processing.
+Uses Unix timestamps (microseconds since epoch) throughout for optimal
+performance and consistency with the rest of the system.
 """
 
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from tarsy.config.settings import Settings
@@ -17,6 +18,7 @@ from tarsy.integrations.llm.client import LLMManager
 from tarsy.integrations.mcp.client import MCPClient
 from tarsy.models.alert import Alert
 from tarsy.models.constants import AlertSessionStatus
+from tarsy.models.history import now_us
 from tarsy.services.agent_factory import AgentFactory
 from tarsy.services.agent_registry import AgentRegistry
 from tarsy.services.history_service import get_history_service
@@ -260,7 +262,7 @@ class AlertService:
                     agent_name=agent_class_name,
                     analysis=analysis,
                     iterations=iterations,
-                    timestamp=agent_result.get('timestamp')
+                    timestamp_us=agent_result.get('timestamp_us')
                 )
                 
                 # Mark history session as completed successfully
@@ -306,7 +308,7 @@ class AlertService:
         agent_name: str,
         analysis: str,
         iterations: int,
-        timestamp: Optional[str] = None
+        timestamp_us: Optional[int] = None
     ) -> str:
         """
         Format successful analysis response.
@@ -316,11 +318,17 @@ class AlertService:
             agent_name: Name of the agent that processed the alert
             analysis: Analysis result from the agent
             iterations: Number of iterations performed
-            timestamp: Processing timestamp
+            timestamp_us: Processing timestamp in microseconds since epoch UTC
             
         Returns:
             Formatted response string
         """
+        # Convert unix timestamp to ISO string for display
+        if timestamp_us:
+            timestamp_str = f"{timestamp_us}"  # Keep as unix timestamp for consistency
+        else:
+            timestamp_str = f"{now_us()}"  # Current unix timestamp
+        
         response_parts = [
             "# Alert Analysis Report",
             "",
@@ -328,7 +336,7 @@ class AlertService:
             f"**Processing Agent:** {agent_name}",
             f"**Environment:** {alert.environment}",
             f"**Severity:** {alert.severity}",
-            f"**Timestamp:** {timestamp or datetime.now(timezone.utc).isoformat()}",
+            f"**Timestamp:** {timestamp_str}",
             "",
             "## Analysis",
             "",
@@ -405,10 +413,10 @@ class AlertService:
             if hasattr(alert, 'id') and alert.id:
                 alert_id = alert.id
             else:
-                # Use nanosecond timestamp and random component to prevent collisions
-                timestamp_ns = int(datetime.now(timezone.utc).timestamp() * 1000000)  # microseconds
+                # Use unix timestamp in microseconds and random component to prevent collisions
+                timestamp_us = now_us()
                 random_suffix = uuid.uuid4().hex[:8]  # 8 chars of randomness
-                alert_id = f"{alert.alert_type}_{alert.environment}_{alert.namespace}_{timestamp_ns}_{random_suffix}"
+                alert_id = f"{alert.alert_type}_{alert.environment}_{alert.namespace}_{timestamp_us}_{random_suffix}"
             
             session_id = self.history_service.create_session(
                 alert_id=alert_id,
@@ -422,7 +430,7 @@ class AlertService:
                     'severity': alert.severity,
                     'pod': getattr(alert, 'pod', None),
                     'context': getattr(alert, 'context', None),
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+                    'timestamp_us': now_us()  # Unix timestamp in microseconds
                  },
                 agent_type=agent_type,
                 alert_type=alert.alert_type
@@ -469,7 +477,7 @@ class AlertService:
             if not session_id or not self.history_service or not self.history_service.enabled:
                 return
                 
-            # The history service automatically sets completed_at when status is 'completed' or 'failed'
+            # The history service automatically sets completed_at_us when status is 'completed' or 'failed'
             self.history_service.update_session_status(
                 session_id=session_id,
                 status=status,
@@ -491,7 +499,7 @@ class AlertService:
             if not session_id or not self.history_service or not self.history_service.enabled:
                 return
                 
-            # Status 'failed' will automatically set completed_at in the history service
+            # Status 'failed' will automatically set completed_at_us in the history service
             self.history_service.update_session_status(
                 session_id=session_id,
                 status='failed',
