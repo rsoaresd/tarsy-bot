@@ -96,7 +96,7 @@ export const formatDurationMs = (durationMs: number): string => {
   }
   
   if (durationMs < 60000) {
-    return `${(durationMs / 1000).toFixed(1)}s`;
+    return `${Math.round(durationMs / 1000)}s`;
   }
   
   const minutes = Math.floor(durationMs / 60000);

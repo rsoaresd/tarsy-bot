@@ -141,7 +141,7 @@ function SessionDetailPage() {
       };
 
       // Handle session-specific timeline updates (LLM/MCP interactions)
-      const handleSessionSpecificUpdate = (data: any) => {
+      const handleSessionSpecificUpdate = async (data: any) => {
         console.log('SessionDetailPage received session-specific update:', data);
         
         // Handle session status changes - update session state without refetching
@@ -172,52 +172,70 @@ function SessionDetailPage() {
           console.log('Session state updated from WebSocket data, no refetch needed');
           return;
         }
-        // Handle batched timeline updates - add new timeline items without refetching
+        // Handle batched timeline updates - intelligently update only new timeline items
         else if (data.type === 'batched_session_updates' && data.updates) {
-          console.log('Timeline batch update detected, adding timeline items');
-          setSession(prevSession => {
-            if (!prevSession) return prevSession;
+          console.log('Timeline batch update detected, fetching new timeline items smoothly');
+          
+          // Get the current timeline length to detect new items
+          const currentTimelineLength = session?.chronological_timeline?.length || 0;
+          
+          // WebSocket updates only contain previews, so we need to refetch for complete details
+          // But we'll do it smartly to avoid full screen refresh
+          try {
+            const updatedSessionData = await apiClient.getSessionDetail(sessionId);
             
-            const newTimelineItems = data.updates.map((update: any) => ({
-              id: `${update.timestamp}_${Math.random()}`, // Generate unique ID
-              event_id: update.session_id || sessionId,
-              type: update.type === 'llm_interaction' ? 'llm' : 'mcp',
-              timestamp_us: new Date(update.timestamp).getTime() * 1000,
-              step_description: update.step_description || 'Processing...',
-              duration_ms: update.duration_ms || null,
-              details: update.type === 'llm_interaction' ? {
-                prompt: 'LLM Analysis',
-                response: update.step_description || '',
-                model_name: update.model_used || 'unknown',
-                tokens_used: undefined,
-                temperature: undefined
-              } : {
-                tool_name: update.tool_name || 'unknown',
-                parameters: {},
-                result: update.step_description || '',
-                server_name: update.server_name || 'unknown',
-                execution_time_ms: update.duration_ms || 0
-              }
-            }));
-            
-            // Add new items to existing timeline, avoiding duplicates
-            const existingTimestamps = new Set(prevSession.chronological_timeline.map((item: any) => item.timestamp_us));
-            const uniqueNewItems = newTimelineItems.filter((item: any) => !existingTimestamps.has(item.timestamp_us));
-            
-            return {
-              ...prevSession,
-              chronological_timeline: [...prevSession.chronological_timeline, ...uniqueNewItems].sort((a: any, b: any) => a.timestamp_us - b.timestamp_us),
-              llm_interaction_count: (prevSession.llm_interaction_count || 0) + uniqueNewItems.filter((item: any) => item.type === 'llm').length,
-              mcp_communication_count: (prevSession.mcp_communication_count || 0) + uniqueNewItems.filter((item: any) => item.type === 'mcp').length
-            };
-          });
+            // Only update if we actually have new timeline items
+            if (updatedSessionData.chronological_timeline.length > currentTimelineLength) {
+              setSession(prevSession => {
+                if (!prevSession) return updatedSessionData;
+                
+                // Merge with existing session data, only updating timeline and essential fields
+                return {
+                  ...prevSession,
+                  chronological_timeline: updatedSessionData.chronological_timeline,
+                  status: updatedSessionData.status,
+                  duration_ms: updatedSessionData.duration_ms,
+                  completed_at_us: updatedSessionData.completed_at_us,
+                  final_analysis: updatedSessionData.final_analysis || prevSession.final_analysis,
+                  error_message: updatedSessionData.error_message || prevSession.error_message
+                };
+              });
+              
+              console.log(`Timeline updated smoothly: ${updatedSessionData.chronological_timeline.length - currentTimelineLength} new items added`);
+            } else {
+              console.log('No new timeline items detected, skipping update');
+            }
+          } catch (error) {
+            console.error('Failed to fetch updated timeline:', error);
+            // Fallback to basic session update without timeline details
+          }
         }
         // Handle individual timeline interactions (fallback) - rarely used now
         else if (data.interaction_type === 'llm' || data.interaction_type === 'mcp') {
-          console.log('Individual timeline interaction detected, adding timeline item');
-          // Similar logic as above but for single item - implementation omitted for brevity
-          // In practice, this case should rarely be hit since we use batched updates
-          fetchSessionDetail(sessionId);
+          console.log('Individual timeline interaction detected, updating timeline smoothly');
+          // Use the same smooth update approach as batched updates
+          try {
+            const updatedSessionData = await apiClient.getSessionDetail(sessionId);
+            const currentTimelineLength = session?.chronological_timeline?.length || 0;
+            
+            if (updatedSessionData.chronological_timeline.length > currentTimelineLength) {
+              setSession(prevSession => {
+                if (!prevSession) return updatedSessionData;
+                
+                return {
+                  ...prevSession,
+                  chronological_timeline: updatedSessionData.chronological_timeline,
+                  status: updatedSessionData.status,
+                  duration_ms: updatedSessionData.duration_ms,
+                  completed_at_us: updatedSessionData.completed_at_us,
+                  final_analysis: updatedSessionData.final_analysis || prevSession.final_analysis,
+                  error_message: updatedSessionData.error_message || prevSession.error_message
+                };
+              });
+            }
+          } catch (error) {
+            console.error('Failed to fetch updated timeline for individual interaction:', error);
+          }
         } 
         // Handle any other session-specific updates - log and potentially ignore
         else {

@@ -5,6 +5,7 @@ import { ContentCopy, Check } from '@mui/icons-material';
 interface CopyButtonProps {
   text: string;
   variant?: 'button' | 'icon';
+  buttonVariant?: 'contained' | 'outlined' | 'text';
   size?: 'small' | 'medium' | 'large';
   label?: string;
   tooltip?: string;
@@ -16,7 +17,8 @@ interface CopyButtonProps {
  */
 function CopyButton({ 
   text, 
-  variant = 'button', 
+  variant = 'button',
+  buttonVariant = 'outlined',
   size = 'small', 
   label = 'Copy',
   tooltip = 'Copy to clipboard'
@@ -51,7 +53,7 @@ function CopyButton({
     <Tooltip title={copied ? 'Copied!' : tooltip}>
       <Button
         size={size}
-        variant="outlined"
+        variant={buttonVariant}
         startIcon={copied ? <Check /> : <ContentCopy />}
         onClick={handleCopy}
         color={copied ? 'success' : 'primary'}

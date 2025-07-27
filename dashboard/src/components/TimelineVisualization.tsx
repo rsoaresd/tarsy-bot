@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { 
   Box, 
   Paper, 
@@ -39,6 +39,135 @@ function TimelineVisualization({
   isActive = false
 }: TimelineVisualizationProps) {
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+
+  // Enhanced timeline formatter for human-readable copy - NO TRUNCATION
+  const getFormattedTimelineText = (): string => {
+    const header = '=== ALERT PROCESSING TIMELINE ===\n\n';
+    const summary = `Timeline Overview:\n- Total Steps: ${timelineItems.length}\n- Duration: ${timelineItems.length > 0 ? formatDurationMs((timelineItems[timelineItems.length - 1].timestamp_us - timelineItems[0].timestamp_us) / 1000) : 'N/A'}\n\n`;
+    
+    const formattedItems = timelineItems.map((item, index) => {
+      const timestamp = formatTimestamp(item.timestamp_us, 'absolute');
+      const duration = item.duration_ms ? ` (${formatDurationMs(item.duration_ms)})` : '';
+      const stepNumber = `STEP ${index + 1}`;
+      
+      let formatted = `${stepNumber}: ${item.step_description}\n`;
+      formatted += `Time: ${timestamp}${duration}\n`;
+      formatted += `Type: ${item.type.toUpperCase()}\n`;
+      
+      // Add detailed information based on interaction type
+      if (item.details) {
+        formatted += '\nDetails:\n';
+        
+        switch (item.type) {
+          case 'llm':
+            const llmDetails = item.details as any;
+            if (llmDetails.prompt) {
+              // Parse LLM messages if they're in Python format
+              const prompt = llmDetails.prompt.trim();
+              if (prompt.startsWith('[') && prompt.includes('LLMMessage(') && prompt.includes('role=')) {
+                // Parse Python LLMMessage objects
+                const messageParts = prompt.split('LLMMessage(').slice(1);
+                messageParts.forEach((part: string) => {
+                  const roleMatch = part.match(/role='([^']+)'/);
+                  if (!roleMatch) return;
+                  
+                  const role = roleMatch[1];
+                  const contentStartMatch = part.match(/content='(.*)$/s);
+                  if (!contentStartMatch) return;
+                  
+                  let rawContent = contentStartMatch[1];
+                  let messageContent = '';
+                  
+                  // Parse content character by character (same logic as InteractionDetails)
+                  let i = 0;
+                  let escapeNext = false;
+                  
+                  while (i < rawContent.length) {
+                    const char = rawContent[i];
+                    
+                    if (escapeNext) {
+                      messageContent += char;
+                      escapeNext = false;
+                    } else if (char === '\\') {
+                      messageContent += char;
+                      escapeNext = true;
+                    } else if (char === "'") {
+                      const nextChars = rawContent.substring(i + 1, i + 5);
+                      if (nextChars.startsWith(')') || nextChars.match(/^,\s*[a-zA-Z_]+=/) || i === rawContent.length - 1) {
+                        break;
+                      }
+                      messageContent += char;
+                    } else {
+                      messageContent += char;
+                    }
+                    i++;
+                  }
+                  
+                  // Clean up escaped characters
+                  messageContent = messageContent
+                    .replace(/\\n/g, '\n')
+                    .replace(/\\'/g, "'")
+                    .replace(/\\"/g, '"')
+                    .replace(/\\\\/g, '\\')
+                    .replace(/\\t/g, '\t');
+                  
+                  // NO TRUNCATION - Full content
+                  formatted += `  ${role.toUpperCase()} MESSAGE:\n  ${messageContent.replace(/\n/g, '\n  ')}\n\n`;
+                });
+              } else {
+                // NO TRUNCATION - Full prompt
+                formatted += `  PROMPT: ${llmDetails.prompt.replace(/\n/g, '\n  ')}\n`;
+              }
+              
+              if (llmDetails.response) {
+                // NO TRUNCATION - Full response
+                formatted += `  RESPONSE: ${llmDetails.response.replace(/\n/g, '\n  ')}\n`;
+              }
+              
+              if (llmDetails.model_name) formatted += `  MODEL: ${llmDetails.model_name}\n`;
+              if (llmDetails.tokens_used) formatted += `  TOKENS: ${llmDetails.tokens_used}\n`;
+              if (llmDetails.temperature !== undefined) formatted += `  TEMPERATURE: ${llmDetails.temperature}\n`;
+            }
+            break;
+            
+          case 'mcp':
+            const mcpDetails = item.details as any;
+            if (mcpDetails.tool_name) formatted += `  TOOL: ${mcpDetails.tool_name}\n`;
+            if (mcpDetails.server_name) formatted += `  SERVER: ${mcpDetails.server_name}\n`;
+            if (mcpDetails.execution_time_ms) formatted += `  EXECUTION TIME: ${mcpDetails.execution_time_ms}ms\n`;
+            
+            if (mcpDetails.parameters && Object.keys(mcpDetails.parameters).length > 0) {
+              formatted += `  PARAMETERS: ${JSON.stringify(mcpDetails.parameters, null, 2).replace(/\n/g, '\n  ')}\n`;
+            }
+            
+            if (mcpDetails.result) {
+              const resultStr = typeof mcpDetails.result === 'string' 
+                ? mcpDetails.result 
+                : JSON.stringify(mcpDetails.result, null, 2);
+              // NO TRUNCATION - Full result
+              formatted += `  RESULT: ${resultStr.replace(/\n/g, '\n  ')}\n`;
+            }
+            break;
+            
+          case 'system':
+            const systemDetails = item.details as any;
+            if (systemDetails.description) {
+              formatted += `  DESCRIPTION: ${systemDetails.description}\n`;
+            }
+            if (systemDetails.metadata && Object.keys(systemDetails.metadata).length > 0) {
+              formatted += `  METADATA: ${JSON.stringify(systemDetails.metadata, null, 2).replace(/\n/g, '\n  ')}\n`;
+            }
+            break;
+        }
+      }
+      
+      return formatted;
+    }).join('\n' + '='.repeat(80) + '\n\n');
+    
+    const footer = isActive ? '\n[TIMELINE ACTIVE - Processing continues...]\n' : '\n[TIMELINE COMPLETE]\n';
+    
+    return header + summary + formattedItems + footer;
+  };
 
   const toggleExpansion = (itemId: string) => {
     setExpandedItems(prev => ({
@@ -95,14 +224,10 @@ function TimelineVisualization({
           Processing Timeline
         </Typography>
         <CopyButton
-          text={timelineItems.map(item => {
-            const timestamp = formatTimestamp(item.timestamp_us, 'absolute');
-            const duration = item.duration_ms ? ` (${formatDurationMs(item.duration_ms)})` : '';
-            return `${timestamp}${duration} - ${item.type.toUpperCase()}: ${item.step_description}`;
-          }).join('\n')}
+          text={getFormattedTimelineText()}
           size="small"
           label="Copy Timeline"
-          tooltip="Copy entire timeline"
+          tooltip="Copy comprehensive timeline with all interaction details (no truncation)"
         />
       </Box>
 
@@ -250,4 +375,27 @@ function TimelineVisualization({
   );
 }
 
-export default TimelineVisualization; 
+// Custom comparison function for memo to prevent unnecessary re-renders
+const arePropsEqual = (prevProps: TimelineVisualizationProps, nextProps: TimelineVisualizationProps) => {
+  // Check if timeline items array has the same length and items
+  if (prevProps.timelineItems.length !== nextProps.timelineItems.length) {
+    return false;
+  }
+  
+  // Check if isActive status changed
+  if (prevProps.isActive !== nextProps.isActive) {
+    return false;
+  }
+  
+  // For timeline items, we only need to check if new items were added
+  // Individual item changes are handled by their own keys in React
+  for (let i = 0; i < prevProps.timelineItems.length; i++) {
+    if (prevProps.timelineItems[i]?.id !== nextProps.timelineItems[i]?.id) {
+      return false;
+    }
+  }
+  
+  return true;
+};
+
+export default memo(TimelineVisualization, arePropsEqual); 

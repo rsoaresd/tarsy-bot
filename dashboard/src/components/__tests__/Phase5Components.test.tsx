@@ -64,7 +64,7 @@ describe('Phase 5 Components', () => {
         />
       );
       
-      expect(screen.getByText('5.0s')).toBeInTheDocument();
+      expect(screen.getByText('5s')).toBeInTheDocument();
     });
 
     it('does not render when duration is null and status is completed', () => {

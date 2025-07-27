@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Box, LinearProgress, CircularProgress, Typography } from '@mui/material';
 import { formatDurationMs } from '../utils/timestamp';
 
@@ -22,9 +23,12 @@ function ProgressIndicator({
   showDuration = true,
   size = 'medium'
 }: ProgressIndicatorProps) {
+  // State for live duration updates
+  const [liveDuration, setLiveDuration] = useState<number | null>(null);
+
   // Calculate live duration for active sessions
   const getLiveDuration = () => {
-    if (duration) return duration;
+    if (duration) return duration; // Use final duration if available
     if (startedAt && (status === 'in_progress' || status === 'pending')) {
       const now = Date.now() * 1000; // Convert to microseconds
       return Math.max(0, (now - startedAt) / 1000); // Convert to milliseconds
@@ -32,7 +36,28 @@ function ProgressIndicator({
     return null;
   };
 
-  const currentDuration = getLiveDuration();
+  // Live ticking timer for active sessions
+  useEffect(() => {
+    // Only start timer for active sessions without final duration
+    if ((status === 'in_progress' || status === 'pending') && startedAt && !duration) {
+      // Update immediately
+      setLiveDuration(getLiveDuration());
+      
+      // Then update every second
+      const timer = setInterval(() => {
+        const newDuration = getLiveDuration();
+        setLiveDuration(newDuration);
+      }, 1000);
+
+      return () => clearInterval(timer);
+    } else {
+      // For completed sessions or when duration is provided, use that instead
+      setLiveDuration(duration ?? null);
+    }
+  }, [status, startedAt, duration]);
+
+  // Use live duration for display, fallback to calculated duration
+  const currentDuration = liveDuration ?? getLiveDuration();
   const sizeMap = {
     small: 16,
     medium: 24,
@@ -52,7 +77,14 @@ function ProgressIndicator({
         ) : (
           <LinearProgress 
             variant="indeterminate" 
-            sx={{ width: 100, height: size === 'small' ? 4 : 6 }} 
+            sx={{ 
+              flexGrow: 1, 
+              height: size === 'small' ? 6 : 8,
+              borderRadius: 1,
+              '& .MuiLinearProgress-bar': {
+                borderRadius: 1,
+              }
+            }} 
             color="info"
           />
         )}
@@ -78,7 +110,14 @@ function ProgressIndicator({
         ) : (
           <LinearProgress 
             variant="indeterminate" 
-            sx={{ width: 100, height: size === 'small' ? 4 : 6 }} 
+            sx={{ 
+              flexGrow: 1, 
+              height: size === 'small' ? 6 : 8,
+              borderRadius: 1,
+              '& .MuiLinearProgress-bar': {
+                borderRadius: 1,
+              }
+            }} 
             color="warning"
           />
         )}

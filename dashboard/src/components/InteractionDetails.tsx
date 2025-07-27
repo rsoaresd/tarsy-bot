@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { 
   Box, 
   Typography, 
@@ -195,7 +196,103 @@ function InteractionDetails({
     }
   };
 
-  const getInteractionText = () => {
+  // Get formatted, human-readable text using the same parsing logic as display
+  const getFormattedInteractionText = () => {
+    switch (type) {
+      case 'llm':
+        const llm = details as LLMInteraction;
+        // Parse and format LLM messages nicely
+        let formatted = '=== LLM INTERACTION ===\n\n';
+        
+        // Try to parse the prompt for structured messages
+        const prompt = llm.prompt.trim();
+        if (prompt.startsWith('[') && prompt.includes('LLMMessage(') && prompt.includes('role=')) {
+          // Parse Python LLMMessage objects
+          const messageParts = prompt.split('LLMMessage(').slice(1);
+          messageParts.forEach((part) => {
+            const roleMatch = part.match(/role='([^']+)'/);
+            if (!roleMatch) return;
+            
+            const role = roleMatch[1];
+            const contentStartMatch = part.match(/content='(.*)$/s);
+            if (!contentStartMatch) return;
+            
+            let rawContent = contentStartMatch[1];
+            let messageContent = '';
+            
+            // Parse content character by character (same logic as JsonDisplay)
+            let i = 0;
+            let escapeNext = false;
+            
+            while (i < rawContent.length) {
+              const char = rawContent[i];
+              
+              if (escapeNext) {
+                messageContent += char;
+                escapeNext = false;
+              } else if (char === '\\') {
+                messageContent += char;
+                escapeNext = true;
+              } else if (char === "'") {
+                const nextChars = rawContent.substring(i + 1, i + 5);
+                if (nextChars.startsWith(')') || nextChars.match(/^,\s*[a-zA-Z_]+=/) || i === rawContent.length - 1) {
+                  break;
+                }
+                messageContent += char;
+              } else {
+                messageContent += char;
+              }
+              i++;
+            }
+            
+            // Clean up escaped characters
+            messageContent = messageContent
+              .replace(/\\n/g, '\n')
+              .replace(/\\'/g, "'")
+              .replace(/\\"/g, '"')
+              .replace(/\\\\/g, '\\')
+              .replace(/\\t/g, '\t');
+            
+            formatted += `${role.toUpperCase()} MESSAGE:\n`;
+            formatted += `${messageContent}\n\n`;
+          });
+        } else {
+          formatted += `PROMPT:\n${llm.prompt}\n\n`;
+        }
+        
+        formatted += `RESPONSE:\n${llm.response}\n\n`;
+        formatted += `MODEL: ${llm.model_name}`;
+        if (llm.tokens_used) formatted += ` | TOKENS: ${llm.tokens_used}`;
+        if (llm.temperature !== undefined) formatted += ` | TEMPERATURE: ${llm.temperature}`;
+        
+        return formatted;
+        
+      case 'mcp':
+        const mcp = details as MCPInteraction;
+        let mcpFormatted = '=== MCP TOOL CALL ===\n\n';
+        mcpFormatted += `TOOL: ${mcp.tool_name}\n`;
+        mcpFormatted += `SERVER: ${mcp.server_name}\n`;
+        if (mcp.execution_time_ms) mcpFormatted += `EXECUTION TIME: ${mcp.execution_time_ms}ms\n`;
+        mcpFormatted += `\nPARAMETERS:\n${JSON.stringify(mcp.parameters, null, 2)}\n\n`;
+        mcpFormatted += `RESULT:\n${JSON.stringify(mcp.result, null, 2)}`;
+        return mcpFormatted;
+        
+      case 'system':
+        const system = details as SystemEvent;
+        let systemFormatted = '=== SYSTEM EVENT ===\n\n';
+        systemFormatted += `DESCRIPTION:\n${system.description}`;
+        if (system.metadata && Object.keys(system.metadata).length > 0) {
+          systemFormatted += `\n\nMETADATA:\n${JSON.stringify(system.metadata, null, 2)}`;
+        }
+        return systemFormatted;
+        
+      default:
+        return '';
+    }
+  };
+
+  // Get raw text (original function, renamed for clarity)
+  const getRawInteractionText = () => {
     switch (type) {
       case 'llm':
         const llm = details as LLMInteraction;
@@ -216,12 +313,19 @@ function InteractionDetails({
       <Box sx={{ pt: 1 }}>
         <Divider sx={{ mb: 2 }} />
         {renderDetails()}
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-start' }}>
+        <Box sx={{ mt: 2, display: 'flex', gap: 1, justifyContent: 'flex-start' }}>
           <CopyButton
-            text={getInteractionText()}
+            text={getFormattedInteractionText()}
             size="small"
             label="Copy All Details"
-            tooltip="Copy all interaction details"
+            tooltip="Copy all interaction details in formatted, human-readable format"
+          />
+          <CopyButton
+            text={getRawInteractionText()}
+            size="small"
+            label="Copy Raw Text"
+            tooltip="Copy raw interaction data (unformatted)"
+            buttonVariant="text"
           />
         </Box>
       </Box>
@@ -229,4 +333,4 @@ function InteractionDetails({
   );
 }
 
-export default InteractionDetails; 
+export default memo(InteractionDetails); 
