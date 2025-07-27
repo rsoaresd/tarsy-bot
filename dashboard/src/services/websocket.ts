@@ -326,33 +326,45 @@ class WebSocketService {
           return;
         }
         
-        // Check if this is a session-specific update (has channel property or session data)
+        // Check if this is a session-specific update (has channel property)
         if (message.channel && message.channel.startsWith('session_')) {
-          console.log(`📈 Handling session-specific dashboard_update for channel: ${message.channel}`);
+          console.log(`📈 Handling dashboard_update with session data for channel: ${message.channel}`);
           const handlers = this.eventHandlers.sessionSpecific.get(message.channel);
           if (handlers && handlers.length > 0) {
             console.log(`📈 Calling ${handlers.length} session-specific handlers for ${message.channel}`);
             handlers.forEach(handler => handler(message.data!));
           } else {
-            console.log(`⚠️  No handlers registered for session-specific channel: ${message.channel}`);
-          }
-        } else if (message.data?.session_id) {
-          // Check if the data contains session_id and route to session-specific handlers
-          const sessionChannel = `session_${message.data.session_id}`;
-          console.log(`📈 Handling dashboard_update with session data for channel: ${sessionChannel}`);
-          const handlers = this.eventHandlers.sessionSpecific.get(sessionChannel);
-          if (handlers && handlers.length > 0) {
-            console.log(`📈 Calling ${handlers.length} session-specific handlers for ${sessionChannel}`);
-            handlers.forEach(handler => handler(message.data!));
-          } else {
-            console.log(`⚠️  No handlers registered for session channel: ${sessionChannel}`);
+            console.log(`⚠️  No handlers registered for session channel: ${message.channel}`);
           }
           
           // Also call regular dashboard handlers
           console.log('📊 Also handling as regular dashboard_update, calling', this.eventHandlers.dashboardUpdate.length, 'handlers');
           this.eventHandlers.dashboardUpdate.forEach(handler => handler(message.data!));
+        } else if (message.data.session_id && message.data.type !== 'system_metrics') {
+          // Only try session-specific routing if:
+          // 1. There's a session_id in the data
+          // 2. It's not a system_metrics update (which should go to dashboard)
+          // 3. There are actually handlers registered for that session
+          const sessionChannel = `session_${message.data.session_id}`;
+          const sessionHandlers = this.eventHandlers.sessionSpecific.get(sessionChannel);
+          
+          if (sessionHandlers && sessionHandlers.length > 0) {
+            console.log(`📈 Handling dashboard_update with session data for channel: ${sessionChannel}`);
+            console.log(`📈 Calling ${sessionHandlers.length} session-specific handlers for ${sessionChannel}`);
+            sessionHandlers.forEach(handler => handler(message.data!));
+            
+            // Also call regular dashboard handlers for certain types
+            if (message.data.type === 'session_status_change' || message.data.type === 'system_metrics') {
+              console.log('📊 Also handling as regular dashboard_update, calling', this.eventHandlers.dashboardUpdate.length, 'handlers');
+              this.eventHandlers.dashboardUpdate.forEach(handler => handler(message.data!));
+            }
+          } else {
+            // No session-specific handlers registered - this is a dashboard-only update
+            console.log('📊 Handling dashboard_update, calling', this.eventHandlers.dashboardUpdate.length, 'handlers');
+            this.eventHandlers.dashboardUpdate.forEach(handler => handler(message.data!));
+          }
         } else {
-          // Regular dashboard update
+          // Regular dashboard update (no session_id or system_metrics)
           console.log('📊 Handling dashboard_update, calling', this.eventHandlers.dashboardUpdate.length, 'handlers');
           this.eventHandlers.dashboardUpdate.forEach(handler => handler(message.data!));
         }

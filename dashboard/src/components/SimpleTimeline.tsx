@@ -127,12 +127,12 @@ function SimpleTimeline({ timelineItems }: SimpleTimelineProps) {
                 </Box>
               }
               secondary={
-                <Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
+                <Box component="div">
+                  <Typography variant="caption" color="text.secondary" component="span" sx={{ fontWeight: 500, display: 'block' }}>
                     {formatTimestamp(item.timestamp_us, 'time-only')} • {item.type.toUpperCase()}
                   </Typography>
                   {item.details && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, fontStyle: 'italic' }}>
+                    <Typography variant="body2" color="text.secondary" component="div" sx={{ mt: 0.5, fontStyle: 'italic' }}>
                       {item.type === 'llm' && 'details' in item.details && 
                         `Model: ${(item.details as any).model_name || 'Unknown'}`
                       }
@@ -146,6 +146,10 @@ function SimpleTimeline({ timelineItems }: SimpleTimelineProps) {
                   )}
                 </Box>
               }
+              secondaryTypographyProps={{
+                component: 'div',
+                variant: 'body2'
+              }}
             />
           </ListItem>
         ))}

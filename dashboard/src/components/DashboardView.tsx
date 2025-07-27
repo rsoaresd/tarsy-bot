@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Container, AppBar, Toolbar, Typography, Box, Tooltip, CircularProgress, IconButton } from '@mui/material';
 import { FiberManualRecord, Refresh } from '@mui/icons-material';
@@ -14,18 +14,27 @@ import type { Session, SessionUpdate } from '../types';
 function DashboardView() {
   const navigate = useNavigate();
   
-  // Active alerts state
+  // Dashboard state
   const [activeAlerts, setActiveAlerts] = useState<Session[]>([]);
-  const [activeLoading, setActiveLoading] = useState<boolean>(true);
-  const [activeError, setActiveError] = useState<string | null>(null);
-
-  // Historical alerts state
   const [historicalAlerts, setHistoricalAlerts] = useState<Session[]>([]);
+  const [activeLoading, setActiveLoading] = useState<boolean>(true);
   const [historicalLoading, setHistoricalLoading] = useState<boolean>(true);
+  const [activeError, setActiveError] = useState<string | null>(null);
   const [historicalError, setHistoricalError] = useState<string | null>(null);
-
-  // WebSocket connection state
   const [wsConnected, setWsConnected] = useState<boolean>(false);
+
+  // Throttling state for API calls
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const REFRESH_THROTTLE_MS = 1000; // Wait 1 second between refreshes
+
+  // Clean up throttling timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Fetch active sessions
   const fetchActiveAlerts = async () => {
@@ -58,6 +67,20 @@ function DashboardView() {
       setHistoricalLoading(false);
     }
   };
+
+  // Throttled refresh function to prevent excessive API calls
+  const throttledRefresh = useCallback(() => {
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+    
+    refreshTimeoutRef.current = setTimeout(() => {
+      console.log('🔄 Executing throttled dashboard refresh');
+      fetchActiveAlerts();
+      fetchHistoricalAlerts();
+      refreshTimeoutRef.current = null;
+    }, REFRESH_THROTTLE_MS);
+  }, []);
 
   // Initial load
   useEffect(() => {
@@ -127,24 +150,44 @@ function DashboardView() {
         // Only refresh if the number of active sessions changed
         if (newActiveCount !== currentActiveCount) {
           console.log(`🔄 Active sessions changed: ${currentActiveCount} → ${newActiveCount}, refreshing data`);
-          fetchActiveAlerts();
-          fetchHistoricalAlerts();
+          throttledRefresh();
         } else {
           console.log('📊 System metrics update - no session changes, skipping refresh');
         }
       } else if (update.type === 'session_status_change') {
         // Session status changes affect the main dashboard
         console.log('🔄 Session status change - refreshing dashboard data');
-        fetchActiveAlerts();
-        fetchHistoricalAlerts();
+        throttledRefresh();
       } else if (update.type === 'llm_interaction' || update.type === 'mcp_communication') {
         // Session-specific updates don't require dashboard refresh - these are for detail views
         console.log('📊 Session-specific update - no dashboard refresh needed');
+      } else if (update.type === 'batched_session_updates') {
+        // Batched timeline updates are session-specific - no dashboard refresh needed
+        console.log('📊 Batched session updates - no dashboard refresh needed');
+      } else if (update.type === 'session_timeline_update') {
+        // Individual timeline updates are session-specific - no dashboard refresh needed
+        console.log('📊 Session timeline update - no dashboard refresh needed');
+      } else if (update.session_id && (update.type === 'llm' || update.type === 'mcp' || update.type === 'system')) {
+        // Timeline-specific updates with session_id - no dashboard refresh needed
+        console.log('📊 Timeline interaction update - no dashboard refresh needed');
+      } else if (update.session_started || update.session_ended) {
+        // Session lifecycle events - refresh dashboard
+        console.log('🔄 Session lifecycle event - refreshing dashboard data');
+        throttledRefresh();
+      } else if (!update.type && update.session_id) {
+        // Generic session update without specific type - might be status or timeline
+        // Check if it looks like a status change
+        if (update.status || update.completed_at_us || update.error_message) {
+          console.log('🔄 Detected session status update - refreshing dashboard data');
+          throttledRefresh();
+        } else {
+          // Likely a timeline update - no dashboard refresh needed
+          console.log('📊 Generic session update (likely timeline) - no dashboard refresh needed');
+        }
       } else {
-        // For other unknown updates, refresh to be safe
-        console.log('🔄 Unknown update type - refreshing dashboard data');
-        fetchActiveAlerts();
-        fetchHistoricalAlerts();
+        // For genuinely unknown updates, log more details and refresh cautiously
+        console.log('🔄 Unknown update type:', update.type, 'Keys:', Object.keys(update), '- refreshing dashboard data');
+        throttledRefresh();
       }
     };
 

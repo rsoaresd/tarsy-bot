@@ -42,8 +42,19 @@ function SessionDetailPage() {
       console.log('Fetching session detail for ID:', id);
       
       const sessionData = await apiClient.getSessionDetail(id);
-      setSession(sessionData);
-      console.log('Session detail loaded:', sessionData);
+      
+      // Validate and normalize session status to prevent "Unknown" status
+      const normalizedStatus = ['completed', 'failed', 'in_progress', 'pending'].includes(sessionData.status) 
+        ? sessionData.status 
+        : 'in_progress'; // Default to in_progress if status is unexpected
+      
+      const normalizedSession = {
+        ...sessionData,
+        status: normalizedStatus as 'completed' | 'failed' | 'in_progress' | 'pending'
+      };
+      
+      setSession(normalizedSession);
+      console.log('Session detail loaded:', normalizedSession);
     } catch (err) {
       const errorMessage = handleAPIError(err);
       setError(errorMessage);
@@ -53,191 +64,206 @@ function SessionDetailPage() {
     }
   };
 
-  // Load session data when component mounts or sessionId changes
-  useEffect(() => {
-    if (sessionId) {
-      fetchSessionDetail(sessionId);
-    } else {
-      setError('Session ID not provided');
-      setLoading(false);
-    }
-  }, [sessionId]);
-
-  // Set up WebSocket event handlers for real-time updates
+  // Set up WebSocket subscriptions immediately when component mounts
   useEffect(() => {
     if (!sessionId) return;
 
-    // Handle session updates (status changes, progress updates, etc.)
-    const handleSessionUpdate = (update: SessionUpdate) => {
-      console.log('SessionDetailPage received session update:', update);
-      
-      // Only process updates for the current session
-      if (update.session_id === sessionId) {
-        console.log('Processing update for current session:', sessionId);
-        
-        // Check if this update contains timeline-related data - handle incrementally
-        if (update.data && (update.data.interaction_type === 'llm' || update.data.interaction_type === 'mcp')) {
-          console.log('Timeline interaction found in session update, updating timeline');
-          // This case should be rare now that we use session-specific updates
-          // But keeping minimal handling to avoid full refetch
-          return;
-        }
-        
-        // Check if this is a status change - handle incrementally
-        if (update.data && update.data.type === 'session_status_change') {
-          console.log('Session status change found in session update, updating status');
-          // This is likely duplicate of session-specific handler, so just update status
-          setSession(prevSession => {
-            if (!prevSession) return prevSession;
-            return {
-              ...prevSession,
-              status: update.data.status || prevSession.status,
-              completed_at_us: update.data.status === 'completed' ? Date.now() * 1000 : prevSession.completed_at_us,
-              final_analysis: update.data.final_analysis || prevSession.final_analysis,
-              error_message: update.data.error_message || prevSession.error_message
-            };
-          });
-          return;
-        }
-        
-        // Update session with new data from the update
-        setSession(prevSession => {
-          if (!prevSession) return prevSession;
-          
-          const updatedSession = {
-            ...prevSession,
-            status: update.status,
-            duration_ms: update.duration_ms ?? prevSession.duration_ms,
-            error_message: update.error_message ?? prevSession.error_message,
-            completed_at_us: update.completed_at_us ?? prevSession.completed_at_us
-          };
-          
-          console.log('Updated session state:', updatedSession);
-          return updatedSession;
-        });
-      } else {
-        console.log('Ignoring update for different session:', update.session_id);
-      }
-    };
-
-    // Handle session-specific timeline updates (LLM/MCP interactions)
-    const handleSessionSpecificUpdate = (data: any) => {
-      console.log('SessionDetailPage received session-specific update:', data);
-      
-      // Handle session status changes - update session state without refetching
-      if (data.type === 'session_status_change') {
-        console.log('Session status change detected, updating session state');
-        setSession(prevSession => {
-          if (!prevSession) return prevSession;
-          
-          return {
-            ...prevSession,
-            status: data.status || prevSession.status,
-            completed_at_us: data.status === 'completed' ? Date.now() * 1000 : prevSession.completed_at_us,
-            final_analysis: data.final_analysis || prevSession.final_analysis,
-            error_message: data.error_message || prevSession.error_message,
-            // Update duration if we can calculate it
-            duration_ms: data.status === 'completed' && prevSession.started_at_us ? 
-              Math.round((Date.now() * 1000 - prevSession.started_at_us) / 1000) : 
-              prevSession.duration_ms
-          };
-        });
-        
-        // No need to refetch - we have all the data we need from the WebSocket update
-        console.log('Session state updated from WebSocket data, no refetch needed');
-      } 
-      // Handle batched timeline updates - add new timeline items without refetching
-      else if (data.type === 'batched_session_updates' && data.updates) {
-        console.log('Timeline batch update detected, adding timeline items');
-        setSession(prevSession => {
-          if (!prevSession) return prevSession;
-          
-          const newTimelineItems = data.updates.map((update: any) => ({
-            id: `${update.timestamp}_${Math.random()}`, // Generate unique ID
-            event_id: update.session_id || sessionId,
-            type: update.type === 'llm_interaction' ? 'llm' : 'mcp',
-            timestamp_us: new Date(update.timestamp).getTime() * 1000,
-            step_description: update.step_description || 'Processing...',
-            duration_ms: update.duration_ms || null,
-            details: update.type === 'llm_interaction' ? {
-              prompt: 'LLM Analysis',
-              response: update.step_description || '',
-              model_name: update.model_used || 'unknown',
-              tokens_used: undefined,
-              temperature: undefined
-            } : {
-              tool_name: update.tool_name || 'unknown',
-              parameters: {},
-              result: update.step_description || '',
-              server_name: update.server_name || 'unknown',
-              execution_time_ms: update.duration_ms || 0
-            }
-          }));
-          
-          // Add new items to existing timeline, avoiding duplicates
-          const existingTimestamps = new Set(prevSession.chronological_timeline.map((item: any) => item.timestamp_us));
-          const uniqueNewItems = newTimelineItems.filter((item: any) => !existingTimestamps.has(item.timestamp_us));
-          
-          return {
-            ...prevSession,
-            chronological_timeline: [...prevSession.chronological_timeline, ...uniqueNewItems].sort((a: any, b: any) => a.timestamp_us - b.timestamp_us),
-            llm_interaction_count: (prevSession.llm_interaction_count || 0) + uniqueNewItems.filter((item: any) => item.type === 'llm').length,
-            mcp_communication_count: (prevSession.mcp_communication_count || 0) + uniqueNewItems.filter((item: any) => item.type === 'mcp').length
-          };
-        });
-      }
-      // Handle individual timeline interactions (fallback) - rarely used now
-      else if (data.interaction_type === 'llm' || data.interaction_type === 'mcp') {
-        console.log('Individual timeline interaction detected, adding timeline item');
-        // Similar logic as above but for single item - implementation omitted for brevity
-        // In practice, this case should rarely be hit since we use batched updates
-        fetchSessionDetail(sessionId);
-      } 
-      // Handle any other session-specific updates - log and potentially ignore
-      else {
-        console.log('Other session-specific update type:', data.type, '- ignoring to prevent unnecessary refetch');
-      }
-    };
-
-    // Handle session completion - refresh full session data to get final analysis and timeline
-    const handleSessionCompleted = (update: SessionUpdate) => {
-      console.log('SessionDetailPage received session completed:', update);
-      
-      // Only process updates for the current session
-      if (update.session_id === sessionId) {
-        console.log('Current session completed, refreshing full session data');
-        // Fetch fresh session data to get final analysis and complete timeline
-        fetchSessionDetail(sessionId);
-      }
-    };
-
-    // Handle session failure - refresh full session data to get error details
-    const handleSessionFailed = (update: SessionUpdate) => {
-      console.log('SessionDetailPage received session failed:', update);
-      
-      // Only process updates for the current session
-      if (update.session_id === sessionId) {
-        console.log('Current session failed, refreshing full session data');
-        // Fetch fresh session data to get error details and final state
-        fetchSessionDetail(sessionId);
-      }
-    };
-
-    // Subscribe to WebSocket events
-    const unsubscribeUpdate = webSocketService.onSessionUpdate(handleSessionUpdate);
-    const unsubscribeCompleted = webSocketService.onSessionCompleted(handleSessionCompleted);
-    const unsubscribeFailed = webSocketService.onSessionFailed(handleSessionFailed);
-
-    // Subscribe to session-specific channel for timeline updates
-    const sessionChannel = `session_${sessionId}`;
-    const unsubscribeSessionSpecific = webSocketService.onSessionSpecificUpdate(
-      sessionChannel, 
-      handleSessionSpecificUpdate
-    );
-
-    // Connect to WebSocket and subscribe to session-specific channel
+    console.log('Setting up WebSocket subscriptions for session:', sessionId);
+    
+    // Connect to WebSocket and subscribe to session-specific channel FIRST
     webSocketService.connect();
     webSocketService.subscribeToSessionChannel(sessionId);
+
+    // Set up handlers after subscription
+    const setupHandlers = () => {
+      // Handle session updates (status changes, progress updates, etc.)
+      const handleSessionUpdate = (update: SessionUpdate) => {
+        console.log('SessionDetailPage received session update:', update);
+        
+        // Only process updates for the current session
+        if (update.session_id === sessionId) {
+          console.log('Processing update for current session:', sessionId);
+          
+          // Check if this update contains timeline-related data - handle incrementally
+          if (update.data && (update.data.interaction_type === 'llm' || update.data.interaction_type === 'mcp')) {
+            console.log('Timeline interaction found in session update, updating timeline');
+            return;
+          }
+          
+          // Check if this is a status change - handle incrementally
+          if (update.data && update.data.type === 'session_status_change') {
+            console.log('Session status change found in session update, updating status');
+            setSession(prevSession => {
+              if (!prevSession) return prevSession;
+              
+              // Validate status before updating
+              const newStatus = update.data.status;
+              const validatedStatus = ['completed', 'failed', 'in_progress', 'pending'].includes(newStatus) 
+                ? newStatus 
+                : prevSession.status;
+              
+              return {
+                ...prevSession,
+                status: validatedStatus,
+                completed_at_us: validatedStatus === 'completed' ? Date.now() * 1000 : prevSession.completed_at_us,
+                final_analysis: update.data.final_analysis || prevSession.final_analysis,
+                error_message: update.data.error_message || prevSession.error_message
+              };
+            });
+            return;
+          }
+          
+          // Update session with new data from the update
+          setSession(prevSession => {
+            if (!prevSession) return prevSession;
+            
+            // Validate status before updating
+            const newStatus = update.status;
+            const validatedStatus = ['completed', 'failed', 'in_progress', 'pending'].includes(newStatus) 
+              ? newStatus 
+              : prevSession.status;
+            
+            const updatedSession = {
+              ...prevSession,
+              status: validatedStatus,
+              duration_ms: update.duration_ms ?? prevSession.duration_ms,
+              error_message: update.error_message ?? prevSession.error_message,
+              completed_at_us: update.completed_at_us ?? prevSession.completed_at_us
+            };
+            
+            console.log('Updated session state:', updatedSession);
+            return updatedSession;
+          });
+        } else {
+          console.log('Ignoring update for different session:', update.session_id);
+        }
+      };
+
+      // Handle session-specific timeline updates (LLM/MCP interactions)
+      const handleSessionSpecificUpdate = (data: any) => {
+        console.log('SessionDetailPage received session-specific update:', data);
+        
+        // Handle session status changes - update session state without refetching
+        if (data.type === 'session_status_change') {
+          console.log('Session status change detected, updating session state');
+          setSession(prevSession => {
+            if (!prevSession) return prevSession;
+            
+            // Validate status before updating
+            const newStatus = data.status;
+            const validatedStatus = ['completed', 'failed', 'in_progress', 'pending'].includes(newStatus) 
+              ? newStatus 
+              : prevSession.status;
+            
+            return {
+              ...prevSession,
+              status: validatedStatus,
+              completed_at_us: validatedStatus === 'completed' ? Date.now() * 1000 : prevSession.completed_at_us,
+              final_analysis: data.final_analysis || prevSession.final_analysis,
+              error_message: data.error_message || prevSession.error_message,
+              // Update duration if we can calculate it
+              duration_ms: validatedStatus === 'completed' && prevSession.started_at_us ? 
+                Math.round((Date.now() * 1000 - prevSession.started_at_us) / 1000) : 
+                prevSession.duration_ms
+            };
+          });
+          
+          console.log('Session state updated from WebSocket data, no refetch needed');
+          return;
+        }
+        // Handle batched timeline updates - add new timeline items without refetching
+        else if (data.type === 'batched_session_updates' && data.updates) {
+          console.log('Timeline batch update detected, adding timeline items');
+          setSession(prevSession => {
+            if (!prevSession) return prevSession;
+            
+            const newTimelineItems = data.updates.map((update: any) => ({
+              id: `${update.timestamp}_${Math.random()}`, // Generate unique ID
+              event_id: update.session_id || sessionId,
+              type: update.type === 'llm_interaction' ? 'llm' : 'mcp',
+              timestamp_us: new Date(update.timestamp).getTime() * 1000,
+              step_description: update.step_description || 'Processing...',
+              duration_ms: update.duration_ms || null,
+              details: update.type === 'llm_interaction' ? {
+                prompt: 'LLM Analysis',
+                response: update.step_description || '',
+                model_name: update.model_used || 'unknown',
+                tokens_used: undefined,
+                temperature: undefined
+              } : {
+                tool_name: update.tool_name || 'unknown',
+                parameters: {},
+                result: update.step_description || '',
+                server_name: update.server_name || 'unknown',
+                execution_time_ms: update.duration_ms || 0
+              }
+            }));
+            
+            // Add new items to existing timeline, avoiding duplicates
+            const existingTimestamps = new Set(prevSession.chronological_timeline.map((item: any) => item.timestamp_us));
+            const uniqueNewItems = newTimelineItems.filter((item: any) => !existingTimestamps.has(item.timestamp_us));
+            
+            return {
+              ...prevSession,
+              chronological_timeline: [...prevSession.chronological_timeline, ...uniqueNewItems].sort((a: any, b: any) => a.timestamp_us - b.timestamp_us),
+              llm_interaction_count: (prevSession.llm_interaction_count || 0) + uniqueNewItems.filter((item: any) => item.type === 'llm').length,
+              mcp_communication_count: (prevSession.mcp_communication_count || 0) + uniqueNewItems.filter((item: any) => item.type === 'mcp').length
+            };
+          });
+        }
+        // Handle individual timeline interactions (fallback) - rarely used now
+        else if (data.interaction_type === 'llm' || data.interaction_type === 'mcp') {
+          console.log('Individual timeline interaction detected, adding timeline item');
+          // Similar logic as above but for single item - implementation omitted for brevity
+          // In practice, this case should rarely be hit since we use batched updates
+          fetchSessionDetail(sessionId);
+        } 
+        // Handle any other session-specific updates - log and potentially ignore
+        else {
+          console.log('Other session-specific update type:', data.type, '- ignoring to prevent unnecessary refetch');
+        }
+      };
+
+      // Handle session completion - refresh full session data to get final analysis and timeline
+      const handleSessionCompleted = (update: SessionUpdate) => {
+        console.log('SessionDetailPage received session completed:', update);
+        
+        // Only process updates for the current session
+        if (update.session_id === sessionId) {
+          console.log('Current session completed, refreshing full session data');
+          // Fetch fresh session data to get final analysis and complete timeline
+          fetchSessionDetail(sessionId);
+        }
+      };
+
+      // Handle session failure - refresh full session data to get error details
+      const handleSessionFailed = (update: SessionUpdate) => {
+        console.log('SessionDetailPage received session failed:', update);
+        
+        // Only process updates for the current session
+        if (update.session_id === sessionId) {
+          console.log('Current session failed, refreshing full session data');
+          // Fetch fresh session data to get error details and final state
+          fetchSessionDetail(sessionId);
+        }
+      };
+
+      // Subscribe to WebSocket events
+      const unsubscribeUpdate = webSocketService.onSessionUpdate(handleSessionUpdate);
+      const unsubscribeCompleted = webSocketService.onSessionCompleted(handleSessionCompleted);
+      const unsubscribeFailed = webSocketService.onSessionFailed(handleSessionFailed);
+
+      // Subscribe to session-specific channel for timeline updates
+      const sessionChannel = `session_${sessionId}`;
+      const unsubscribeSessionSpecific = webSocketService.onSessionSpecificUpdate(
+        sessionChannel, 
+        handleSessionSpecificUpdate
+      );
+
+      return { handleSessionUpdate, handleSessionSpecificUpdate, unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeSessionSpecific };
+    };
+
+    const { unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeSessionSpecific } = setupHandlers();
 
     // Cleanup subscriptions
     return () => {
@@ -250,6 +276,21 @@ function SessionDetailPage() {
       // Unsubscribe from session-specific channel
       webSocketService.unsubscribeFromSessionChannel(sessionId);
     };
+  }, [sessionId]);
+
+  // Load session data AFTER WebSocket subscriptions are set up
+  useEffect(() => {
+    if (sessionId) {
+      // Small delay to ensure WebSocket subscription is active
+      const timeoutId = setTimeout(() => {
+        fetchSessionDetail(sessionId);
+      }, 100);
+      
+      return () => clearTimeout(timeoutId);
+    } else {
+      setError('Session ID not provided');
+      setLoading(false);
+    }
   }, [sessionId]);
 
   // Handle back navigation
