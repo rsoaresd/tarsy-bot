@@ -32,6 +32,14 @@ Complete visibility into alert processing workflows:
 - **Advanced Querying**: REST API with filtering, pagination, and complex query support
 - **Dashboard Ready**: Foundation for SRE monitoring dashboards with comprehensive historical data
 
+### 🖥️ SRE Dashboard (EP-0004)
+Standalone React dashboard for operational monitoring:
+- **Real-time Monitoring**: Live view of active alert processing with progress indicators
+- **Historical Analysis**: Comprehensive filtering of alert sessions
+- **Timeline Visualization**: Interactive chronological view of complete processing workflows
+- **Multiplexed WebSocket**: Efficient real-time updates with subscription-based architecture
+- **Performance Optimized**: Advanced pagination for large datasets
+
 ## Architecture
 
 Tarsy implements a modern, multi-layer architecture:
@@ -39,6 +47,7 @@ Tarsy implements a modern, multi-layer architecture:
 - **Multi-Layer Backend**: FastAPI-based service with orchestrator and specialized agent layers
 - **Agent Specialization**: Domain-specific agents (KubernetesAgent) with focused MCP server subsets
 - **History Service**: Comprehensive audit trail capture with SQLModel database persistence
+- **SRE Dashboard**: Standalone React dashboard for operational monitoring with real-time WebSocket integration
 - **Alert Dev UI**: React TypeScript development interface for testing and demonstration
 - **MCP Integration**: Official `mcp` library with agent-specific server assignments and hook context
 - **LLM Support**: Unified LLM client supporting multiple providers (OpenAI, Google, xAI) with automatic interaction logging
@@ -53,9 +62,11 @@ Tarsy implements a modern, multi-layer architecture:
 
 ### 📈 History & Monitoring
 - **Comprehensive Audit Trail**: Persistent capture of all alert processing workflows
-- **Chronological Timeline**: Microsecond-precision reconstruction of complete processing history
+- **SRE Dashboard**: Standalone React dashboard with real-time monitoring and historical analysis
+- **Timeline Visualization**: Interactive chronological view with LLM interactions and MCP communications
 - **Advanced Query API**: REST endpoints with filtering, pagination, and complex queries
-- **Real-time & Historical Access**: Support for both active session monitoring and historical analysis
+- **Multiplexed WebSocket**: Efficient real-time updates with subscription-based architecture
+- **Performance Optimized**: Virtual scrolling for 1000+ sessions with responsive UI
 
 ### ⚡ Technical Features
 - **Multi-LLM Support**: Configurable providers (OpenAI, Google, xAI) with unified client interface
@@ -74,7 +85,8 @@ Tarsy implements a modern, multi-layer architecture:
 5. **Agent Initialization**: Agent configures with its assigned MCP server subset (kubernetes-server)
 6. **Iterative Analysis**: Agent uses LLM to intelligently select and call tools from its server subset
 7. **Comprehensive Logging**: All LLM interactions and MCP communications automatically captured
-8. **Final Analysis**: Agent provides specialized domain analysis with complete processing history
+8. **Real-time Updates**: Dashboard receives live updates via multiplexed WebSocket with subscription channels
+9. **Final Analysis**: Agent provides specialized domain analysis with complete processing history
 
 ### 📝 Audit Trail Capture
 - **Automatic Logging**: HookContext system transparently captures all interactions
@@ -101,6 +113,13 @@ tarsy-bot/
 │   ├── tests/              # Comprehensive test suite (unit, integration, e2e)
 │   ├── pyproject.toml      # Python dependencies and project configuration
 │   └── env.template        # Environment variables template
+├── dashboard/              # React TypeScript SRE dashboard
+│   ├── src/
+│   │   ├── components/     # Dashboard components (ActiveAlertsPanel, SessionDetailPage, etc.)
+│   │   ├── services/       # API clients and WebSocket managers
+│   │   ├── hooks/          # Custom React hooks for state management
+│   │   └── types/          # TypeScript type definitions
+│   └── package.json        # Node.js dependencies
 ├── alert-dev-ui/           # React TypeScript development interface
 │   ├── src/
 │   │   ├── components/     # React components (AlertForm, ProcessingStatus, ResultDisplay)
@@ -151,15 +170,23 @@ uvicorn tarsy.main:app --reload --port 8000
 ```
 The backend will be available at: http://localhost:8000
 
+### SRE Dashboard (React App)
+```bash
+# From the project root directory
+cd dashboard
+PORT=3000 npm start
+```
+The SRE dashboard will be available at: http://localhost:3000
+
 ### Alert Dev UI (React App)
 ```bash
 # From the project root directory
 cd alert-dev-ui
 PORT=3001 npm start
 ```
-The frontend will be available at: http://localhost:3001
+The development interface will be available at: http://localhost:3001
 
-> **Note**: Start the backend first, then the frontend. The React app is configured to proxy API requests to the backend.
+> **Note**: Start the backend first, then the frontend applications. Both React apps are configured to proxy API requests to the backend.
 
 ### Troubleshooting
 
@@ -189,10 +216,11 @@ The setup script will create `backend/.env` from the template. You'll need to ad
 ## Usage
 
 1. **Start the Backend**: The FastAPI server runs on http://localhost:8000
-2. **Start the Alert Dev UI**: The React app runs on http://localhost:3001
-3. **Submit an Alert**: Use the alert dev UI form to simulate an alert
-4. **Monitor Progress**: Watch real-time progress updates
-5. **View Results**: See the detailed LLM analysis
+2. **Start the SRE Dashboard**: The operational dashboard runs on http://localhost:3000
+3. **Start the Alert Dev UI**: The development interface runs on http://localhost:3001
+4. **Submit an Alert**: Use the alert dev UI form to simulate an alert
+5. **Monitor via Dashboard**: Watch real-time progress updates and historical analysis in the SRE dashboard
+6. **View Results**: See detailed processing timelines and comprehensive LLM analysis
 
 ## Supported Alert Types
 

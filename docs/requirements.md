@@ -9,6 +9,7 @@ Tarsy-bot is an intelligent Site Reliability Engineering system that automates i
 This requirements document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant changes to system requirements are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
 
 ### Recent Changes
+- **EP-0004 (IMPLEMENTED)**: Dashboard UI for Alert History - Added standalone React dashboard for SRE operational monitoring with real-time WebSocket integration and historical alert analysis
 - **EP-0003 (IMPLEMENTED)**: Alert Processing History Service - Added comprehensive audit trail capture for all alert processing workflows with database persistence and API endpoints
 - **EP-0002 (IMPLEMENTED)**: Multi-Layer Agent Architecture - Transformed monolithic alert processing into orchestrator + specialized agents architecture
 - This document was established as the baseline requirements specification
@@ -185,50 +186,74 @@ For proposed changes or new requirements, see the [Enhancement Proposals directo
 
 ## 2. User Interface Requirements
 
-### 2.1 Web Interface (Development and Testing)
+### 2.1 Dashboard UI (SRE Operational Monitoring)
 
-**REQ-2.1.1: Alert Submission Interface**
+**REQ-2.1.1: Real-time Alert Monitoring**
+- The system shall provide a standalone React dashboard for SRE operational monitoring
+- The dashboard shall display active alerts with real-time progress indicators and status updates
+- The dashboard shall show historical alert processing sessions with comprehensive filtering capabilities
+- The dashboard shall support efficient analysis of 1000+ alert sessions with virtual scrolling
+
+**REQ-2.1.2: WebSocket Integration**
+- The dashboard shall use multiplexed WebSocket connections for real-time updates
+- The system shall provide subscription-based message routing for dashboard updates and session monitoring
+- The dashboard shall handle connection failures gracefully with auto-reconnection
+
+**REQ-2.1.3: Historical Analysis Interface**
+- The dashboard shall provide timeline visualization of alert processing workflows
+- The system shall support filtering by status, agent type, alert type, and date ranges
+- The dashboard shall display chronological timelines with LLM interactions and MCP communications
+- The system shall provide session detail views with complete audit trails
+
+**REQ-2.1.4: Dashboard Independence**
+- The dashboard shall operate as an independent React application in `dashboard/` directory
+- The dashboard shall be deployable separately from the alert dev UI
+- The system shall maintain clear separation between operational monitoring and development interfaces
+
+### 2.2 Alert Dev UI (Development and Testing)
+
+**REQ-2.2.1: Alert Submission Interface**
 - The system shall provide a web-based alert submission form for development and testing purposes
 - The form shall include all required alert fields with validation
 - The form shall provide dropdown selections for predefined values
 - The form shall include helpful placeholders and examples
 - The interface shall be used for development, testing, and demonstration purposes only
 
-**REQ-2.1.2: Processing Status Display**
+**REQ-2.2.2: Processing Status Display**
 - The system shall display real-time processing status for development and testing
 - The system shall show progress bars and percentage completion
 - The system shall display current processing step information
 - The system shall provide visual indicators for different status states
 
-**REQ-2.1.3: Results Presentation**
+**REQ-2.2.3: Results Presentation**
 - The system shall display analysis results in a readable format for development and testing
 - The system shall provide detailed investigation history
 - The system shall show all collected data and tool outputs
 - The system shall include recommendations and next steps
 
-### 2.2 Production Integration
+### 2.3 Production Integration
 
-**REQ-2.2.1: External Client Integration**
+**REQ-2.3.1: External Client Integration**
 - The system shall accept alerts from external monitoring systems (e.g., Alert Manager)
 - The system shall provide REST API endpoints for production alert submission
 - The system shall support integration with existing incident management workflows
 - The system shall handle authentication and authorization for external clients
 - The system shall maintain API compatibility while delegating processing to specialized agents
 
-**REQ-2.2.2: API-Based Alert Processing**
+**REQ-2.3.2: API-Based Alert Processing**
 - The system shall process alerts submitted via API in production environments through specialized agents
 - The system shall provide status endpoints for external clients to query processing progress including agent information
 - The system shall return structured responses suitable for automated systems with agent-specific results
 - The system shall support webhook notifications for alert processing completion
 
-### 2.3 User Experience (Development Interface)
+### 2.4 User Experience
 
-**REQ-2.3.1: Responsive Design**
+**REQ-2.4.1: Responsive Design**
 - The development interface shall be responsive and work on different screen sizes
 - The interface shall provide consistent user experience across devices
 - The interface shall use modern UI components and styling
 
-**REQ-2.3.2: Error Handling**
+**REQ-2.4.2: Error Handling**
 - The system shall display clear error messages for user actions in the development interface
 - The system shall provide guidance for resolving common issues
 - The system shall maintain user-friendly error descriptions

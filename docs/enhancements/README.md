@@ -117,7 +117,9 @@ docs/
 
 | EP # | Title | Implemented | Requirements Updated | Design Updated |
 |------|-------|-------------|----------------------|----------------|
-| -    | -     | -           | -                    | -              |
+| EP-0002 | Multi-Layer Agent Design | 2025-07-20 | ✅ | ✅ |
+| EP-0003 | Alert Processing History | 2025-07-25 | ✅ | ✅ |
+| EP-0004 | Dashboard UI for Alert History | 2025-07-27 | ✅ | ✅ |
 
 ## Naming Convention
 

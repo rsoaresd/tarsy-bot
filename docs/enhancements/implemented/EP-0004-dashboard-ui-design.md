@@ -1,11 +1,11 @@
 # EP-0004: Tarsy Dashboard UI for Alert History - Design Document
 
-**Status:** Approved  
+**Status:** Implemented  
 **Created:** 2025-01-19  
-**Phase:** Design Approved  
+**Phase:** Implementation Complete  
 **Last Updated:** 2025-01-25 (Backend API endpoints added)
-**Requirements Document:** `docs/enhancements/approved/EP-0004-dashboard-ui-requirements.md`
-**Next Phase:** Implementation Plan
+**Implemented:** 2025-07-27
+**Requirements Document:** `docs/enhancements/implemented/EP-0004-dashboard-ui-requirements.md`
 
 ---
 

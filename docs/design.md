@@ -20,6 +20,7 @@
 This design document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant architectural changes are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
 
 ### Recent Changes
+- **EP-0004 (IMPLEMENTED)**: Dashboard UI for Alert History - Added standalone React dashboard for SRE operational monitoring with real-time WebSocket integration, historical analysis, and multiplexed WebSocket architecture
 - **EP-0003 (IMPLEMENTED)**: Alert Processing History Service - Added comprehensive audit trail capture and database persistence with REST API endpoints for historical data access
 - **EP-0002 (IMPLEMENTED)**: Multi-Layer Agent Architecture - Transformed monolithic alert processing into orchestrator + specialized agents architecture
 - This document was established as the baseline technical design
@@ -57,6 +58,12 @@ Tarsy is a **distributed, event-driven system** designed to automate incident re
 - **History Service**: SQLModel-based database persistence with comprehensive audit trail capture
 - **Database**: SQLite with PostgreSQL migration support, automatic schema creation and management
 
+**Dashboard UI (SRE Operational Monitoring):**
+- **Framework**: React 18.2.0 with TypeScript for standalone SRE dashboard
+- **UI Library**: Material-UI v5.15.0 with comprehensive Material Design components
+- **Communication**: Axios for HTTP requests, multiplexed WebSocket for real-time updates
+- **Features**: Active/historical alert monitoring, timeline visualization, filtering, virtual scrolling
+
 **Alert Dev UI (Development/Testing Only):**
 - **Framework**: React with TypeScript
 - **UI Library**: Material-UI (MUI) for modern, responsive interface
@@ -72,15 +79,12 @@ Tarsy is a **distributed, event-driven system** designed to automate incident re
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                              Tarsy - Multi-Layer Architecture                       │
 │                                                                                     │
-│  ┌─────────────────────────────────────────────────────────────────────────────┐    │
-│  │                            Alert Dev UI Layer                               │    │
-│  │                        (Development/Testing Only)                           │    │
-│  │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │    │
-│  │  │   Alert Form    │    │ Processing      │    │ Result Display  │          │    │
-│  │  │   Component     │    │ Status          │    │ Component       │          │    │
-│  │  │                 │    │ (Agent-Aware)   │    │ (Agent Details) │          │    │
-│  │  └─────────────────┘    └─────────────────┘    └─────────────────┘          │    │
-│  └─────────────────────────────────────────────────────────────────────────────┘    │
+│              ┌────────────────────┐            ┌────────────────────────┐           │
+│              │ Alert Dev UI Layer │            │       Dashboard UI     |           |
+│              │                    │            │                        |           |
+│              │                    │            │                        │           │
+│              └────────────────────┘            └────────────────────────┘           |
+│                        └────────────────────────────────────┘                       │
 │                                      │                                              │
 │                                   HTTP/WebSocket                                    │
 │                                      │                                              │
@@ -226,6 +230,14 @@ History API Endpoints:
 GET /api/v1/history/sessions          # List alert processing sessions with filtering and pagination
 GET /api/v1/history/sessions/{id}     # Get detailed session information with chronological timeline
 GET /api/v1/history/health           # History service health check
+
+Dashboard API Endpoints (EP-0004):
+GET /api/v1/history/metrics          # Dashboard overview metrics and statistics
+GET /api/v1/history/active-sessions  # Currently processing sessions with real-time status
+GET /api/v1/history/filter-options   # Dynamic filter options based on actual data
+GET /api/v1/history/sessions/{id}/export  # Export session data in JSON/CSV format
+GET /api/v1/history/search           # Multi-field session search functionality
+WebSocket /ws/dashboard/{user_id}    # Multiplexed WebSocket with subscription management
 ```
 
 **Core Features:**
@@ -234,6 +246,7 @@ GET /api/v1/history/health           # History service health check
 - **Lifecycle Management**: Startup/shutdown hooks for service and agent initialization
 - **State Management**: Processing status tracking with agent identification
 - **Real-time Communication**: WebSocket-based progress broadcasting with agent context
+- **Dashboard WebSocket**: Multiplexed WebSocket endpoint (`/ws/dashboard/{user_id}`) with subscription management
 
 ### 2. AlertService
 
@@ -527,7 +540,7 @@ class RunbookService:
 
 ### 12. WebSocket Manager
 
-Real-time communication management for progress updates:
+Real-time communication management for progress updates and dashboard integration:
 
 ```
 Interface Pattern:
@@ -537,11 +550,19 @@ class WebSocketManager:
     def disconnect(self, websocket: WebSocket, alert_id: str)
     async def send_status_update(self, alert_id: str, status: ProcessingStatus)
     async def send_message(self, alert_id: str, message: dict)
+    
+class DashboardWebSocketManager:
+    def __init__(self)
+    async def connect(self, websocket: WebSocket, user_id: str)
+    async def subscribe(self, user_id: str, channel: str, filters: dict = None)
+    async def broadcast_dashboard_update(self, channel: str, data: dict)
 ```
 
 **Core Features:**
 - **Connection Management**: Per-alert WebSocket connection tracking and cleanup
+- **Dashboard Integration**: Multiplexed WebSocket endpoint with subscription management
 - **Status Broadcasting**: Send ProcessingStatus updates to all connected clients for an alert
+- **Subscription Management**: Channel-based message routing for dashboard updates
 - **Custom Messaging**: Support for custom message types beyond status updates
 - **Error Handling**: Automatic cleanup of broken connections
 - **DateTime Serialization**: Built-in support for datetime object serialization in JSON messages

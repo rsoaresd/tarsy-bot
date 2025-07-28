@@ -1,11 +1,12 @@
 # EP-0004: Tarsy Dashboard UI for Alert History - Implementation Plan
 
-**Status:** Approved  
+**Status:** Implemented  
 **Created:** 2025-01-19  
-**Phase:** Implementation Approved  
+**Phase:** Implementation Complete  
 **Last Updated:** 2025-01-25 (Backend API endpoints implemented)
-**Requirements Document:** `docs/enhancements/approved/EP-0004-dashboard-ui-requirements.md`
-**Design Document:** `docs/enhancements/approved/EP-0004-dashboard-ui-design.md`
+**Implemented:** 2025-07-27
+**Requirements Document:** `docs/enhancements/implemented/EP-0004-dashboard-ui-requirements.md`
+**Design Document:** `docs/enhancements/implemented/EP-0004-dashboard-ui-design.md`
 
 ---
 
@@ -95,7 +96,7 @@ This implementation plan works in conjunction with the **UI Phases Document** (`
 - **Frontend Integration Phases** (3, 4): High-level frontend implementation strategy with references to UI phases
 - **Overall Strategy**: Architecture, constraints, and system integration approach
 
-### UI Phases Document (`EP-0004-dashboard-ui-phases.md`)
+### UI Phases Document (`docs/enhancements/implemented/EP-0004-dashboard-ui-phases.md`)
 - **Frontend UI Phases** (1-7): Detailed progressive UI enhancement with Material-UI components
 - **Component Specifications**: Complete UI layouts, component code, and implementation details
 - **User Experience**: Detailed UX flows, accessibility requirements, and design specifications
@@ -679,7 +680,7 @@ echo "All dashboard API tests should pass"
 **Dependencies:** Phase 2.5 completion  
 **Goal:** Create standalone React dashboard application with progressive UI enhancement
 
-**📋 Detailed UI Implementation**: This phase implements **UI Phases 1-3** from `EP-0004-dashboard-ui-phases.md`:
+**📋 Detailed UI Implementation**: This phase implements **UI Phases 1-3** from `docs/enhancements/implemented/EP-0004-dashboard-ui-phases.md`:
 - **UI Phase 1**: Basic Alert List - Simple session display with Material-UI Table
 - **UI Phase 2**: Active/Historical Split - Distinct panels for operational awareness  
 - **UI Phase 3**: Navigation & Detail - Session detail pages with timeline visualization
@@ -722,7 +723,7 @@ echo "All dashboard API tests should pass"
 - React hooks for WebSocket state management
 
 ### Phase 3 Completion Criteria
-- [ ] **UI Phases 1-3 successfully implemented** following specifications in `EP-0004-dashboard-ui-phases.md`
+- [ ] **UI Phases 1-3 successfully implemented** following specifications in `docs/enhancements/implemented/EP-0004-dashboard-ui-phases.md`
 - [ ] Dashboard application runs independently with proper routing
 - [ ] WebSocket client provides reliable real-time communication  
 - [ ] Material-UI theme and components render correctly across all views
@@ -735,7 +736,7 @@ echo "All dashboard API tests should pass"
 **Dependencies:** Phase 3 completion  
 **Goal:** Complete dashboard implementation with advanced UI features and production readiness
 
-**📋 Detailed UI Implementation**: This phase implements **UI Phases 4-7** from `EP-0004-dashboard-ui-phases.md`:
+**📋 Detailed UI Implementation**: This phase implements **UI Phases 4-7** from `docs/enhancements/implemented/EP-0004-dashboard-ui-phases.md`:
 - **UI Phase 4**: Search & Filtering - Enhanced data exploration capabilities
 - **UI Phase 5**: Real-time Updates - Live monitoring with WebSocket integration  
 - **UI Phase 6**: Advanced Features - Pagination, export, performance optimization
@@ -789,7 +790,7 @@ echo "All dashboard API tests should pass"
 - **react-markdown**: Markdown rendering for AI analysis content
 
 ### Phase 4 Completion Criteria
-- [ ] **UI Phases 4-7 successfully implemented** following specifications in `EP-0004-dashboard-ui-phases.md`
+- [ ] **UI Phases 4-7 successfully implemented** following specifications in `docs/enhancements/implemented/EP-0004-dashboard-ui-phases.md`
 - [ ] Advanced filtering and search functionality working efficiently
 - [ ] Real-time updates integrated with enhanced timeline visualization
 - [ ] Performance optimizations handle 1000+ sessions without performance degradation
