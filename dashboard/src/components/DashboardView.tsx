@@ -391,6 +391,10 @@ function DashboardView() {
       setWsConnected(connected);
       if (connected) {
         console.log('✅ WebSocket connected - real-time updates active');
+        // Sync with backend state after reconnection (handles backend restarts)
+        console.log('🔄 WebSocket reconnected - syncing dashboard with backend state');
+        fetchActiveAlerts();
+        fetchHistoricalAlerts(true); // Use filtering to maintain current view
       } else {
         console.log('❌ WebSocket disconnected - use manual refresh buttons');
       }

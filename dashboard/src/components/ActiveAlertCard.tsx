@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Card,
   CardContent,
@@ -17,7 +17,7 @@ import {
   OpenInNew,
 } from '@mui/icons-material';
 import type { ActiveAlertCardProps } from '../types';
-import { formatTimestamp, formatDuration, getCurrentTimestampUs } from '../utils/timestamp';
+import { formatTimestamp, formatDuration, getCurrentTimestampUs, formatDurationMs } from '../utils/timestamp';
 import ProgressIndicator from './ProgressIndicator';
 
 // Helper function to get status chip configuration
@@ -68,6 +68,63 @@ const animationStyles = {
   },
 };
 
+// Helper component for live duration updates
+const LiveDuration: React.FC<{ 
+  startedAt: number; 
+  completedAt: number | null; 
+  status: string;
+  variant?: 'body2' | 'caption';
+}> = ({ startedAt, completedAt, status, variant = 'body2' }) => {
+  const [liveDuration, setLiveDuration] = useState<string>('');
+
+  useEffect(() => {
+    // Calculate duration function - same logic as ProgressIndicator
+    const calculateDuration = () => {
+      let durationMs: number;
+      
+      if (completedAt) {
+        // Use completed duration
+        const durationUs = completedAt - startedAt;
+        durationMs = durationUs / 1000; // Convert to milliseconds
+      } else if (status === 'in_progress' || status === 'pending') {
+        // Calculate live duration
+        const now = Date.now() * 1000; // Convert to microseconds
+        const durationUs = now - startedAt;
+        durationMs = Math.max(0, durationUs / 1000); // Convert to milliseconds
+      } else {
+        // Fallback calculation
+        const now = Date.now() * 1000;
+        const durationUs = now - startedAt;
+        durationMs = Math.max(0, durationUs / 1000);
+      }
+      
+      return formatDurationMs(durationMs);
+    };
+
+    // Update immediately
+    setLiveDuration(calculateDuration());
+
+    // For active sessions, update every second
+    if ((status === 'in_progress' || status === 'pending') && !completedAt) {
+      const timer = setInterval(() => {
+        setLiveDuration(calculateDuration());
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }
+  }, [startedAt, completedAt, status]);
+
+  return (
+    <Typography 
+      variant={variant}
+      color="text.secondary"
+      sx={{ fontFamily: 'monospace' }}
+    >
+      {liveDuration}
+    </Typography>
+  );
+};
+
 /**
  * ActiveAlertCard component displays an individual active alert
  * with progress indicators and real-time status updates.
@@ -79,11 +136,6 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
 }) => {
   const statusConfig = getStatusChipConfig(session.status);
   
-  // Calculate duration from start time to now (for ongoing sessions)
-  const currentDuration = session.completed_at_us 
-    ? formatDuration(session.started_at_us, session.completed_at_us)
-    : formatDuration(session.started_at_us, getCurrentTimestampUs());
-
   // Handle card click (same tab navigation)
   const handleCardClick = () => {
     if (onClick && session.session_id) {
@@ -164,13 +216,11 @@ const ActiveAlertCard: React.FC<ActiveAlertCardProps> = ({
           <Typography variant="body2" color="text.secondary">
             Started: {formatTimestamp(session.started_at_us, 'time-only')}
           </Typography>
-          <Typography 
-            variant="body2" 
-            color="text.secondary"
-            sx={{ fontFamily: 'monospace' }}
-          >
-            {currentDuration}
-          </Typography>
+          <LiveDuration 
+            startedAt={session.started_at_us}
+            completedAt={session.completed_at_us}
+            status={session.status}
+          />
         </Box>
 
         {/* Progress Indicator for active sessions */}

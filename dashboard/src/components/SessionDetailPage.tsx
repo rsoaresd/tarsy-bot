@@ -267,10 +267,22 @@ function SessionDetailPage() {
         }
       };
 
+      // Handle WebSocket connection changes - refresh data on reconnection
+      const handleConnectionChange = (connected: boolean) => {
+        if (connected) {
+          console.log('✅ WebSocket reconnected in SessionDetailPage - syncing session data');
+          // Refresh session data to sync with backend state after reconnection
+          fetchSessionDetail(sessionId);
+        } else {
+          console.log('❌ WebSocket disconnected in SessionDetailPage');
+        }
+      };
+
       // Subscribe to WebSocket events
       const unsubscribeUpdate = webSocketService.onSessionUpdate(handleSessionUpdate);
       const unsubscribeCompleted = webSocketService.onSessionCompleted(handleSessionCompleted);
       const unsubscribeFailed = webSocketService.onSessionFailed(handleSessionFailed);
+      const unsubscribeConnection = webSocketService.onConnectionChange(handleConnectionChange);
 
       // Subscribe to session-specific channel for timeline updates
       const sessionChannel = `session_${sessionId}`;
@@ -279,10 +291,10 @@ function SessionDetailPage() {
         handleSessionSpecificUpdate
       );
 
-      return { handleSessionUpdate, handleSessionSpecificUpdate, unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeSessionSpecific };
+      return { handleSessionUpdate, handleSessionSpecificUpdate, unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeConnection, unsubscribeSessionSpecific };
     };
 
-    const { unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeSessionSpecific } = setupHandlers();
+    const { unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeConnection, unsubscribeSessionSpecific } = setupHandlers();
 
     // Cleanup subscriptions
     return () => {
@@ -290,6 +302,7 @@ function SessionDetailPage() {
       unsubscribeUpdate();
       unsubscribeCompleted();
       unsubscribeFailed();
+      unsubscribeConnection();
       unsubscribeSessionSpecific();
       
       // Unsubscribe from session-specific channel
