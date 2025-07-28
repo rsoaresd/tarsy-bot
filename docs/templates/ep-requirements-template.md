@@ -1,189 +1,114 @@
 # EP-XXXX: [Title] - Requirements Document
 
-**Status:** Draft | Review | Approved  
-**Created:** YYYY-MM-DD  <!-- AI: Replace with actual current date in format YYYY-MM-DD -->
-**Phase:** Requirements Definition
-**Next Phase:** Design Document
+**Status:** Draft | Approved  
+**Created:** [Use current date in YYYY-MM-DD format - AI should use tools to get current date]  
 
 ---
-
-## Executive Summary
-<!-- AI: Provide a 2-3 sentence summary of what this enhancement does and why it's needed -->
 
 ## Problem Statement
-<!-- AI: Answer these questions clearly and briefly:
-- What specific problem or limitation exists in the current system?
--->
 
-## Current State Analysis
-<!-- AI: Analyze the current implementation:
-- What components are currently involved?
-- How does the current flow work?
-- What are the current limitations?
-- What works well that we should preserve?
-- Reference specific files/functions/classes if applicable
--->
+<!-- AI: Clearly describe the current problem or limitation -->
+**Current Issue:** [What specific problem exists in the current system?]
+
+**Impact:** [How does this problem affect users or the system?]
+
+## Solution Requirements
+
+### Functional Requirements
+<!-- AI: Define what the system should do -->
+
+**Core Functionality:**
+- [ ] **REQ-1**: [Primary functional requirement]
+- [ ] **REQ-2**: [Secondary functional requirement]  
+- [ ] **REQ-3**: [Additional functional requirement]
+
+**User Interface Requirements:**
+- [ ] **REQ-4**: [UI/UX requirement if applicable]
+- [ ] **REQ-5**: [User interaction requirement if applicable]
+
+**Integration Requirements:**
+- [ ] **REQ-6**: [API or system integration requirement]
+- [ ] **REQ-7**: [Data exchange requirement if applicable]
+
+### Non-Functional Requirements
+
+**Performance Requirements:**
+- [ ] **REQ-8**: [Response time should be reasonable for user experience]
+- [ ] **REQ-9**: [System should handle expected load without degradation]
+- [ ] **REQ-10**: [Resource usage should be efficient and not impact other components]
+
+**Security Requirements:**
+- [ ] **REQ-11**: [Authentication/authorization requirement]
+- [ ] **REQ-12**: [Data protection requirement]
+- [ ] **REQ-13**: [Security compliance requirement]
+
+**Reliability Requirements:**
+- [ ] **REQ-14**: [System should be reliably available during normal operation]
+- [ ] **REQ-15**: [Error handling requirement]
+- [ ] **REQ-16**: [Recovery requirement]
 
 ## Success Criteria
-<!-- AI: Define clear, measurable success criteria -->
 
-### Functional Success Criteria
-- [ ] [Specific functional requirement that must be met]
-- [ ] [Specific functional requirement that must be met]
-- [ ] [Specific functional requirement that must be met]
+### Primary Success Criteria
+- [ ] [Main success measure - how to know the solution works]
+- [ ] [Key functional validation - specific testable outcome]
+- [ ] [Performance validation - acceptable user experience]
 
-### Non-Functional Success Criteria
-- [ ] [Performance requirement with specific metrics]
-- [ ] [Security requirement with specific criteria]
-- [ ] [Usability requirement with specific measures]
-- [ ] [Reliability requirement with specific targets]
+### Secondary Success Criteria  
+- [ ] [Additional success measure]
+- [ ] [User experience improvement]
+- [ ] [System reliability improvement]
 
-## Functional Requirements
-
-### Core Functionality
-<!-- AI: List the core functional requirements -->
-- **REQ-X.1**: [Detailed functional requirement]
-- **REQ-X.2**: [Detailed functional requirement]
-- **REQ-X.3**: [Detailed functional requirement]
-
-### User Interface Requirements
-<!-- AI: Define UI/UX requirements -->
-- **REQ-X.4**: [UI requirement]
-- **REQ-X.5**: [UX requirement]
-- **REQ-X.6**: [Accessibility requirement]
-
-### Integration Requirements
-<!-- AI: Define integration requirements -->
-- **REQ-X.7**: [Integration requirement]
-- **REQ-X.8**: [API requirement]
-- **REQ-X.9**: [Data exchange requirement]
-
-## Non-Functional Requirements
-
-### Performance Requirements
-<!-- AI: Define performance requirements with specific metrics -->
-- **REQ-X.10**: [Performance requirement with metrics]
-- **REQ-X.11**: [Scalability requirement with targets]
-- **REQ-X.12**: [Response time requirement with thresholds]
-
-### Security Requirements
-<!-- AI: Define security requirements -->
-- **REQ-X.13**: [Security requirement]
-- **REQ-X.14**: [Privacy requirement]
-- **REQ-X.15**: [Compliance requirement]
-
-### Reliability Requirements
-<!-- AI: Define reliability requirements -->
-- **REQ-X.16**: [Availability requirement]
-- **REQ-X.17**: [Error handling requirement]
-- **REQ-X.18**: [Recovery requirement]
-
-### Usability Requirements
-<!-- AI: Define usability requirements -->
-- **REQ-X.19**: [Usability requirement]
-- **REQ-X.20**: [Accessibility requirement]
-- **REQ-X.21**: [User experience requirement]
-
-## Constraints and Assumptions
+## Constraints and Limitations
 
 ### Technical Constraints
-<!-- AI: List technical constraints -->
-- [Technical constraint 1]
-- [Technical constraint 2]
-- [Technical constraint 3]
+- [Constraint 1: specific technical limitation]
+- [Constraint 2: compatibility requirement]  
+- [Constraint 3: resource limitation]
 
-### Assumptions
-<!-- AI: List key assumptions -->
-- [Assumption 1]
-- [Assumption 2]
-- [Assumption 3]
+### Compatibility Requirements
+- [External API compatibility requirement]
+- [Database compatibility requirement]
+- [UI/UX compatibility requirement]
+
+### Dependencies
+- **Internal**: [Dependencies on other system components]
+- **External**: [Dependencies on external services or systems]
 
 ## Out of Scope
-<!-- AI: Clearly define what is NOT included in this enhancement -->
-- [Feature/requirement explicitly excluded]
-- [Feature/requirement deferred to future versions]
-- [Feature/requirement handled by other systems]
 
-## Dependencies
-<!-- AI: List dependencies on other systems, teams, or projects -->
-- **Internal Dependencies**: [Dependencies on other parts of the system]
-- **External Dependencies**: [Dependencies on external systems or services]
+<!-- AI: Clearly define what this enhancement will NOT include -->
+- [Feature explicitly excluded from this EP]
+- [Functionality deferred to future enhancements]
+- [Related but separate concerns]
 
-## Risk Assessment
-<!-- AI: Identify potential risks -->
-
-### High-Risk Items
-- **Risk**: [High-risk item]
-  - **Impact**: [Potential impact]
-  - **Mitigation**: [How to mitigate]
-
-### Medium-Risk Items
-- **Risk**: [Medium-risk item]
-  - **Impact**: [Potential impact]
-  - **Mitigation**: [How to mitigate]
-
-### Low-Risk Items
-- **Risk**: [Low-risk item]
-  - **Impact**: [Potential impact]
-  - **Mitigation**: [How to mitigate]
+---
 
 ## Acceptance Criteria
-<!-- AI: Define detailed acceptance criteria for testing -->
 
-### Functional Acceptance Criteria
-- [ ] [Specific testable criteria]
-- [ ] [Specific testable criteria]
-- [ ] [Specific testable criteria]
+### Functional Acceptance
+- [ ] [Specific testable criterion for core functionality]
+- [ ] [Specific testable criterion for user interface]
+- [ ] [Specific testable criterion for integration points]
 
-### Non-Functional Acceptance Criteria
-- [ ] [Performance criteria with metrics]
-- [ ] [Security criteria with validation methods]
-- [ ] [Usability criteria with measurement methods]
+### Performance Acceptance
+- [ ] [Response time is acceptable for typical user workflows]
+- [ ] [System performs well under expected usage patterns]  
+- [ ] [Resource usage is reasonable and sustainable]
 
-### Integration Acceptance Criteria
-- [ ] [Integration testing criteria]
-- [ ] [API testing criteria]
-- [ ] [End-to-end testing criteria]
-
-## Future Considerations
-<!-- AI: What future enhancements might this enable? -->
-- [Future enhancement possibility 1]
-- [Future enhancement possibility 2]
-- [Future enhancement possibility 3]
+### Security Acceptance
+- [ ] [Security validation criterion]
+- [ ] [Data protection validation criterion]
+- [ ] [Access control validation criterion]
 
 ---
 
-## Requirements Review Checklist
+## AI Notes
 
-### Completeness Check
-- [ ] All functional requirements are clearly defined
-- [ ] All non-functional requirements are specified with metrics
-- [ ] Success criteria are measurable and testable
-- [ ] Constraints and assumptions are documented
-- [ ] Dependencies are identified
-- [ ] Risks are assessed
+### Key Information for Design Phase
+- **Primary Focus**: [Main area of system change]
+- **Architecture Impact**: [Level of architectural change expected]
+- **Integration Complexity**: [Complexity of integration requirements]
+- **Performance Criticality**: [How critical performance requirements are]
 
-### Quality Check
-- [ ] Requirements are specific and unambiguous
-- [ ] Requirements are testable and verifiable
-- [ ] Requirements are realistic and achievable
-- [ ] Requirements are prioritized appropriately
-
-### Stakeholder Check
-- [ ] All stakeholders have been identified
-- [ ] User needs are clearly captured
-- [ ] Technical requirements are feasible
-
----
-
-## Next Steps
-
-After requirements approval:
-1. Create Design Document: `docs/enhancements/pending/EP-XXXX-design.md`
-2. Reference this requirements document in the design phase
-3. Ensure all requirements are addressed in the design
-
-**AI Prompt for Next Phase:**
-```
-Create a design document using the template at docs/templates/ep-design-template.md for EP-XXXX based on the approved requirements in this document.
-``` 
+When creating the design document, ensure all requirements above are addressed with specific technical solutions. 

@@ -1,580 +1,163 @@
-# EP-XXXX: [Title] - Implementation Plan
+# EP-XXXX: [Title] - Implementation Guidelines
 
-**Status:** Draft | Review | Approved | In Progress | Completed  
-**Created:** YYYY-MM-DD  <!-- AI: Replace with actual current date in format YYYY-MM-DD -->
-**Phase:** Implementation Planning & Execution
-**Requirements Document:** `docs/enhancements/pending/EP-XXXX-requirements.md`
-**Design Document:** `docs/enhancements/pending/EP-XXXX-design.md`
+**Status:** Draft | Approved  
+**Created:** [Use current date in YYYY-MM-DD format - AI should use tools to get current date]  
+**Requirements:** `docs/enhancements/pending/EP-XXXX-requirements.md`
+**Design:** `docs/enhancements/pending/EP-XXXX-design.md`
+
+This document provides AI with the essential standards and processes for implementing EPs. Use this alongside the requirements and design documents to execute implementations effectively.
 
 ---
 
-## Implementation Overview
+## Code Standards
 
-### Implementation Summary
-<!-- AI: Summarize the implementation approach based on the design document -->
-<!-- IMPORTANT: Clarify if this is a complete replacement or extension approach. For replacements, emphasize that NO legacy code will be preserved - only external API compatibility is maintained. -->
+### Code Quality Requirements
+- **Docstrings**: Add to all new public functions, classes, and modules
+- **Type Hints**: Use for all function parameters and return values
+- **Error Handling**: Include meaningful error messages and proper exception types
+- **Logging**: Use structured logging for debugging and monitoring
 
-### Implementation Goals
-<!-- AI: List the key implementation goals -->
-- [Implementation goal 1]
-- [Implementation goal 2]
-- [Implementation goal 3]
+### Testing Approach
+- **Comprehensive but Practical**: Test business logic, error conditions, integration points, and user workflows
+- **Mock External Dependencies**: Don't rely on external services in tests
+- **Balance Coverage vs Complexity**: Aim for thorough testing that's maintainable, not arbitrary coverage percentages
+- **Test Error Cases**: Include edge cases, failure scenarios, and input validation
+- **Test Integration**: Verify component interactions and data flow paths
 
-### Implementation Strategy
-<!-- AI: Specify if this is a complete replacement or extension approach -->
-**CRITICAL**: Specify whether this is:
-- **Complete Code Replacement**: Existing implementation will be entirely removed and replaced with new code (maintain only external API compatibility)
-- **Extension/Enhancement**: Existing code will be extended or enhanced (maintain internal compatibility)
+### Validation Commands
+Use appropriate commands based on implementation type:
 
-### Implementation Constraints
-<!-- AI: List any implementation constraints -->
-- Must maintain external API endpoint contracts without breaking changes (for UI and external integrations)
-- [Internal implementation can be completely replaced if using complete replacement approach]
-- [Constraint 2]
-- [Constraint 3]
-
-### Success Criteria
-<!-- AI: Reference success criteria from requirements document -->
-- [ ] [Success criterion 1 from requirements]
-- [ ] [Success criterion 2 from requirements]
-- [ ] [Success criterion 3 from requirements]
-
-### Rollback Strategy
-<!-- AI: Choose appropriate rollback strategy based on implementation approach -->
-**For Complete Code Replacement:**
-- Use git rollbacks to revert modified files to previous versions
-- No legacy code preservation needed - clean rollback to working state
-- Focus on external API compatibility during rollback testing
-
-**For Extensions/Enhancements:**
-- Use specific feature rollbacks while preserving existing functionality
-- May require selective code removal rather than full file rollbacks
-
-### Backward Compatibility Guidelines
-**External API Compatibility (Always Required):**
-- Maintain same REST endpoint paths, methods, and response formats
-- Preserve WebSocket communication contracts
-- Keep same configuration file formats (external)
-- Maintain same command-line interfaces (if any)
-
-**Internal Compatibility (NOT Required for Complete Replacements):**
-- Internal class interfaces can be completely changed
-- Internal method signatures can be completely different
-- Internal data structures can be completely redesigned
-- Internal configuration formats can be completely changed
-- Legacy code does not need to be preserved or wrapped
-
-## Phase 1: Foundation & Setup
-
-### Phase 1 Overview
-**Dependencies:** [List any dependencies]
-**Goal:** [Overall goal for Phase 1]
-
-#### Step 1.1: [Step Name]
-**Goal:** [Specific goal for this step]
-**Files to Create/Modify:**
-- `path/to/file1.py` (new)
-- `path/to/file2.py` (modify | completely replace if using replacement approach)
-- `path/to/file3.py` (modify | completely replace if using replacement approach)
-
-**AI Prompt:** `Implement Step 1.1 of EP-XXXX: [step description]`
-<!-- For complete replacements, include phrases like "completely replace", "remove all legacy code", "no legacy preservation" -->
-
-**Tasks:**
-- [ ] [Atomic task 1]
-- [ ] [Atomic task 2]
-- [ ] [Atomic task 3]
-
-**Dependencies:**
-- [Internal dependency 1]
-- [External dependency 1]
-
-**Validation Criteria:**
-- [ ] [Specific, testable criterion 1]
-- [ ] [Specific, testable criterion 2]
-- [ ] [Specific, testable criterion 3]
-
-**Success Check:**
+**For Python/Backend Changes:**
 ```bash
-# Commands to verify this step
-[verification command 1]
-[verification command 2]
-[verification command 3]
+# Run all tests
+python -m pytest tests/ -v
+
+# Check code style and quality
+pre-commit run --all-files
+
+# Type checking
+mypy src/
+
+# Run specific test categories
+python -m pytest tests/unit/ -v          # Unit tests
+python -m pytest tests/integration/ -v   # Integration tests
+python -m pytest tests/api/ -v          # API compatibility tests
 ```
 
-#### Step 1.2: [Step Name]
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `path/to/file1.py` (new)
-- `path/to/file2.py` (modify)
-
-**AI Prompt:** `Implement Step 1.2 of EP-XXXX: [step description]`
-
-**Tasks:**
-- [ ] [Atomic task 1]
-- [ ] [Atomic task 2]
-- [ ] [Atomic task 3]
-
-**Dependencies:**
-- [Step 1.1 must be complete]
-- [Other dependency]
-
-**Validation Criteria:**
-- [ ] [Specific, testable criterion 1]
-- [ ] [Specific, testable criterion 2]
-
-**Success Check:**
+**For UI/Frontend Changes:**
 ```bash
-# Commands to verify this step
-[verification command 1]
-[verification command 2]
+# Run frontend tests
+npm test
+
+# Check code style and linting
+npm run lint
+
+# Type checking (if using TypeScript)
+npm run type-check
+
+# Build verification
+npm run build
+
+# End-to-end tests
+npm run test:e2e
 ```
 
-#### Step 1.3: [Step Name]
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `path/to/file1.py` (modify)
-- `path/to/file2.py` (modify)
-
-**AI Prompt:** `Implement Step 1.3 of EP-XXXX: [step description]`
-
-**Tasks:**
-- [ ] [Atomic task 1]
-- [ ] [Atomic task 2]
-
-**Dependencies:**
-- [Step 1.2 must be complete]
-
-**Validation Criteria:**
-- [ ] [Specific, testable criterion 1]
-- [ ] [Specific, testable criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[verification command 1]
-[verification command 2]
-```
-
-### Phase 1 Completion Criteria
-- [ ] [Overall Phase 1 success criterion 1]
-- [ ] [Overall Phase 1 success criterion 2]
-- [ ] [Overall Phase 1 success criterion 3]
-
-## Phase 2: Core Implementation
-
-### Phase 2 Overview
-**Dependencies:** [Phase 1 completion]
-**Goal:** [Overall goal for Phase 2]
-
-#### Step 2.1: [Step Name]
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `path/to/file1.py` (new)
-- `path/to/file2.py` (modify)
-
-**AI Prompt:** `Implement Step 2.1 of EP-XXXX: [step description]`
-
-**Tasks:**
-- [ ] [Atomic task 1]
-- [ ] [Atomic task 2]
-- [ ] [Atomic task 3]
-
-**Dependencies:**
-- [Phase 1 completion]
-- [Specific dependency]
-
-**Validation Criteria:**
-- [ ] [Specific, testable criterion 1]
-- [ ] [Specific, testable criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[verification command 1]
-[verification command 2]
-```
-
-#### Step 2.2: [Step Name]
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `path/to/file1.py` (modify)
-- `path/to/file2.py` (modify)
-
-**AI Prompt:** `Implement Step 2.2 of EP-XXXX: [step description]`
-
-**Tasks:**
-- [ ] [Atomic task 1]
-- [ ] [Atomic task 2]
-
-**Dependencies:**
-- [Step 2.1 must be complete]
-
-**Validation Criteria:**
-- [ ] [Specific, testable criterion 1]
-- [ ] [Specific, testable criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[verification command 1]
-[verification command 2]
-```
-
-#### Step 2.3: [Step Name]
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `path/to/file1.py` (modify)
-- `path/to/file2.py` (modify)
-
-**AI Prompt:** `Implement Step 2.3 of EP-XXXX: [step description]`
-
-**Tasks:**
-- [ ] [Atomic task 1]
-- [ ] [Atomic task 2]
-
-**Dependencies:**
-- [Step 2.2 must be complete]
-
-**Validation Criteria:**
-- [ ] [Specific, testable criterion 1]
-- [ ] [Specific, testable criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[verification command 1]
-[verification command 2]
-```
-
-### Phase 2 Completion Criteria
-- [ ] [Overall Phase 2 success criterion 1]
-- [ ] [Overall Phase 2 success criterion 2]
-- [ ] [Overall Phase 2 success criterion 3]
-
-## Phase 3: Integration & Testing
-
-### Phase 3 Overview
-**Dependencies:** [Phase 2 completion]
-**Goal:** [Overall goal for Phase 3]
-
-#### Step 3.1: [Step Name]
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `path/to/test1.py` (new)
-- `path/to/test2.py` (new)
-
-**AI Prompt:** `Implement Step 3.1 of EP-XXXX: [step description]`
-
-**Tasks:**
-- [ ] [Atomic task 1]
-- [ ] [Atomic task 2]
-
-**Dependencies:**
-- [Phase 2 completion]
-
-**Validation Criteria:**
-- [ ] [Specific, testable criterion 1]
-- [ ] [Specific, testable criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[verification command 1]
-[verification command 2]
-```
-
-#### Step 3.2: [Step Name]
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `path/to/file1.py` (modify)
-- `path/to/integration_test.py` (new)
-
-**AI Prompt:** `Implement Step 3.2 of EP-XXXX: [step description]`
-
-**Tasks:**
-- [ ] [Atomic task 1]
-- [ ] [Atomic task 2]
-
-**Dependencies:**
-- [Step 3.1 must be complete]
-
-**Validation Criteria:**
-- [ ] [Specific, testable criterion 1]
-- [ ] [Specific, testable criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[verification command 1]
-[verification command 2]
-```
-
-#### Step 3.3: [Step Name]
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `path/to/e2e_test.py` (new)
-- `path/to/performance_test.py` (new)
-
-**AI Prompt:** `Implement Step 3.3 of EP-XXXX: [step description]`
-
-**Tasks:**
-- [ ] [Atomic task 1]
-- [ ] [Atomic task 2]
-
-**Dependencies:**
-- [Step 3.2 must be complete]
-
-**Validation Criteria:**
-- [ ] [Specific, testable criterion 1]
-- [ ] [Specific, testable criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[verification command 1]
-[verification command 2]
-```
-
-### Phase 3 Completion Criteria
-- [ ] [Overall Phase 3 success criterion 1]
-- [ ] [Overall Phase 3 success criterion 2]
-- [ ] [Overall Phase 3 success criterion 3]
-
-## Phase 4: Documentation & Finalization
-
-### Phase 4 Overview
-**Dependencies:** [Phase 3 completion]
-**Goal:** [Overall goal for Phase 4]
-
-#### Step 4.1: Code Documentation
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `path/to/file1.py` (modify - add docstrings)
-- `path/to/file2.py` (modify - add docstrings)
-
-**AI Prompt:** `Implement Step 4.1 of EP-XXXX: Code Documentation`
-
-**Tasks:**
-- [ ] [Documentation task 1]
-- [ ] [Documentation task 2]
-
-**Dependencies:**
-- [Phase 3 completion]
-
-**Validation Criteria:**
-- [ ] [Documentation criterion 1]
-- [ ] [Documentation criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[documentation verification command]
-```
-
-#### Step 4.2: Update Main Documentation
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `docs/requirements.md` (modify)
-- `docs/design.md` (modify)
-
-**AI Prompt:** `Implement Step 4.2 of EP-XXXX: Update Main Documentation`
-
-**Tasks:**
-- [ ] [Documentation task 1]
-- [ ] [Documentation task 2]
-
-**Dependencies:**
-- [Step 4.1 must be complete]
-
-**Validation Criteria:**
-- [ ] [Documentation criterion 1]
-- [ ] [Documentation criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[documentation verification command]
-```
-
-#### Step 4.3: Final Validation
-**Goal:** [Specific goal for this step]
-
-**Files to Create/Modify:**
-- `docs/enhancements/implemented/EP-XXXX-requirements.md` (move)
-- `docs/enhancements/implemented/EP-XXXX-design.md` (move)
-- `docs/enhancements/implemented/EP-XXXX-implementation.md` (move)
-
-**AI Prompt:** `Implement Step 4.3 of EP-XXXX: Final Validation`
-
-**Tasks:**
-- [ ] [Validation task 1]
-- [ ] [Validation task 2]
-
-**Dependencies:**
-- [Step 4.2 must be complete]
-
-**Validation Criteria:**
-- [ ] [Final validation criterion 1]
-- [ ] [Final validation criterion 2]
-
-**Success Check:**
-```bash
-# Commands to verify this step
-[final verification command]
-```
-
-### Phase 4 Completion Criteria
-- [ ] [Overall Phase 4 success criterion 1]
-- [ ] [Overall Phase 4 success criterion 2]
-- [ ] [Overall Phase 4 success criterion 3]
-
-## Testing Strategy
-
-### Test Plans
-<!-- AI: Reference test plans from design document -->
-
-### Test Execution
-<!-- AI: Describe how tests will be executed -->
-
-#### Unit Tests
-- [ ] [Unit test requirement 1]
-- [ ] [Unit test requirement 2]
-- [ ] [Unit test requirement 3]
-
-#### Integration Tests  (Mock Services Only)
-- [ ] [Integration test requirement 1]
-- [ ] [Integration test requirement 2]
-- [ ] [Integration test requirement 3]
-
-#### End-to-End Tests (Mock Services Only)
-- [ ] [End-to-End test requirement 1]
-- [ ] [End-to-End test requirement 2]
-- [ ] [End-to-End test requirement 3]
-
-## Resource Requirements
-
-### Technical Resources
-<!-- AI: List technical resource requirements -->
-- [Resource 1]: [Description and requirements]
-- [Resource 2]: [Description and requirements]
-
-### External Dependencies
-<!-- AI: List external dependencies -->
-- [Dependency 1]: [Description]
-- [Dependency 2]: [Description]
-
-## Documentation Updates Required
-
-### Main Documentation Updates
-<!-- AI: Reference documentation requirements from design document -->
-
-#### requirements.md Updates
-- [ ] **Section [X.X]**: [Specific change needed]
-- [ ] **Section [X.X]**: [Specific change needed]
-- [ ] **New Section**: [What needs to be added]
-
-#### design.md Updates
-- [ ] **Section [X.X]**: [Specific change needed]
-- [ ] **Section [X.X]**: [Specific change needed]
-- [ ] **New Section**: [What needs to be added]
-
-#### Other Documentation
-- [ ] [File/section]: [Change needed]
-- [ ] [File/section]: [Change needed]
-
-## Monitoring & Success Metrics
-
-### Success Metrics
-<!-- AI: Reference success criteria from requirements document -->
-- [Metric 1]: [Target value]
-- [Metric 2]: [Target value]
-- [Metric 3]: [Target value]
+**For Mixed Backend/Frontend Changes:**
+Use both sets of commands as applicable to the components being changed.
 
 ---
 
-## Implementation Checklist
+## Implementation Planning
 
-### Pre-Implementation
-- [ ] Requirements document approved
-- [ ] Design document approved
-- [ ] Implementation plan approved
-- [ ] Resources allocated
-- [ ] Dependencies confirmed
+### Breaking Down Complex Work
+1. **Identify Dependencies**: What must be built before other parts can work
+2. **Create Testable Chunks**: Each phase should be independently validatable
+3. **Minimize Risk**: Implement core functionality first, extensions second
+4. **Enable Early Validation**: Structure work so problems are caught quickly
+
+### Phase Planning Strategy
+**Adapt the number of phases based on complexity:**
+
+**For Simple Changes (1-2 phases):**
+- **Phase 1**: Implement change and basic tests
+- **Phase 2**: Integration testing and validation
+
+**For Moderate Changes (3-4 phases):**
+- **Phase 1**: Core functionality
+- **Phase 2**: Integration points  
+- **Phase 3**: Error handling and edge cases
+- **Phase 4**: Testing and validation
+
+**For Complex Changes (4+ phases):**
+- **Phase 1**: Foundation/data structures
+- **Phase 2**: Core business logic
+- **Phase 3**: API/integration layer
+- **Phase 4**: Error handling and resilience
+- **Phase 5+**: Additional phases as needed
+
+### Implementation Order
+1. **Data structures and core logic** (foundation)
+2. **API endpoints or interfaces** (integration points)
+3. **Error handling and validation** (robustness)
+4. **Tests and documentation** (verification)
+
+---
+
+## Execution Process
+
+### For Each Implementation Phase:
+1. **Implement** the functionality for this phase
+2. **Test** using the validation commands above
+3. **Fix** any issues before proceeding
+4. **Document** any important decisions or changes
+5. **Move** to next phase only when current phase passes validation
+
+### Quality Gates
+Before marking any phase complete:
+- [ ] All code follows the standards above
+- [ ] All validation commands pass
+- [ ] Tests cover the implemented functionality
+- [ ] Error handling is appropriate
+- [ ] Integration points work as expected
+
+### When Things Go Wrong
+- **Test Failures**: Check mocking setup and test logic
+- **Type Errors**: Add missing type annotations
+- **Import Issues**: Verify module structure and dependencies
+- **Integration Problems**: Check API contracts and data formats
+
+---
+
+## Definition of Done
+
+An EP implementation is complete when:
+- [ ] All requirements from the requirements document are met
+- [ ] All design elements from the design document are implemented
+- [ ] All validation commands pass consistently
+- [ ] Critical functionality has appropriate test coverage
+- [ ] Code includes proper documentation and error handling
+- [ ] Integration points work as specified in the design
+- [ ] Implementation is ready for production use
+
+---
+
+## AI Implementation Notes
+
+### Reading the Design Document
+- Understand the implementation strategy (replace/extend/new)
+- Identify which components need changes
+- Note compatibility requirements and constraints
+- Plan phases based on dependencies and complexity
+
+### Creating Implementation Plans
+- **Choose appropriate number of phases** based on EP complexity
+- Break work into **logical, testable chunks** that make sense for the specific change
+- Specify exact files to modify in each phase
+- Include validation steps for each phase
+- Order phases to minimize risk and enable early testing
 
 ### During Implementation
-- [ ] Follow step-by-step process
-- [ ] Validate each step before proceeding
-- [ ] Update progress regularly
-- [ ] Escalate issues promptly
-- [ ] Document decisions and changes
-
-### Post-Implementation
-- [ ] All tests passing
-- [ ] Documentation updated
-- [ ] Success metrics achieved
-- [ ] Stakeholders notified
-- [ ] Implementation marked complete
-
----
-
-## AI Implementation Guide
-
-### Implementation Approach Reminder
-**CRITICAL**: If this is a complete replacement implementation:
-- Remove ALL legacy code - do not preserve, wrap, or extend existing implementation
-- Focus ONLY on maintaining external API endpoint compatibility
-- Use clear AI prompts like "completely replace" and "remove all legacy code"
-- Internal implementation can be entirely different from original
-
-### Step-by-Step Execution
-1. **Implement each step individually** using the specific AI prompt
-2. **Validate each step** using the success check commands
-3. **Proceed only after validation** to avoid cascading failures
-4. **Update progress** by checking off completed tasks
-5. **Escalate issues** if validation fails
-
-### Implementation Pattern
-```
-AI Prompt: "Implement Step X.Y of EP-XXXX: [step description]"
-[For complete replacements, add: "Completely replace existing implementation. Remove all legacy code."]
-Human: Run success check commands
-Human: Verify validation criteria
-Human: Check off completed tasks
-Human: Proceed to next step only if all validation passes
-```
-
-### Troubleshooting
-- If a step fails validation, use the appropriate rollback strategy (git revert for complete replacements)
-- Review dependencies before proceeding
-- Check for blockers and resolve them
-- For complete replacements: Don't try to preserve failing code, revert cleanly and retry
-
----
-
-## Completion Criteria
-
-### Final Success Criteria
-- [ ] [All requirements from requirements document are met]
-- [ ] [All design elements from design document are implemented]
-- [ ] [All test cases pass]
-- [ ] [All documentation is updated]
-- [ ] [All stakeholders are satisfied]
-
-### Implementation Complete
-When all phases are complete and all success criteria are met, this EP implementation is considered complete and can be moved to the implemented directory.
-
-**Final AI Prompt:**
-```
-Review EP-XXXX implementation and mark it as completed. Move all three documents (requirements, design, implementation) to the implemented directory and update the EP registry.
-``` 
+- Follow the code standards consistently
+- Run validation commands after each significant change
+- Test thoroughly before moving to the next phase
+- Document any deviations from the original design 
