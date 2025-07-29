@@ -247,8 +247,8 @@ class TestKubernetesAgentIntegration:
         
         alert_data = {
             "alert": sample_alert.alert_type,
-            "namespace": sample_alert.namespace,
-            "message": sample_alert.message
+            "namespace": sample_alert.data.get('namespace', ''),
+            "message": sample_alert.data.get('message', '')
         }
         
         available_tools = {
@@ -413,8 +413,8 @@ class TestServiceInteractionPatterns:
         
         alert_data = {
             "alert": sample_alert.alert_type,
-            "namespace": sample_alert.namespace,
-            "message": sample_alert.message
+            "namespace": sample_alert.data.get('namespace', ''),
+            "message": sample_alert.data.get('message', '')
         }
         
         mcp_data = {

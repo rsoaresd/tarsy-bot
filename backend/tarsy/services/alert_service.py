@@ -92,7 +92,7 @@ class AlertService:
     def _generate_alert_key(self, alert_data: Dict[str, Any]) -> str:
         """Generate a deterministic key for alert concurrency control."""
         # Use content hash for consistent concurrency control of identical alerts
-        data = alert_data.get('alert_data', {})
+        data = alert_data.get('data', {})
         alert_type = alert_data.get('alert_type', 'unknown')
         
         # Combine alert type with content hash for better key distribution

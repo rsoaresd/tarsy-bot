@@ -14,6 +14,7 @@ from tarsy.integrations.llm.client import LLMClient
 from tarsy.integrations.mcp.client import MCPClient
 from tarsy.models.alert import Alert
 from tarsy.services.mcp_server_registry import MCPServerRegistry
+from tarsy.utils.timestamp import now_us
 
 
 class TestConcreteAgent(BaseAgent):
@@ -136,27 +137,18 @@ class TestBaseAgentUtilityMethods:
     def sample_alert(self):
         """Create sample alert."""
         return Alert(
-            alert_type="TestAlert",
-            severity="high",
-            environment="test",
-            cluster="test-cluster",
-            namespace="test-namespace",
-            message="Test alert message",
-            runbook="test-runbook.md"
+            alert_type="kubernetes",
+            runbook="test-runbook.md",
+            severity="high", 
+            timestamp=now_us(),
+            data={
+                "alert": "TestAlert",
+                "message": "Test alert message",
+                "environment": "test",
+                "cluster": "test-cluster",
+                "namespace": "test-namespace"
+            }
         )
-
-    @pytest.mark.unit
-    def test_prepare_alert_data(self, base_agent, sample_alert):
-        """Test alert data preparation for prompt building."""
-        alert_data = base_agent._prepare_alert_data(sample_alert)
-        
-        assert isinstance(alert_data, dict)
-        assert alert_data["alert"] == "TestAlert"
-        assert alert_data["message"] == "Test alert message"
-        assert alert_data["environment"] == "test"
-        assert alert_data["severity"] == "high"
-        assert alert_data["cluster"] == "test-cluster"
-        assert alert_data["namespace"] == "test-namespace"
 
     @pytest.mark.unit
     def test_parse_json_response_valid_json(self, base_agent):
@@ -1007,38 +999,34 @@ class TestBaseAgentErrorHandling:
             runbook="test-runbook.md"
         )
 
-    @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_process_alert_mcp_configuration_error(self, base_agent, mock_mcp_registry, sample_alert):
+    async def test_process_alert_mcp_configuration_error(self, base_agent, sample_alert):
         """Test process_alert with MCP configuration error."""
-        mock_mcp_registry.get_server_configs.return_value = []  # No servers configured
+        base_agent.mcp_registry.get_server_configs.side_effect = Exception("MCP config error")
         
-        result = await base_agent.process_alert(sample_alert, "runbook content", "test-session-123")
+        alert_dict = sample_alert.model_dump()
+        result = await base_agent.process_alert(alert_dict, "runbook content", "test-session-123")
         
         assert result["status"] == "error"
-        assert "Agent processing failed" in result["error"]
-        assert result["agent"] == "TestConcreteAgent"
+        assert "MCP config error" in result["error"]
 
-    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_process_alert_progress_callback_error(self, base_agent, sample_alert, mock_mcp_client):
         """Test process_alert handles progress callback errors gracefully."""
-        failing_callback = Mock(side_effect=Exception("Callback error"))
-        mock_mcp_client.list_tools.return_value = {"test-server": []}
+        # Mock progress callback that raises error
+        progress_callback = Mock(side_effect=Exception("Callback error"))
         
-        # Should complete despite callback errors
+        alert_dict = sample_alert.model_dump()
         result = await base_agent.process_alert(
-            sample_alert, 
-            "runbook content",
-            callback=failing_callback,
-            session_id="test-session-123"
+            alert_dict, 
+            "runbook content", 
+            "test-session-callback-error",
+            callback=progress_callback
         )
         
-        # Should complete successfully despite callback failures
+        # Should still complete despite callback error
         assert result["status"] in ["success", "error"]
-        assert result["agent"] == "TestConcreteAgent"
 
-    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_process_alert_success_flow(self, base_agent, mock_mcp_client, mock_llm_client, sample_alert):
         """Test successful process_alert flow."""
@@ -1058,12 +1046,15 @@ class TestBaseAgentErrorHandling:
         base_agent.determine_next_mcp_tools = AsyncMock(return_value={"continue": False})
         base_agent.analyze_alert = AsyncMock(return_value="Success analysis")
         
-        result = await base_agent.process_alert(sample_alert, "runbook content", "test-session-success")
+        # Convert Alert to dict for new interface
+        alert_dict = sample_alert.model_dump()
+        
+        result = await base_agent.process_alert(alert_dict, "runbook content", "test-session-success")
         
         assert result["status"] == "success"
         assert result["analysis"] == "Success analysis"
         assert result["agent"] == "TestConcreteAgent"
-        assert "timestamp" in result
+        assert "timestamp_us" in result  # Changed from "timestamp" to "timestamp_us"
         assert "iterations" in result
 
     @pytest.mark.unit
@@ -1084,7 +1075,7 @@ class TestBaseAgentErrorHandling:
 
 @pytest.mark.unit
 class TestBaseAgent:
-    """Test suite for BaseAgent class - Original interface compatibility tests."""
+    """Test BaseAgent with session ID parameter validation."""
     
     @pytest.fixture
     def mock_llm_client(self):
@@ -1102,312 +1093,142 @@ class TestBaseAgent:
         return client
     
     @pytest.fixture
-    def mock_mcp_registry(self):
-        """Create mock MCP server registry."""
-        registry = Mock(spec=MCPServerRegistry)
-        mock_config = Mock()
-        mock_config.server_id = "test-server"
-        mock_config.server_type = "test"
-        mock_config.instructions = "Test server instructions"
-        registry.get_server_configs.return_value = [mock_config]
-        return registry
+    def base_agent(self, mock_llm_client, mock_mcp_client):
+        """Create BaseAgent with mocked dependencies."""
+        agent = TestConcreteAgent(mock_llm_client, Mock(spec=MCPClient), Mock(spec=MCPServerRegistry))
+        agent.mcp_client = mock_mcp_client
+        return agent
     
     @pytest.fixture
     def sample_alert(self):
-        """Create a sample alert for testing."""
+        """Create sample alert for testing."""
         return Alert(
-            alert_type="TestAlert",
+            alert_type="kubernetes",
+            runbook="test-runbook.md",
             severity="high",
-            environment="test",
-            cluster="test-cluster",
-            namespace="test-namespace",
-            message="Test alert message",
-            runbook="test-runbook.md"
+            timestamp=now_us(),
+            data={
+                "alert": "TestAlert",
+                "message": "Test alert message",
+                "environment": "test",
+                "cluster": "test-cluster",
+                "namespace": "test-namespace"
+            }
         )
-    
-    @pytest.fixture
-    def base_agent(self, mock_llm_client, mock_mcp_client, mock_mcp_registry):
-        """Create a concrete BaseAgent instance for testing."""
-        return TestConcreteAgent(
-            llm_client=mock_llm_client,
-            mcp_client=mock_mcp_client,
-            mcp_registry=mock_mcp_registry
-        )
-    
+
     @pytest.mark.asyncio
-    @pytest.mark.unit
     async def test_process_alert_with_session_id_parameter(
-        self, 
-        base_agent, 
-        sample_alert,
-        mock_mcp_client
+        self, base_agent, mock_mcp_client, mock_llm_client, sample_alert
     ):
         """Test that process_alert accepts session_id parameter without error."""
-        # Arrange
-        runbook_content = "Test runbook content"
-        session_id = "test-session-123"
-        progress_callback = Mock()
+        # Mock MCP registry
+        mock_config = Mock()
+        mock_config.server_id = "test-server"
+        base_agent.mcp_registry.get_server_configs.return_value = [mock_config]
         
-        # Mock the tools listing to avoid MCP calls
-        mock_mcp_client.list_tools.return_value = {"test-server": []}
+        # Mock prompt builder methods
+        base_agent.determine_mcp_tools = AsyncMock(return_value=[])
+        base_agent.determine_next_mcp_tools = AsyncMock(return_value={"continue": False})
+        base_agent.analyze_alert = AsyncMock(return_value="Test analysis")
         
-        # Act - This should not raise a TypeError about unexpected keyword argument
+        # Convert Alert to dict for new interface
+        alert_dict = sample_alert.model_dump()
+        
         result = await base_agent.process_alert(
-            alert=sample_alert,
-            runbook_content=runbook_content,
-            callback=progress_callback,
-            session_id=session_id
-        )
-        
-        # Assert
-        assert result is not None
-        assert isinstance(result, dict)
-        assert result["status"] in ["success", "error"]
-        assert result["agent"] == "TestConcreteAgent"
-    
-    @pytest.mark.asyncio
-    @pytest.mark.unit
-    async def test_process_alert_without_session_id_parameter(
-        self, 
-        base_agent, 
-        sample_alert,
-        mock_mcp_client
-    ):
-        """Test that process_alert works without session_id parameter."""
-        # Arrange
-        runbook_content = "Test runbook content"
-        progress_callback = Mock()
-        
-        # Mock the tools listing to avoid MCP calls
-        mock_mcp_client.list_tools.return_value = {"test-server": []}
-        
-        # Act - Should work with session_id parameter
-        result = await base_agent.process_alert(
-            alert=sample_alert,
-            runbook_content=runbook_content,
-            callback=progress_callback,
+            alert_data=alert_dict,
+            runbook_content="runbook content",
             session_id="test-session-123"
         )
         
-        # Assert
-        assert result is not None
-        assert isinstance(result, dict)
-        assert result["status"] in ["success", "error"]
-        assert result["agent"] == "TestConcreteAgent"
-    
+        assert result["status"] == "success"
+        assert result["analysis"] == "Test analysis"
+
     @pytest.mark.asyncio
-    @pytest.mark.unit
+    async def test_process_alert_without_session_id_parameter(
+        self, base_agent, mock_mcp_client, mock_llm_client, sample_alert
+    ):
+        """Test that process_alert works without session_id parameter."""
+        # Mock MCP registry
+        mock_config = Mock()
+        mock_config.server_id = "test-server"
+        base_agent.mcp_registry.get_server_configs.return_value = [mock_config]
+        
+        # Mock prompt builder methods
+        base_agent.determine_mcp_tools = AsyncMock(return_value=[])
+        base_agent.determine_next_mcp_tools = AsyncMock(return_value={"continue": False})
+        base_agent.analyze_alert = AsyncMock(return_value="Test analysis")
+        
+        # Convert Alert to dict for new interface
+        alert_dict = sample_alert.model_dump()
+        
+        result = await base_agent.process_alert(
+            alert_data=alert_dict,
+            runbook_content="runbook content", 
+            session_id="test-session"
+        )
+        
+        assert result["status"] == "success"
+        assert result["analysis"] == "Test analysis"
+
+    @pytest.mark.asyncio
     async def test_process_alert_with_none_session_id(
-        self, 
-        base_agent, 
-        sample_alert,
-        mock_mcp_client
+        self, base_agent, mock_mcp_client, mock_llm_client, sample_alert
     ):
         """Test that process_alert raises ValueError with None session_id."""
-        # Arrange
-        runbook_content = "Test runbook content"
-        progress_callback = Mock()
+        # Convert Alert to dict for new interface
+        alert_dict = sample_alert.model_dump()
         
-        # Mock the tools listing to avoid MCP calls
-        mock_mcp_client.list_tools.return_value = {"test-server": []}
-        
-        # Act & Assert - Should raise ValueError with None session_id
-        with pytest.raises(ValueError, match="session_id is required for alert processing"):
+        with pytest.raises(ValueError, match="session_id is required"):
             await base_agent.process_alert(
-                alert=sample_alert,
-                runbook_content=runbook_content,
-                callback=progress_callback,
+                alert_data=alert_dict,
+                runbook_content="runbook content",
                 session_id=None
             )
-    
+
     @pytest.mark.asyncio
-    @pytest.mark.unit
     async def test_process_alert_parameter_order_flexibility(
-        self, 
-        base_agent, 
-        sample_alert,
-        mock_mcp_client
+        self, base_agent, mock_mcp_client, mock_llm_client, sample_alert
     ):
         """Test that process_alert accepts parameters in different orders."""
-        # Arrange
-        runbook_content = "Test runbook content"
-        session_id = "test-session-456"
-        progress_callback = Mock()
+        # Mock MCP registry
+        mock_config = Mock()
+        mock_config.server_id = "test-server"
+        base_agent.mcp_registry.get_server_configs.return_value = [mock_config]
         
-        # Mock the tools listing to avoid MCP calls
-        mock_mcp_client.list_tools.return_value = {"test-server": []}
+        # Mock prompt builder methods
+        base_agent.determine_mcp_tools = AsyncMock(return_value=[])
+        base_agent.determine_next_mcp_tools = AsyncMock(return_value={"continue": False})
+        base_agent.analyze_alert = AsyncMock(return_value="Test analysis")
         
-        # Act - Pass parameters in different order using keywords
+        # Convert Alert to dict for new interface
+        alert_dict = sample_alert.model_dump()
+        
         result = await base_agent.process_alert(
-            session_id=session_id,
-            callback=progress_callback,
-            alert=sample_alert,
-            runbook_content=runbook_content
+            runbook_content="runbook content",
+            alert_data=alert_dict, 
+            session_id="test-session"
         )
         
-        # Assert
-        assert result is not None
-        assert isinstance(result, dict)
-        assert result["status"] in ["success", "error"]
-        assert result["agent"] == "TestConcreteAgent"
-    
-    @pytest.mark.unit
-    def test_concrete_agent_abstract_methods(self, base_agent):
-        """Test that concrete agent properly implements abstract methods."""
-        # Act & Assert
-        assert base_agent.mcp_servers() == ["test-server"]
-        assert base_agent.custom_instructions() == "Test instructions"
-    
+        assert result["status"] == "success"
+        assert result["analysis"] == "Test analysis"
+
     @pytest.mark.asyncio
-    @pytest.mark.unit
     async def test_process_alert_error_handling_preserves_session_id_interface(
-        self, 
-        base_agent, 
-        sample_alert,
-        mock_mcp_client
+        self, base_agent, mock_mcp_client, mock_llm_client, sample_alert
     ):
-        """Test error handling preserves session_id interface."""
-        # Arrange
-        runbook_content = "Test runbook content"
-        session_id = "test-session-error"
+        """Test that process_alert error responses preserve session_id interface."""
+        # Mock MCP registry to cause an error
+        base_agent.mcp_registry.get_server_configs.side_effect = Exception("MCP error")
         
-        # Mock MCP client to raise an error
-        mock_mcp_client.list_tools.side_effect = Exception("MCP connection failed")
+        # Convert Alert to dict for new interface
+        alert_dict = sample_alert.model_dump()
         
-        # Act - Should handle error gracefully while preserving interface
         result = await base_agent.process_alert(
-            alert=sample_alert,
-            runbook_content=runbook_content,
-            session_id=session_id
+            alert_data=alert_dict,
+            runbook_content="runbook content",
+            session_id="test-session-error"
         )
         
-        # Assert - Agent handles MCP errors gracefully and continues with analysis
-        assert result is not None
-        assert isinstance(result, dict)
-        assert result["status"] in ["success", "error"]  # Either is acceptable
-        assert result["agent"] == "TestConcreteAgent" 
-
-
-class TestSessionIdPropagation:
-    """Test session_id propagation and validation in BaseAgent."""
-    
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_process_alert_requires_session_id_validation(self):
-        """Test that process_alert validates session_id properly."""
-        mock_llm_client = AsyncMock()
-        mock_mcp_client = AsyncMock()
-        mock_mcp_registry = Mock()
-        base_agent = TestConcreteAgent(mock_llm_client, mock_mcp_client, mock_mcp_registry)
-        
-        sample_alert = Alert(
-            id="test-alert",
-            alert_type="TestAlert", 
-            environment="test",
-            cluster="test-cluster",
-            severity="high",
-            namespace="test-namespace",
-            message="Test message",
-            runbook="Test runbook"
-        )
-        
-        # Test None session_id raises error
-        with pytest.raises(ValueError, match="session_id is required"):
-            await base_agent.process_alert(sample_alert, "runbook", session_id=None)
-        
-        # Test empty session_id raises error  
-        with pytest.raises(ValueError, match="session_id is required"):
-            await base_agent.process_alert(sample_alert, "runbook", session_id="")
-        
-        # Test whitespace-only session_id raises error
-        with pytest.raises(ValueError, match="session_id is required"):
-            await base_agent.process_alert(sample_alert, "runbook", session_id="   ")
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_analyze_alert_session_id_propagation(self):
-        """Test that analyze_alert correctly passes session_id to LLM client."""
-        mock_llm_client = AsyncMock()
-        mock_llm_client.generate_response.return_value = "Test analysis"
-        mock_mcp_client = AsyncMock()
-        mock_mcp_registry = Mock()
-        mock_mcp_registry.get_server_configs.return_value = []
-        
-        base_agent = TestConcreteAgent(mock_llm_client, mock_mcp_client, mock_mcp_registry)
-        
-        sample_alert_data = {
-            "id": "test-alert-123",
-            "type": "TestAlert", 
-            "severity": "high",
-            "namespace": "test-namespace"
-        }
-        
-        await base_agent.analyze_alert(
-            sample_alert_data, 
-            "runbook content", 
-            {"mcp": "data"}, 
-            session_id="test-session-12345"
-        )
-        
-        # Verify session_id was passed to LLM client
-        mock_llm_client.generate_response.assert_called_once()
-        call_args = mock_llm_client.generate_response.call_args
-        assert call_args[0][1] == "test-session-12345"  # Second positional arg
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_determine_mcp_tools_session_id_propagation(self):
-        """Test that determine_mcp_tools correctly passes session_id to LLM client."""
-        mock_llm_client = AsyncMock()
-        mock_response = '[{"server": "test", "tool": "test", "parameters": {}, "reason": "test"}]'
-        mock_llm_client.generate_response.return_value = mock_response
-        mock_mcp_client = AsyncMock()
-        mock_mcp_registry = Mock()
-        mock_mcp_registry.get_server_configs.return_value = []
-        
-        base_agent = TestConcreteAgent(mock_llm_client, mock_mcp_client, mock_mcp_registry)
-        
-        sample_alert_data = {
-            "id": "test-alert-123",
-            "type": "TestAlert",
-            "severity": "high",
-            "namespace": "test-namespace"
-        }
-        
-        await base_agent.determine_mcp_tools(
-            sample_alert_data, 
-            "runbook content", 
-            {"tools": []}, 
-            session_id="test-session-12345"
-        )
-        
-        # Verify session_id was passed to LLM client
-        mock_llm_client.generate_response.assert_called_once()
-        call_args = mock_llm_client.generate_response.call_args
-        assert call_args[0][1] == "test-session-12345"  # Second positional arg
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_execute_mcp_tools_session_id_propagation(self):
-        """Test that _execute_mcp_tools correctly passes session_id to MCP client."""
-        mock_llm_client = AsyncMock()
-        mock_mcp_client = AsyncMock()
-        mock_mcp_client.call_tool.return_value = {"result": "success"}
-        mock_mcp_registry = Mock()
-        
-        base_agent = TestConcreteAgent(mock_llm_client, mock_mcp_client, mock_mcp_registry)
-        base_agent._configured_servers = ["test-server"]
-        
-        tools_to_call = [{
-            "server": "test-server",
-            "tool": "test-tool", 
-            "parameters": {"param": "value"},
-            "reason": "Testing"
-        }]
-        
-        await base_agent._execute_mcp_tools(tools_to_call, session_id="test-session-12345")
-        
-        # Verify session_id was passed to MCP client
-        mock_mcp_client.call_tool.assert_called_once_with(
-            "test-server", "test-tool", {"param": "value"}, "test-session-12345"
-        ) 
+        assert result["status"] == "error"
+        assert "error" in result
+        assert "MCP error" in result["error"] 

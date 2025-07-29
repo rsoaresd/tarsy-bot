@@ -17,6 +17,36 @@ from sqlmodel import Session, SQLModel, create_engine
 # Set testing environment variable as early as possible
 os.environ["TESTING"] = "true"
 
+# Import Alert model for fixtures
+from tarsy.models.alert import Alert
+from tarsy.utils.timestamp import now_us
+
+
+def alert_to_api_format(alert: Alert) -> dict:
+    """
+    Convert an Alert object to the dictionary format that the API layer produces
+    and AlertService expects: {"alert_type": "...", "alert_data": {...}}
+    
+    This matches the format created in main.py lines 349-352.
+    """
+    # Create normalized_data that matches what the API layer does
+    normalized_data = alert.data.copy() if alert.data else {}
+    
+    # Add core fields (matching API logic)
+    normalized_data["runbook"] = alert.runbook
+    normalized_data["severity"] = alert.severity or "warning"
+    normalized_data["timestamp"] = alert.timestamp or now_us()
+    
+    # Add default environment if not present
+    if "environment" not in normalized_data:
+        normalized_data["environment"] = "production"
+    
+    # Return in the format AlertService expects
+    return {
+        "alert_type": alert.alert_type,
+        "alert_data": normalized_data
+    }
+
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
@@ -138,3 +168,47 @@ def cleanup_test_database_files():
                 test_file.unlink()
             except OSError:
                 pass  # File might be in use, ignore 
+
+
+@pytest.fixture
+def sample_kubernetes_alert():
+    """Create a sample Kubernetes alert using the new flexible model."""
+    return Alert(
+        alert_type="kubernetes",
+        runbook="https://github.com/company/runbooks/blob/main/k8s.md",
+        severity="critical",
+        timestamp=now_us(),
+        data={
+            "environment": "production",
+            "cluster": "main-cluster", 
+            "namespace": "test-namespace",
+            "message": "Namespace is terminating",
+            "alert": "NamespaceTerminating"
+        }
+    )
+
+
+@pytest.fixture
+def sample_generic_alert():
+    """Create a sample generic alert using the new flexible model."""
+    return Alert(
+        alert_type="generic",
+        runbook="https://example.com/runbook",
+        severity="warning",
+        timestamp=now_us(),
+        data={
+            "environment": "production",
+            "message": "Generic alert message",
+            "source": "monitoring-system"
+        }
+    )
+
+
+@pytest.fixture
+def minimal_alert():
+    """Create a minimal alert with only required fields."""
+    return Alert(
+        alert_type="test",
+        runbook="https://example.com/minimal-runbook",
+        data={}
+    ) 

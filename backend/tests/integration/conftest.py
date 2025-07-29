@@ -77,15 +77,19 @@ def mock_settings():
 def sample_alert():
     """Create a sample alert for testing."""
     return Alert(
-        alert_type="NamespaceTerminating",
-        severity="high",
-        environment="production",
-        cluster="https://k8s-cluster.example.com",
-        namespace="stuck-namespace",
-        pod="problematic-pod-12345",
-        message="Namespace 'stuck-namespace' has been in Terminating state for 30+ minutes",
+        alert_type="kubernetes",
         runbook="https://github.com/company/runbooks/blob/main/k8s-namespace-terminating.md",
-        context="Multiple pods in the namespace are stuck with finalizers"
+        severity="high",
+        timestamp=1704110400000000,  # Fixed timestamp for testing
+        data={
+            "environment": "production",
+            "cluster": "https://k8s-cluster.example.com",
+            "namespace": "stuck-namespace",
+            "pod": "problematic-pod-12345",
+            "message": "Namespace 'stuck-namespace' has been in Terminating state for 30+ minutes",
+            "context": "Multiple pods in the namespace are stuck with finalizers",
+            "alert": "NamespaceTerminating"
+        }
     )
 
 
@@ -365,7 +369,7 @@ def mock_agent_factory(mock_llm_manager, mock_mcp_client):
             mock_agent = Mock(spec=KubernetesAgent)
             
             # Mock the process_alert method to actually call dependencies for test verification
-            async def mock_process_alert(alert, runbook_content, session_id, callback=None):
+            async def mock_process_alert(alert_data, runbook_content, session_id, callback=None):
                 if not session_id:
                     raise ValueError("session_id is required for alert processing")
                 
@@ -441,6 +445,42 @@ async def alert_service(mock_settings, mock_runbook_service, mock_agent_registry
     service.agent_factory = mock_agent_factory
     
     yield service
+
+
+@pytest.fixture
+def alert_service_with_mocks(
+    mock_settings,
+    mock_llm_manager,
+    mock_mcp_client,
+    mock_mcp_server_registry,
+    mock_runbook_service,
+    mock_agent_registry,
+    mock_agent_factory
+):
+    """Create AlertService with all dependencies mocked for integration testing."""
+    # Create service with mocked settings
+    service = AlertService(mock_settings)
+    
+    # Inject mocked dependencies
+    service.llm_manager = mock_llm_manager
+    service.mcp_client = mock_mcp_client
+    service.mcp_registry = mock_mcp_server_registry
+    service.runbook_service = mock_runbook_service
+    service.agent_registry = mock_agent_registry
+    service.agent_factory = mock_agent_factory
+    service.history_service = None  # Disable history for integration tests
+    
+    # Bundle dependencies for easy access in tests
+    mock_dependencies = {
+        'llm_manager': mock_llm_manager,
+        'mcp_client': mock_mcp_client,
+        'mcp_registry': mock_mcp_server_registry,
+        'runbook': mock_runbook_service,
+        'registry': mock_agent_registry,
+        'factory': mock_agent_factory
+    }
+    
+    return service, mock_dependencies
 
 
 # History Service Test Fixtures

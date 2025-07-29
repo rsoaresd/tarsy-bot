@@ -20,6 +20,7 @@ from tarsy.models.alert import Alert
 # Import history models to ensure they're registered with SQLModel.metadata
 from tarsy.services.alert_service import AlertService
 from tarsy.services.history_service import HistoryService
+from tests.conftest import alert_to_api_format
 
 logger = logging.getLogger(__name__)
 
@@ -122,10 +123,10 @@ class TestHistoryServiceIntegration:
             alert_id="alert-123",
             alert_data={
                 "alert_type": sample_alert.alert_type,
-                "environment": sample_alert.environment,
-                "cluster": sample_alert.cluster,
-                "namespace": sample_alert.namespace,
-                "message": sample_alert.message
+                        "environment": sample_alert.data.get('environment', ''),
+        "cluster": sample_alert.data.get('cluster', ''),
+        "namespace": sample_alert.data.get('namespace', ''),
+        "message": sample_alert.data.get('message', '')
             },
             agent_type="KubernetesAgent",
             alert_type=sample_alert.alert_type
@@ -475,7 +476,7 @@ class TestAlertServiceHistoryIntegration:
         
         # Process alert
         result = await alert_service_with_history.process_alert(
-            alert=sample_alert,
+            alert_to_api_format(sample_alert),
             progress_callback=progress_callback
         )
         
@@ -515,7 +516,7 @@ class TestAlertServiceHistoryIntegration:
         
         # Process alert (should handle error gracefully)
         result = await alert_service_with_history.process_alert(
-            alert=sample_alert,
+            alert_to_api_format(sample_alert),
             progress_callback=AsyncMock()
         )
         
@@ -901,10 +902,11 @@ class TestDuplicatePreventionIntegration:
         
         # Create identical alerts rapidly
         alert = Alert(**sample_alert_data)
+        alert_dict = alert_to_api_format(alert)
         generated_ids = set()
         
         for _ in range(100):
-            session_id = alert_service._create_history_session(alert, "TestAgent")
+            session_id = alert_service._create_history_session(alert_dict, "TestAgent")
             if session_id:
                 # Get the generated alert_id from the created session
                 session = history_service_with_test_db.get_session_timeline(session_id)
@@ -914,10 +916,11 @@ class TestDuplicatePreventionIntegration:
         # All generated alert IDs should be unique
         assert len(generated_ids) == 100, f"Expected 100 unique alert IDs, got {len(generated_ids)}"
         
-        # Each ID should follow the expected pattern
+        # Each ID should follow the expected pattern (hash-based format)
         for alert_id in generated_ids:
-            assert alert_id.startswith("PodCrashLoopBackOff_production_default_")
-            assert len(alert_id.split('_')) >= 5  # Should have timestamp and random suffix
+            assert alert_id.startswith("PodCrashLoopBackOff_")
+            parts = alert_id.split('_')
+            assert len(parts) == 4  # alert_type_hash_timestamp_random
     
     def test_retry_logic_doesnt_create_duplicates(self, history_service_with_test_db, sample_alert_data):
         """Test that retry logic doesn't create duplicate sessions."""
