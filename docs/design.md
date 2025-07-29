@@ -20,6 +20,7 @@
 This design document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant architectural changes are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
 
 ### Recent Changes
+- **EP-0005 (IMPLEMENTED)**: Flexible Alert Data Structure Support - Transformed rigid Kubernetes-specific alert model into flexible, agent-agnostic system supporting arbitrary JSON payloads with minimal validation, enhanced database with JSON indexing, and updated UI for dynamic alert data rendering
 - **EP-0004 (IMPLEMENTED)**: Dashboard UI for Alert History - Added standalone React dashboard for SRE operational monitoring with real-time WebSocket integration, historical analysis, and multiplexed WebSocket architecture
 - **EP-0003 (IMPLEMENTED)**: Alert Processing History Service - Added comprehensive audit trail capture and database persistence with REST API endpoints for historical data access
 - **EP-0002 (IMPLEMENTED)**: Multi-Layer Agent Architecture - Transformed monolithic alert processing into orchestrator + specialized agents architecture
@@ -38,12 +39,14 @@ Tarsy is a **distributed, event-driven system** designed to automate incident re
 
 1. **Multi-Layer Agent Architecture**: Orchestrator layer delegates processing to specialized agents based on alert type mappings
 2. **Agent Specialization**: Domain-specific agents with focused MCP server subsets and specialized instructions
-3. **Iterative Intelligence**: Multi-step LLM-driven analysis that mimics human troubleshooting methodology
-4. **Dynamic Tool Selection**: Agents intelligently choose appropriate MCP tools from their assigned server subsets
-5. **Extensible Architecture**: Inheritance-based agent design for easy addition of new specialized agents
-6. **Real-time Communication**: WebSocket-based progress updates and status tracking with agent identification
-7. **Resilient Design**: Graceful degradation and comprehensive error handling across agent layers
-8. **Comprehensive Audit Trail**: Persistent history capture of all alert processing workflows with chronological timeline reconstruction
+3. **Flexible Alert Data Structure**: Agent-agnostic system supporting arbitrary JSON payloads from diverse monitoring sources
+4. **LLM-First Processing**: Agents receive complete JSON payloads for intelligent interpretation without rigid field extraction
+5. **Iterative Intelligence**: Multi-step LLM-driven analysis that mimics human troubleshooting methodology
+6. **Dynamic Tool Selection**: Agents intelligently choose appropriate MCP tools from their assigned server subsets
+7. **Extensible Architecture**: Inheritance-based agent design for easy addition of new specialized agents
+8. **Real-time Communication**: WebSocket-based progress updates and status tracking with agent identification
+9. **Resilient Design**: Graceful degradation and comprehensive error handling across agent layers
+10. **Comprehensive Audit Trail**: Persistent history capture of all alert processing workflows with chronological timeline reconstruction
 
 ### Technology Stack
 
@@ -635,9 +638,9 @@ MCPCommunication:
 - tool_result: Optional[dict] (JSON)
 - available_tools: Optional[dict] (JSON)
 - duration_ms: int
-- success: bool
-- error_message: Optional[str]
-- step_description: str
+- success: boolean                # Success/failure status
+- error_message: Optional[string] # Error message if failed
+- step_description: string        # Human-readable step description
 ```
 
 ### 15. History Repository
@@ -837,17 +840,16 @@ sequenceDiagram
 
 **Alert Data Model:**
 ```
-Alert Entity:
-- alert_type: string              # Alert type for agent selection
-- severity: string                # Alert severity level
-- environment: string             # Environment identifier
-- cluster: string                 # Kubernetes cluster URL
-- namespace: string               # Kubernetes namespace
-- pod: Optional[string]           # Specific pod (optional)
-- message: string                 # Alert description
-- runbook: string                 # GitHub runbook URL
-- context: Optional[string]       # Additional context or details
-- timestamp: Optional[datetime]   # Alert occurrence time (auto-generated)
+FlexibleAlert Entity:
+- alert_type: string              # Alert type for agent selection (required)
+- runbook: string                 # GitHub runbook URL (required)
+- data: object                    # Arbitrary JSON payload for monitoring data
+  - severity: Optional[string]    # Defaults to "warning" if not provided
+  - timestamp: Optional[number]   # Unix microseconds, auto-generated if not provided
+  - environment: Optional[string] # Defaults to "production" if not provided
+  - [any_field]: any              # Support for arbitrary monitoring system data
+                                  # Examples: cluster, namespace, pod, service_name,
+                                  # aws_region, argocd_app, prometheus_labels, etc.
 ```
 
 **Processing Status Model:**

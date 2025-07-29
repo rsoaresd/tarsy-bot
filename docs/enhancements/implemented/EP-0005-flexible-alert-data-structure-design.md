@@ -1,9 +1,9 @@
 # EP-0005: Flexible Alert Data Structure Support - Design Document
 
-**Status:** Approved
+**Status:** Implemented
 **Created:** 2025-07-28
 **Phase:** Technical Design
-**Requirements Document:** `docs/enhancements/approved/EP-0005-flexible-alert-data-structure-requirements.md`
+**Requirements Document:** `docs/enhancements/implemented/EP-0005-flexible-alert-data-structure-requirements.md`
 **Next Phase:** Implementation Plan
 
 ---

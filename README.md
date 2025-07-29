@@ -17,6 +17,14 @@ Inspired by the spirit of sci-fi AI, TARSy is your reliable SRE operations compa
 
 ## Key Features
 
+### 🔧 Flexible Alert Data Structure (EP-0005)
+Support for diverse monitoring sources beyond Kubernetes:
+- **Agent-Agnostic Design**: Accept arbitrary JSON payloads from any monitoring system
+- **Minimal Validation**: Only alert_type and runbook URL required, everything else flexible
+- **LLM-First Processing**: Agents receive complete JSON payloads for intelligent interpretation
+- **Dynamic UI Rendering**: Dashboard and dev UI dynamically display any alert data fields
+- **Enhanced Database**: JSON indexing for optimized queries on flexible data structures
+
 ### 🧠 Multi-Layer Agent Architecture (EP-0002)
 The system implements a sophisticated multi-layer architecture:
 - **Orchestrator Layer**: Routes alerts to specialized agents based on alert type
@@ -45,6 +53,7 @@ Standalone React dashboard for operational monitoring:
 Tarsy implements a modern, multi-layer architecture:
 
 - **Multi-Layer Backend**: FastAPI-based service with orchestrator and specialized agent layers
+- **Flexible Alert Processing**: Agent-agnostic system supporting arbitrary JSON payloads from diverse monitoring sources
 - **Agent Specialization**: Domain-specific agents (KubernetesAgent) with focused MCP server subsets
 - **History Service**: Comprehensive audit trail capture with SQLModel database persistence
 - **SRE Dashboard**: Standalone React dashboard for operational monitoring with real-time WebSocket integration
@@ -56,6 +65,8 @@ Tarsy implements a modern, multi-layer architecture:
 
 ### 🤖 Core Processing
 - **Multi-Layer Agent Architecture**: Orchestrator delegates to specialized agents based on alert type
+- **Flexible Alert Ingestion**: Accept arbitrary JSON payloads from any monitoring system with minimal validation
+- **LLM-First Processing**: Agents receive complete alert data for intelligent interpretation without rigid field extraction
 - **Intelligent Tool Selection**: Agents use LLM to select appropriate tools from their assigned MCP server subset
 - **Runbook Integration**: Automatic GitHub runbook download and distribution to specialized agents
 - **Agent Specialization**: Domain-specific agents (KubernetesAgent) with focused capabilities
@@ -224,12 +235,20 @@ The setup script will create `backend/.env` from the template. You'll need to ad
 
 ## Supported Alert Types
 
-Currently supported:
-- **Namespace stuck in Terminating**: Analyzes stuck Kubernetes namespaces
+The system now supports flexible alert types from any monitoring source:
 
-The LLM-driven approach means new alert types can be handled without code changes, as long as:
-- A runbook exists for the alert
-- The MCP servers have relevant tools available
+### Current Agent Types
+- **Kubernetes Agent**: Processes alerts from Kubernetes clusters (namespaces, pods, services, etc.)
+
+### Flexible Alert Support  
+- **Any Monitoring System**: Accepts arbitrary JSON payloads from Prometheus, AWS CloudWatch, ArgoCD, Datadog, etc.
+- **Agent-Agnostic Processing**: New alert types can be added by creating specialized agents and updating agent registry
+- **LLM-Driven Analysis**: Agents intelligently interpret any alert data structure without code changes to core system
+
+The LLM-driven approach with flexible data structures means diverse alert types can be handled from any monitoring source, as long as:
+- A runbook exists for the alert type
+- An appropriate specialized agent is available or can be created
+- The MCP servers have relevant tools for the monitoring domain
 
 ## API Endpoints
 

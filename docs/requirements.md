@@ -9,6 +9,7 @@ Tarsy-bot is an intelligent Site Reliability Engineering system that automates i
 This requirements document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant changes to system requirements are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
 
 ### Recent Changes
+- **EP-0005 (IMPLEMENTED)**: Flexible Alert Data Structure Support - Transformed rigid Kubernetes-specific alert model into flexible, agent-agnostic system supporting arbitrary JSON payloads with minimal validation
 - **EP-0004 (IMPLEMENTED)**: Dashboard UI for Alert History - Added standalone React dashboard for SRE operational monitoring with real-time WebSocket integration and historical alert analysis
 - **EP-0003 (IMPLEMENTED)**: Alert Processing History Service - Added comprehensive audit trail capture for all alert processing workflows with database persistence and API endpoints
 - **EP-0002 (IMPLEMENTED)**: Multi-Layer Agent Architecture - Transformed monolithic alert processing into orchestrator + specialized agents architecture
@@ -22,17 +23,19 @@ For proposed changes or new requirements, see the [Enhancement Proposals directo
 ### 1.1 Alert Processing and Management
 
 **REQ-1.1.1: Alert Ingestion**
-- The system shall accept alerts with the following mandatory fields:
-  - Alert type (from predefined list)
-  - Severity level (warning, critical, info)
-  - Environment (production, staging, development)
-  - Cluster URL
-  - Namespace
-  - Alert message
-  - Runbook URL
-- The system shall support optional fields:
-  - Pod name
-  - Timestamp (auto-generated if not provided)
+- The system shall accept alerts with flexible JSON data structures
+- The system shall require only two mandatory fields:
+  - Alert type (from predefined list or agent registry)
+  - Runbook URL (GitHub repository URL)
+- The system shall support arbitrary additional fields in JSON format:
+  - Any monitoring system specific data (Kubernetes, AWS, ArgoCD, Prometheus, etc.)
+  - Nested objects, arrays, and complex data structures
+  - YAML strings and configuration data
+  - Custom metadata from any monitoring source
+- The system shall apply default values for common fields:
+  - Severity (defaults to "warning" if not provided)
+  - Timestamp (auto-generated Unix microseconds if not provided)
+  - Environment (defaults to "production" if not provided)
 
 **REQ-1.1.2: Alert Validation**
 - The system shall validate all incoming alerts against supported alert types
@@ -67,6 +70,9 @@ For proposed changes or new requirements, see the [Enhancement Proposals directo
 **REQ-1.2.3: Specialized Agent Architecture**
 - The system shall implement specialized agents inheriting from a common base agent class
 - Each agent shall specify its required MCP server subset through abstract method implementation
+- Agents shall process flexible alert data structures without preprocessing
+- Agents shall receive complete JSON payloads for intelligent LLM interpretation
+- Agents shall support diverse monitoring sources beyond Kubernetes through flexible data handling
 - Agents shall implement domain-specific analysis logic while sharing common infrastructure
 - Agents shall support three-tier instruction composition: general, MCP server-specific, and agent-specific
 
