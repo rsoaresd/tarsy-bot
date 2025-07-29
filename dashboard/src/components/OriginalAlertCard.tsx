@@ -2,7 +2,6 @@ import { Paper, Typography, Box, Chip, Link, IconButton, Collapse } from '@mui/m
 import { AccessTime, OpenInNew, ExpandMore, ExpandLess } from '@mui/icons-material';
 import { useState } from 'react';
 import type { AlertData } from '../types';
-import { formatTimestamp } from '../utils/timestamp';
 import { renderValue, formatKeyName, sortAlertFields, type RenderableValue } from '../utils/dataRenderer';
 import ErrorBoundary from './ErrorBoundary';
 
@@ -118,41 +117,46 @@ const FieldRenderer: React.FC<{ fieldKey: string; renderedValue: RenderableValue
 
     case 'multiline':
       return (
-        <Typography variant="body2" sx={{ 
-          backgroundColor: 'grey.50', 
-          p: 1.5, 
-          borderRadius: 1,
-          fontSize: '0.875rem',
-          fontFamily: 'monospace',
-          lineHeight: 1.6,
-          whiteSpace: 'pre-wrap',
-          overflowWrap: 'break-word'
-        }}>
+        <Typography
+          component="pre"
+          sx={{ 
+            backgroundColor: 'grey.50', 
+            p: 1.5, 
+            borderRadius: 1,
+            fontFamily: 'monospace',
+            fontSize: '0.825rem',
+            lineHeight: 1.6,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            overflowX: 'auto',
+            maxHeight: '200px',
+            overflowY: 'auto'
+          }}
+        >
           {renderedValue.displayValue}
         </Typography>
       );
 
+    case 'timestamp':
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <AccessTime fontSize="small" sx={{ color: 'text.secondary' }} />
+          <Typography variant="body2" sx={{ 
+            fontFamily: 'monospace', 
+            fontSize: '0.875rem',
+            color: 'text.primary',
+            backgroundColor: 'grey.50',
+            px: 1.5,
+            py: 0.5,
+            borderRadius: 1
+          }}>
+            {renderedValue.displayValue}
+          </Typography>
+        </Box>
+      );
+
     case 'simple':
     default:
-      // Special handling for timestamp fields
-      if (fieldKey === 'timestamp_us' && typeof renderedValue.displayValue === 'string') {
-        const timestamp = parseInt(renderedValue.displayValue);
-        if (!isNaN(timestamp)) {
-          return (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <AccessTime fontSize="small" sx={{ color: 'text.secondary' }} />
-              <Typography variant="body2" sx={{ 
-                fontFamily: 'monospace', 
-                fontSize: '0.875rem',
-                color: 'text.secondary'
-              }}>
-                {formatTimestamp(timestamp, 'absolute')}
-              </Typography>
-            </Box>
-          );
-        }
-      }
-
       return (
         <Typography variant="body2" sx={{ 
           fontFamily: fieldKey.includes('id') || fieldKey.includes('hash') ? 'monospace' : 'inherit',
@@ -244,7 +248,7 @@ function OriginalAlertCard({ alertData }: OriginalAlertCardProps) {
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {sortedFields.map(([key, value]) => {
               try {
-                const renderedValue = renderValue(value);
+                const renderedValue = renderValue(value, key);
                 const displayKey = formatKeyName(key);
 
                 return (
