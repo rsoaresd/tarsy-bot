@@ -42,11 +42,11 @@ api.interceptors.response.use(
 
 export class ApiService {
   /**
-   * Submit an alert for processing
+   * Submit an alert for processing (flexible data structure)
    */
-  static async submitAlert(alert: Alert): Promise<AlertResponse> {
+  static async submitAlert(alertData: Record<string, any>): Promise<AlertResponse> {
     try {
-      const response = await api.post<AlertResponse>('/alerts', alert);
+      const response = await api.post<AlertResponse>('/alerts', alertData);
       return response.data;
     } catch (error) {
       console.error('Error submitting alert:', error);

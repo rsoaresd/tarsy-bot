@@ -218,17 +218,47 @@ Your task is to provide a comprehensive analysis of the incident based on:
 Please provide detailed, actionable insights about what's happening and potential next steps."""
     
     def _build_alert_section(self, alert_data: Dict) -> str:
-        """Build the alert section of the prompt."""
-        return f"""## Alert Details
-
-**Alert Type:** {alert_data.get('alert', 'Unknown')}
-**Severity:** {alert_data.get('severity', 'Unknown')}
-**Environment:** {alert_data.get('environment', 'Unknown')}
-**Cluster:** {alert_data.get('cluster', 'Unknown')}
-**Namespace:** {alert_data.get('namespace', 'Unknown')}
-**Pod:** {alert_data.get('pod', 'N/A')}
-**Message:** {alert_data.get('message', 'No message provided')}
-**Timestamp:** {alert_data.get('timestamp', 'Unknown')}"""
+        """
+        Build the alert section of the prompt with flexible data support.
+        
+        Uses LLM-First Processing approach: displays all alert data as key-value pairs
+        for intelligent interpretation by the LLM, rather than hardcoding field expectations.
+        """
+        if not alert_data:
+            return "## Alert Details\n\nNo alert data provided."
+        
+        alert_text = "## Alert Details\n\n"
+        
+        # Process all alert data dynamically - LLM-First Processing
+        for key, value in alert_data.items():
+            # Format the key as human-readable
+            formatted_key = key.replace('_', ' ').title()
+            
+            # Handle different value types intelligently
+            if isinstance(value, dict):
+                # Nested object - format as JSON for LLM interpretation
+                formatted_value = f"\n```json\n{json.dumps(value, indent=2)}\n```"
+            elif isinstance(value, list):
+                # Array - format as JSON for LLM interpretation
+                formatted_value = f"\n```json\n{json.dumps(value, indent=2)}\n```"
+            elif isinstance(value, str) and (value.startswith('{') or value.startswith('[')):
+                # Potential JSON string - try to format it
+                try:
+                    parsed_json = json.loads(value)
+                    formatted_value = f"\n```json\n{json.dumps(parsed_json, indent=2)}\n```"
+                except json.JSONDecodeError:
+                    # Not valid JSON, treat as regular string
+                    formatted_value = str(value)
+            elif isinstance(value, str) and '\n' in value:
+                # Multi-line string (like YAML) - preserve formatting
+                formatted_value = f"\n```\n{value}\n```"
+            else:
+                # Simple value - display as-is
+                formatted_value = str(value) if value is not None else "N/A"
+            
+            alert_text += f"**{formatted_key}:** {formatted_value}\n"
+        
+        return alert_text.strip()
     
     def _build_runbook_section(self, runbook_content: str) -> str:
         """Build the runbook section of the prompt."""

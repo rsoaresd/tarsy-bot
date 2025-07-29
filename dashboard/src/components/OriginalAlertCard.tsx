@@ -1,48 +1,17 @@
-import { Paper, Typography, Box, Chip, Link } from '@mui/material';
-import { AccessTime, OpenInNew } from '@mui/icons-material';
-import type { OriginalAlertCardProps } from '../types';
+import { Paper, Typography, Box, Chip, Link, IconButton, Collapse } from '@mui/material';
+import { AccessTime, OpenInNew, ExpandMore, ExpandLess } from '@mui/icons-material';
+import { useState } from 'react';
+import type { AlertData } from '../types';
 import { formatTimestamp } from '../utils/timestamp';
+import { renderValue, formatKeyName, sortAlertFields, type RenderableValue } from '../utils/dataRenderer';
+import ErrorBoundary from './ErrorBoundary';
+
+export interface OriginalAlertCardProps {
+  alertData: AlertData;
+}
 
 /**
- * Transform cluster API URL to OpenShift console URL
- * Input: https://api.<cluster-domain>:<port>
- * Output: https://console-openshift-console.apps.<cluster-domain>/
- */
-const getConsoleUrlFromCluster = (clusterUrl: string): string => {
-  try {
-    // Handle both with and without https:// prefix
-    const urlToParse = clusterUrl.startsWith('http') ? clusterUrl : `https://${clusterUrl}`;
-    const url = new URL(urlToParse);
-    
-    // Extract domain from api.<cluster-domain>
-    const hostname = url.hostname;
-    if (hostname.startsWith('api.')) {
-      const clusterDomain = hostname.substring(4); // Remove 'api.' prefix
-      return `https://console-openshift-console.apps.${clusterDomain}/`;
-    }
-    
-    // Fallback: if it doesn't match expected pattern, return original
-    return clusterUrl;
-  } catch (error) {
-    // If URL parsing fails, return original
-    return clusterUrl;
-  }
-};
-
-/**
- * Generate namespace/project URL for OpenShift console
- * Input: cluster URL and namespace name
- * Output: https://console-openshift-console.apps.<cluster-domain>/k8s/cluster/projects/<namespace>
- */
-const getNamespaceConsoleUrl = (clusterUrl: string, namespace: string): string => {
-  const consoleBaseUrl = getConsoleUrlFromCluster(clusterUrl);
-  // Remove trailing slash if present and append namespace path
-  const baseUrl = consoleBaseUrl.endsWith('/') ? consoleBaseUrl.slice(0, -1) : consoleBaseUrl;
-  return `${baseUrl}/k8s/cluster/projects/${namespace}`;
-};
-
-/**
- * Get severity color for alert severity levels
+ * Get severity color for alert severity levels (if severity field exists)
  */
 const getSeverityColor = (severity: string): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {
   switch (severity.toLowerCase()) {
@@ -60,7 +29,7 @@ const getSeverityColor = (severity: string): 'default' | 'primary' | 'secondary'
 };
 
 /**
- * Get environment color for different environments
+ * Get environment color for different environments (if environment field exists)
  */
 const getEnvironmentColor = (environment: string): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {
   switch (environment.toLowerCase()) {
@@ -76,10 +45,142 @@ const getEnvironmentColor = (environment: string): 'default' | 'primary' | 'seco
 };
 
 /**
- * OriginalAlertCard component - Phase 3
- * Displays structured original alert data with severity indicators and environment information
+ * Component to render individual field values based on their type
+ */
+const FieldRenderer: React.FC<{ fieldKey: string; renderedValue: RenderableValue }> = ({ fieldKey, renderedValue }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  switch (renderedValue.type) {
+    case 'url':
+      return (
+        <Link
+          href={renderedValue.displayValue}
+          target="_blank"
+          rel="noopener noreferrer"
+          sx={{ 
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            backgroundColor: fieldKey === 'runbook' ? 'info.50' : 'grey.50',
+            color: fieldKey === 'runbook' ? 'info.main' : 'text.primary',
+            p: 1.5, 
+            borderRadius: 1,
+            fontSize: '0.875rem',
+            fontFamily: 'monospace',
+            textDecoration: 'none',
+            wordBreak: 'break-word',
+            '&:hover': {
+              backgroundColor: fieldKey === 'runbook' ? 'info.100' : 'grey.100',
+              textDecoration: 'underline'
+            }
+          }}
+        >
+          <OpenInNew fontSize="small" />
+          {renderedValue.displayValue}
+        </Link>
+      );
+
+    case 'json':
+      return (
+        <Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+            <IconButton
+              size="small"
+              onClick={() => setIsExpanded(!isExpanded)}
+              sx={{ mr: 1 }}
+            >
+              {isExpanded ? <ExpandLess /> : <ExpandMore />}
+            </IconButton>
+            <Typography variant="caption" color="text.secondary">
+              {isExpanded ? 'Hide JSON' : 'Show JSON'}
+            </Typography>
+          </Box>
+          <Collapse in={isExpanded}>
+            <Typography
+              component="pre"
+              sx={{ 
+                backgroundColor: 'grey.50', 
+                p: 2, 
+                borderRadius: 1,
+                fontFamily: 'monospace',
+                fontSize: '0.825rem',
+                lineHeight: 1.6,
+                overflowX: 'auto',
+                maxHeight: '300px',
+                overflowY: 'auto'
+              }}
+            >
+              {renderedValue.displayValue}
+            </Typography>
+          </Collapse>
+        </Box>
+      );
+
+    case 'multiline':
+      return (
+        <Typography variant="body2" sx={{ 
+          backgroundColor: 'grey.50', 
+          p: 1.5, 
+          borderRadius: 1,
+          fontSize: '0.875rem',
+          fontFamily: 'monospace',
+          lineHeight: 1.6,
+          whiteSpace: 'pre-wrap',
+          overflowWrap: 'break-word'
+        }}>
+          {renderedValue.displayValue}
+        </Typography>
+      );
+
+    case 'simple':
+    default:
+      // Special handling for timestamp fields
+      if (fieldKey === 'timestamp_us' && typeof renderedValue.displayValue === 'string') {
+        const timestamp = parseInt(renderedValue.displayValue);
+        if (!isNaN(timestamp)) {
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <AccessTime fontSize="small" sx={{ color: 'text.secondary' }} />
+              <Typography variant="body2" sx={{ 
+                fontFamily: 'monospace', 
+                fontSize: '0.875rem',
+                color: 'text.secondary'
+              }}>
+                {formatTimestamp(timestamp, 'absolute')}
+              </Typography>
+            </Box>
+          );
+        }
+      }
+
+      return (
+        <Typography variant="body2" sx={{ 
+          fontFamily: fieldKey.includes('id') || fieldKey.includes('hash') ? 'monospace' : 'inherit',
+          fontSize: '0.875rem',
+          backgroundColor: 'grey.50',
+          px: 1,
+          py: 0.5,
+          borderRadius: 0.5,
+          wordBreak: 'break-word'
+        }}>
+          {renderedValue.displayValue}
+        </Typography>
+      );
+  }
+};
+
+/**
+ * OriginalAlertCard component - Flexible data support
+ * Displays any alert data structure dynamically with proper formatting
  */
 function OriginalAlertCard({ alertData }: OriginalAlertCardProps) {
+  const sortedFields = sortAlertFields(alertData);
+
+  // Extract special fields for header if they exist
+  const severity = alertData.severity;
+  const environment = alertData.environment;
+  const alertType = alertData.alert_type;
+
   return (
     <Paper sx={{ p: 3 }}>
       <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
@@ -87,215 +188,105 @@ function OriginalAlertCard({ alertData }: OriginalAlertCardProps) {
       </Typography>
       
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {/* Alert Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-          {/* Left side: Severity, Environment, Alert Type */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <Chip 
-              label={alertData.severity.toUpperCase()} 
-              color={getSeverityColor(alertData.severity)} 
-              size="small"
-              sx={{ fontWeight: 600 }}
-            />
-            <Chip 
-              label={alertData.environment.toUpperCase()} 
-              color={getEnvironmentColor(alertData.environment)} 
-              size="small"
-              variant="outlined"
-            />
-            <Typography variant="body2" color="text.secondary">
-              {alertData.alert_type}
+        {/* Alert Header - Show special fields if they exist */}
+        <ErrorBoundary 
+          componentName="Alert Header"
+          fallback={
+            <Typography variant="body2" color="error">
+              Error displaying alert header information
             </Typography>
-          </Box>
-
-          {/* Right side: Timestamp */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 'auto' }}>
-            <AccessTime fontSize="small" sx={{ color: 'text.secondary' }} />
-            <Typography variant="body2" sx={{ 
-              fontFamily: 'monospace', 
-              fontSize: '0.875rem',
-              color: 'text.secondary'
-            }}>
-              {formatTimestamp(alertData.timestamp_us, 'absolute')}
-            </Typography>
-          </Box>
-        </Box>
-
-        {/* Alert Message */}
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-            Message
-          </Typography>
-          <Typography variant="body1" sx={{ 
-            backgroundColor: 'grey.50', 
-            p: 2, 
-            borderRadius: 1,
-            fontFamily: 'monospace',
-            fontSize: '0.875rem',
-            lineHeight: 1.6,
-            whiteSpace: 'pre-wrap',
-            overflowWrap: 'break-word'
-          }}>
-            {alertData.message}
-          </Typography>
-        </Box>
-
-        {/* Infrastructure Information - Vertical Stack */}
-        <Box>
-          <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-            Infrastructure
-          </Typography>
-          
-          {/* Cluster - Full width for long names */}
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-              Cluster
-            </Typography>
-            <Link
-              href={getConsoleUrlFromCluster(alertData.cluster)}
-              target="_blank"
-              rel="noopener noreferrer"
-              sx={{ 
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                fontFamily: 'monospace', 
-                fontSize: '0.875rem',
-                backgroundColor: 'grey.50',
-                px: 1,
-                py: 0.5,
-                borderRadius: 0.5,
-                wordBreak: 'break-word',
-                textDecoration: 'none',
-                color: 'text.primary',
-                '&:hover': {
-                  backgroundColor: 'grey.100',
-                  textDecoration: 'underline'
-                }
-              }}
-            >
-              <OpenInNew fontSize="small" sx={{ color: 'text.secondary' }} />
-              {alertData.cluster}
-            </Link>
-          </Box>
-
-          {/* Namespace and Pod - Same row for compact layout */}
-          <Box sx={{ 
-            display: 'grid', 
-            gridTemplateColumns: alertData.pod ? '1fr 1fr' : '1fr',
-            gap: 2,
-            mb: 2
-          }}>
-            <Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                Namespace
-              </Typography>
-              <Link
-                href={getNamespaceConsoleUrl(alertData.cluster, alertData.namespace)}
-                target="_blank"
-                rel="noopener noreferrer"
-                sx={{ 
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                  fontFamily: 'monospace', 
-                  fontSize: '0.875rem',
-                  backgroundColor: 'grey.50',
-                  px: 1,
-                  py: 0.5,
-                  borderRadius: 0.5,
-                  textDecoration: 'none',
-                  color: 'text.primary',
-                  '&:hover': {
-                    backgroundColor: 'grey.100',
-                    textDecoration: 'underline'
-                  }
-                }}
-              >
-                <OpenInNew fontSize="small" sx={{ color: 'text.secondary' }} />
-                {alertData.namespace}
-              </Link>
+          }
+        >
+          {(severity || environment || alertType) && (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                {severity && (
+                  <Chip 
+                    label={String(severity).toUpperCase()} 
+                    color={getSeverityColor(String(severity))} 
+                    size="small"
+                    sx={{ fontWeight: 600 }}
+                  />
+                )}
+                {environment && (
+                  <Chip 
+                    label={String(environment).toUpperCase()} 
+                    color={getEnvironmentColor(String(environment))} 
+                    size="small"
+                    variant="outlined"
+                  />
+                )}
+                {alertType && (
+                  <Typography variant="body2" color="text.secondary">
+                    {String(alertType)}
+                  </Typography>
+                )}
+              </Box>
             </Box>
-            
-            {alertData.pod && (
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                  Pod
-                </Typography>
-                <Typography variant="body2" sx={{ 
-                  fontFamily: 'monospace', 
-                  fontSize: '0.875rem',
-                  backgroundColor: 'grey.50',
-                  px: 1,
-                  py: 0.5,
-                  borderRadius: 0.5,
-                  wordBreak: 'break-word'
-                }}>
-                  {alertData.pod}
-                </Typography>
-              </Box>
-            )}
-          </Box>
-        </Box>
+          )}
+        </ErrorBoundary>
 
+        {/* Dynamic Fields */}
+        <ErrorBoundary 
+          componentName="Dynamic Alert Fields"
+          fallback={
+            <Box sx={{ p: 2, border: '1px dashed', borderColor: 'error.main', borderRadius: 1 }}>
+              <Typography variant="body2" color="error" gutterBottom>
+                Error displaying alert data fields
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                The alert data structure may be corrupted or contain invalid content.
+                Raw data: {JSON.stringify(alertData).substring(0, 200)}...
+              </Typography>
+            </Box>
+          }
+        >
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {sortedFields.map(([key, value]) => {
+              try {
+                const renderedValue = renderValue(value);
+                const displayKey = formatKeyName(key);
 
-
-        {/* Context and Runbook */}
-        {(alertData.context || alertData.runbook) && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {alertData.context && (
-              <Box>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Context
-                </Typography>
-                <Typography variant="body2" sx={{ 
-                  backgroundColor: 'grey.50', 
-                  p: 1.5, 
-                  borderRadius: 1,
-                  fontSize: '0.825rem',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {alertData.context}
-                </Typography>
-              </Box>
-            )}
-            
-            {alertData.runbook && (
-              <Box>
-                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Runbook Reference
-                </Typography>
-                <Link
-                  href={alertData.runbook}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{ 
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    backgroundColor: 'info.50', 
-                    color: 'info.main',
-                    p: 1.5, 
-                    borderRadius: 1,
-                    fontSize: '0.825rem',
-                    fontFamily: 'monospace',
-                    textDecoration: 'none',
-                    '&:hover': {
-                      backgroundColor: 'info.100',
-                      textDecoration: 'underline'
+                return (
+                  <ErrorBoundary 
+                    key={key}
+                    componentName={`Field: ${key}`}
+                    fallback={
+                      <Box sx={{ p: 1, bgcolor: 'error.50', border: '1px solid', borderColor: 'error.200', borderRadius: 1 }}>
+                        <Typography variant="caption" color="error">
+                          Error rendering field "{key}": {String(value).substring(0, 100)}
+                        </Typography>
+                      </Box>
                     }
-                  }}
-                >
-                  <OpenInNew fontSize="small" />
-                  {alertData.runbook}
-                </Link>
-              </Box>
-            )}
+                  >
+                    <Box>
+                      <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                        {displayKey}
+                      </Typography>
+                      <FieldRenderer fieldKey={key} renderedValue={renderedValue} />
+                    </Box>
+                  </ErrorBoundary>
+                );
+              } catch (error) {
+                // Fallback for individual field rendering errors
+                return (
+                  <Box key={key} sx={{ p: 1, bgcolor: 'warning.50', border: '1px solid', borderColor: 'warning.200', borderRadius: 1 }}>
+                    <Typography variant="subtitle2" color="warning.dark" gutterBottom>
+                      {formatKeyName(key)} (Rendering Error)
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Failed to render this field. Raw value: {String(value).substring(0, 100)}
+                      {String(value).length > 100 && '...'}
+                    </Typography>
+                  </Box>
+                );
+              }
+            })}
           </Box>
-        )}
+        </ErrorBoundary>
       </Box>
     </Paper>
   );
 }
 
-export default OriginalAlertCard; 
+export default OriginalAlertCard;

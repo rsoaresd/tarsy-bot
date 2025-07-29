@@ -36,11 +36,18 @@ Transform the current rigid, Kubernetes-specific alert data model into a flexibl
 
 #### Tasks
 1. **Update Alert Session Model** (`tarsy/models/history.py`)
-   - Add GIN index for flexible JSON queries: `Index('ix_alert_data_gin', 'alert_data', postgresql_using='gin')`
-   - Create indexes on common JSON paths: `Index('ix_alert_data_severity', text("((alert_data->>'severity'))"))`
-   - Add indexes for environment and cluster fields using same pattern
-   - Add __table_args__ for PostgreSQL JSON optimization
    - The AlertSession model already has the JSON alert_data field we need
+   - Add JSON indexes directly to the model using __table_args__:
+     ```python
+     __table_args__ = (
+         Index('ix_alert_data_gin', 'alert_data', postgresql_using='gin'),
+         Index('ix_alert_data_severity', text("((alert_data->>'severity'))")),
+         Index('ix_alert_data_environment', text("((alert_data->>'environment'))")),
+         Index('ix_alert_data_cluster', text("((alert_data->>'cluster'))")),
+     )
+     ```
+   - These indexes will optimize JSON queries for common alert fields
+   - Fresh database deployment means no migration complexity
 
 2. **Create Flexible Alert Model** (`tarsy/models/alert.py`)
    - Replace rigid Alert model with FlexibleAlert model
@@ -54,11 +61,11 @@ Transform the current rigid, Kubernetes-specific alert data model into a flexibl
 
 #### Validation Commands
 ```bash
-# Test database models and initialization
+# Test database models with fresh schema
 python -m pytest tests/unit/models/ -v
 python -m pytest tests/integration/test_database_setup.py -v
 
-# Check database connectivity and schema (using existing initialization)
+# Initialize fresh database with JSON indexes
 python -c "from tarsy.database.init_db import initialize_database; initialize_database()"
 
 # Type checking
@@ -87,9 +94,10 @@ mypy tarsy/models/
 
 2. **Update Alert Service** (`tarsy/services/alert_service.py`)  
    - Modify alert processing to handle flexible data structure
-   - Update _create_history_session() to store alert_type in separate AlertSession column
-   - Store runbook + all data contents in AlertSession.alert_data JSON field
-   - Extract runbook from alert data before passing to agents
+   - The service already stores alert data as JSON in AlertSession.alert_data (lines 421-437)
+   - Update _create_history_session() to store flexible alert data instead of rigid Alert object fields
+   - Extract runbook from flexible alert data before passing to agents
+   - Change agent interface: pass AlertSession.alert_data directly to agents (not Alert object)
    - Remove rigid validation, add simple inline normalization
    - Preserve existing agent routing logic
 
@@ -133,9 +141,10 @@ curl -X POST http://localhost:8000/alerts \
 
 #### Tasks  
 1. **Update Base Agent** (`tarsy/agents/base_agent.py`)
-   - Remove _prepare_alert_data() method
-   - Modify agents to receive AlertSession.alert_data directly (with runbook extracted by service layer)
-   - Update prompt building to include all remaining data as key-value pairs
+   - Remove _prepare_alert_data() method (currently converts Alert object to dictionary)
+   - Modify agent interface: agents receive AlertSession.alert_data directly as dictionary
+   - Update process_alert() method signature to accept Dict instead of Alert object
+   - Update prompt building to include all data as key-value pairs
    - Handle complex data structures (nested objects, arrays, YAML strings, any JSON structure)
    - Service layer extracts runbook before passing data to agent
 
@@ -363,15 +372,15 @@ python -m pytest tests/performance/ -v --benchmark-only
 - Current WebSocket infrastructure
 
 ### Constraints
-- **Fresh Database Setup**: Since existing DB was deleted, use current `initialize_database()` function with enhanced schema
-- **Backward Compatibility**: Kubernetes alerts must continue to process correctly
+- **Fresh Database Deployment**: Working with clean database - no existing data to preserve
+- **Backward Compatibility**: Kubernetes alerts must continue to process correctly  
 - **Performance**: Must maintain current response times and throughput
 - **UI Compatibility**: Existing user workflows should not be disrupted
 
 ### Risk Mitigation
 - **Phased Approach**: Each phase can be validated independently
-- **Backward Compatibility**: Preserve existing Kubernetes alert processing
-- **Existing Infrastructure**: Use current database initialization, just add JSON indexes
+- **Backward Compatibility**: Preserve existing Kubernetes alert processing workflows
+- **Fresh Database**: Clean slate deployment eliminates schema migration complexity
 - **Comprehensive Testing**: Multiple validation points throughout implementation
 
 ### Quality Gates

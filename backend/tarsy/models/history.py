@@ -7,21 +7,17 @@ precision for optimal performance and consistency.
 """
 
 import uuid
-from datetime import timezone, datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import JSON, Column, Field, Relationship, SQLModel, Index
+from sqlalchemy import text
 
 from tarsy.models.constants import AlertSessionStatus
+from tarsy.utils.timestamp import now_us
 
 if TYPE_CHECKING:
     # Import for type hints only to avoid circular imports
     pass
-
-
-def now_us() -> int:
-    """Get current timestamp as microseconds since epoch (UTC)."""
-    return int(datetime.now(timezone.utc).timestamp() * 1000000)
 
 
 class AlertSession(SQLModel, table=True):
@@ -34,6 +30,14 @@ class AlertSession(SQLModel, table=True):
     """
     
     __tablename__ = "alert_sessions"
+    
+    # JSON indexes for efficient querying of flexible alert data
+    __table_args__ = (
+        Index('ix_alert_data_gin', 'alert_data', postgresql_using='gin'),
+        Index('ix_alert_data_severity', text("((alert_data->>'severity'))")),
+        Index('ix_alert_data_environment', text("((alert_data->>'environment'))")),
+        Index('ix_alert_data_cluster', text("((alert_data->>'cluster'))")),
+    )
     
     session_id: str = Field(
         default_factory=lambda: str(uuid.uuid4()),

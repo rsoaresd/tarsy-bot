@@ -9,14 +9,15 @@ performance and consistency with the rest of the system.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import uuid
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict, Any
 
 from tarsy.config.settings import Settings
 from tarsy.integrations.llm.client import LLMManager
 from tarsy.integrations.mcp.client import MCPClient
-from tarsy.models.alert import Alert
 from tarsy.models.constants import AlertSessionStatus
 from tarsy.models.history import now_us
 from tarsy.services.agent_factory import AgentFactory
@@ -83,9 +84,20 @@ class AlertService:
                 if not lock.locked():
                     del self._processing_locks[alert_key]
     
-    def _generate_alert_key(self, alert: Alert) -> str:
-        """Generate a unique key for an alert to use for concurrency control."""
-        return f"{alert.alert_type}_{alert.environment}_{alert.namespace}_{alert.message[:50]}"
+    def _generate_data_hash(self, data: Dict[str, Any], length: int = 12) -> str:
+        """Generate a deterministic hash from alert data."""
+        data_json = json.dumps(data, sort_keys=True, separators=(',', ':'))
+        return hashlib.sha256(data_json.encode('utf-8')).hexdigest()[:length]
+
+    def _generate_alert_key(self, alert_data: Dict[str, Any]) -> str:
+        """Generate a deterministic key for alert concurrency control."""
+        # Use content hash for consistent concurrency control of identical alerts
+        data = alert_data.get('alert_data', {})
+        alert_type = alert_data.get('alert_type', 'unknown')
+        
+        # Combine alert type with content hash for better key distribution
+        content_hash = self._generate_data_hash(data, length=12)
+        return f"{alert_type}_{content_hash}"
 
     async def initialize(self):
         """
@@ -121,42 +133,42 @@ class AlertService:
     
     async def process_alert(
         self, 
-        alert: Alert, 
+        alert_data: Dict[str, Any], 
         progress_callback: Optional[Callable] = None
     ) -> str:
         """
         Process an alert by delegating to the appropriate specialized agent.
         
         Args:
-            alert: The alert to process
+            alert_data: Flexible alert data dictionary with alert_type and alert_data fields
             progress_callback: Optional callback for progress updates
             
         Returns:
             Analysis result as a string
         """
         # Generate alert key for concurrency control
-        alert_key = self._generate_alert_key(alert)
+        alert_key = self._generate_alert_key(alert_data)
         
         # Get alert-specific lock to prevent concurrent processing
         alert_lock = await self._get_alert_lock(alert_key)
         
         async with alert_lock:
             try:
-                return await self._process_alert_internal(alert, progress_callback)
+                return await self._process_alert_internal(alert_data, progress_callback)
             finally:
                 # Clean up the lock after processing
                 await self._cleanup_alert_lock(alert_key)
     
     async def _process_alert_internal(
         self, 
-        alert: Alert, 
+        alert_data: Dict[str, Any], 
         progress_callback: Optional[Callable] = None
     ) -> str:
         """
         Internal alert processing logic with all the actual processing steps.
         
         Args:
-            alert: The alert to process
+            alert_data: Flexible alert data dictionary
             progress_callback: Optional callback for progress updates
             
         Returns:
@@ -164,8 +176,6 @@ class AlertService:
         """
         session_id = None
         try:
-            # Will create history session after determining agent type
-            
             # Step 1: Validate prerequisites
             if not self.llm_manager.is_available():
                 raise Exception("Cannot process alert: No LLM providers are available")
@@ -177,11 +187,12 @@ class AlertService:
             if progress_callback:
                 await progress_callback(5, "Selecting specialized agent")
             
-            agent_class_name = self.agent_registry.get_agent_for_alert_type(alert.alert_type)
+            alert_type = alert_data.get("alert_type")
+            agent_class_name = self.agent_registry.get_agent_for_alert_type(alert_type)
             
             if not agent_class_name:
                 error_msg = (
-                    f"No specialized agent available for alert type: '{alert.alert_type}'. "
+                    f"No specialized agent available for alert type: '{alert_type}'. "
                     f"Supported alert types: {self.agent_registry.get_supported_alert_types()}"
                 )
                 logger.error(error_msg)
@@ -192,21 +203,30 @@ class AlertService:
                 if progress_callback:
                     await progress_callback(100, f"Error: {error_msg}")
                     
-                return self._format_error_response(alert, error_msg)
+                return self._format_error_response(alert_data, error_msg)
             
-            logger.info(f"Selected agent {agent_class_name} for alert type: {alert.alert_type}")
+            logger.info(f"Selected agent {agent_class_name} for alert type: {alert_type}")
             
-            # Create history session now that we have the agent type
-            session_id = self._create_history_session(alert, agent_class_name)
+            # Create history session with flexible data
+            session_id = self._create_history_session(alert_data, agent_class_name)
             
             # Update history session with agent selection
             self._update_session_status(session_id, AlertSessionStatus.IN_PROGRESS, f"Selected agent: {agent_class_name}")
             
-            # Step 3: Download runbook
+            # Step 3: Extract runbook from alert data
             if progress_callback:
-                await progress_callback(10, "Downloading runbook")
+                await progress_callback(10, "Extracting runbook")
             
-            runbook_content = await self.runbook_service.download_runbook(alert.runbook)
+            runbook = alert_data.get("alert_data", {}).get("runbook")
+            if not runbook:
+                error_msg = "No runbook specified in alert data"
+                logger.error(error_msg)
+                self._update_session_error(session_id, error_msg)
+                if progress_callback:
+                    await progress_callback(100, f"Error: {error_msg}")
+                return self._format_error_response(alert_data, error_msg)
+            
+            runbook_content = await self.runbook_service.download_runbook(runbook)
             
             # Step 4: Create agent instance
             if progress_callback:
@@ -229,9 +249,9 @@ class AlertService:
                 if progress_callback:
                     await progress_callback(100, f"Error: {error_msg}")
                     
-                return self._format_error_response(alert, error_msg)
+                return self._format_error_response(alert_data, error_msg)
             
-            # Step 5: Delegate processing to agent
+            # Step 5: Delegate processing to agent with flexible data
             if progress_callback:
                 await progress_callback(20, f"Delegating to {agent_class_name}")
             
@@ -243,9 +263,9 @@ class AlertService:
                     f"[{agent_class_name}] {status.get('message', 'Processing...')}"
                 )
             
-            # Process alert with agent (pass session_id for history tracking)
+            # Process alert with agent - pass alert_data directly with flexible structure
             agent_result = await agent.process_alert(
-                alert=alert,
+                alert_data=alert_data.get("alert_data", {}),
                 runbook_content=runbook_content,
                 callback=agent_progress_callback,
                 session_id=session_id
@@ -258,11 +278,11 @@ class AlertService:
                 
                 # Format final result with agent context
                 final_result = self._format_success_response(
-                    alert=alert,
-                    agent_name=agent_class_name,
-                    analysis=analysis,
-                    iterations=iterations,
-                    timestamp_us=agent_result.get('timestamp_us')
+                    alert_data,
+                    agent_class_name,
+                    analysis,
+                    iterations,
+                    agent_result.get('timestamp_us')
                 )
                 
                 # Mark history session as completed successfully
@@ -272,49 +292,44 @@ class AlertService:
                     await progress_callback(100, "Analysis completed successfully")
                 
                 return final_result
-                
             else:
                 # Handle agent processing error
-                error_msg = agent_result.get('error', 'Unknown agent error')
-                logger.error(f"Agent {agent_class_name} failed: {error_msg}")
+                error_msg = agent_result.get('error', 'Agent processing failed')
+                logger.error(f"Agent processing failed: {error_msg}")
                 
-                # Update history session with agent error
+                # Update history session with processing error
                 self._update_session_error(session_id, error_msg)
                 
                 if progress_callback:
-                    await progress_callback(100, f"Agent error: {error_msg}")
+                    await progress_callback(100, f"Error: {error_msg}")
                 
-                return self._format_error_response(
-                    alert=alert,
-                    error=error_msg,
-                    agent_name=agent_class_name
-                )
+                return self._format_error_response(alert_data, error_msg)
                 
         except Exception as e:
             error_msg = f"Alert processing failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            logger.error(error_msg)
             
-            # Update history session with general processing error
+            # Update history session with processing error
             self._update_session_error(session_id, error_msg)
             
             if progress_callback:
                 await progress_callback(100, f"Error: {error_msg}")
             
-            return self._format_error_response(alert, error_msg)
-    
+            return self._format_error_response(alert_data, error_msg)
+
     def _format_success_response(
         self,
-        alert: Alert,
+        alert_data: Dict[str, Any],
         agent_name: str,
         analysis: str,
         iterations: int,
         timestamp_us: Optional[int] = None
     ) -> str:
         """
-        Format successful analysis response.
+        Format successful analysis response for flexible alert data.
         
         Args:
-            alert: The processed alert
+            alert_data: The flexible alert data dictionary
             agent_name: Name of the agent that processed the alert
             analysis: Analysis result from the agent
             iterations: Number of iterations performed
@@ -323,19 +338,20 @@ class AlertService:
         Returns:
             Formatted response string
         """
-        # Convert unix timestamp to ISO string for display
+        # Convert unix timestamp to string for display
         if timestamp_us:
             timestamp_str = f"{timestamp_us}"  # Keep as unix timestamp for consistency
         else:
             timestamp_str = f"{now_us()}"  # Current unix timestamp
         
+        data = alert_data.get("alert_data", {})
         response_parts = [
             "# Alert Analysis Report",
             "",
-            f"**Alert Type:** {alert.alert_type}",
+            f"**Alert Type:** {alert_data.get('alert_type', 'unknown')}",
             f"**Processing Agent:** {agent_name}",
-            f"**Environment:** {alert.environment}",
-            f"**Severity:** {alert.severity}",
+            f"**Environment:** {data.get('environment', 'unknown')}",
+            f"**Severity:** {data.get('severity', 'unknown')}",
             f"**Timestamp:** {timestamp_str}",
             "",
             "## Analysis",
@@ -350,26 +366,27 @@ class AlertService:
     
     def _format_error_response(
         self,
-        alert: Alert,
+        alert_data: Dict[str, Any],
         error: str,
         agent_name: Optional[str] = None
     ) -> str:
         """
-        Format error response.
+        Format error response for flexible alert data.
         
         Args:
-            alert: The alert that failed processing
+            alert_data: The flexible alert data dictionary
             error: Error message
             agent_name: Name of the agent if known
             
         Returns:
             Formatted error response string
         """
+        data = alert_data.get("alert_data", {})
         response_parts = [
             "# Alert Processing Error",
             "",
-            f"**Alert Type:** {alert.alert_type}",
-            f"**Environment:** {alert.environment}",
+            f"**Alert Type:** {alert_data.get('alert_type', 'unknown')}",
+            f"**Environment:** {data.get('environment', 'unknown')}",
             f"**Error:** {error}",
         ]
         
@@ -387,15 +404,15 @@ class AlertService:
         ])
         
         return "\n".join(response_parts)
-    
+
     # History Session Management Methods
-    def _create_history_session(self, alert: Alert, agent_class_name: Optional[str] = None) -> Optional[str]:
+    def _create_history_session(self, alert_data: Dict[str, Any], agent_class_name: Optional[str] = None) -> Optional[str]:
         """
-        Create a history session for alert processing.
+        Create a history session for flexible alert processing.
         
         Args:
-            alert: The alert being processed
-            agent_class_name: Optional agent class name (if already determined)
+            alert_data: Flexible alert data dictionary
+            agent_class_name: Agent class name for the session
             
         Returns:
             Session ID if created successfully, None if history service unavailable
@@ -404,36 +421,29 @@ class AlertService:
             if not self.history_service or not self.history_service.enabled:
                 return None
             
+            # Extract data from dictionary format
+            alert_type = alert_data.get('alert_type')
+            data = alert_data.get("alert_data", {})
+            
             # Use provided agent class name or determine it
             if agent_class_name is None:
-                agent_class_name = self.agent_registry.get_agent_for_alert_type(alert.alert_type)
+                agent_class_name = self.agent_registry.get_agent_for_alert_type(alert_type)
             agent_type = agent_class_name or 'unknown'
             
-            # Generate alert ID from alert data if not present
-            if hasattr(alert, 'id') and alert.id:
-                alert_id = alert.id
-            else:
-                # Use unix timestamp in microseconds and random component to prevent collisions
-                timestamp_us = now_us()
-                random_suffix = uuid.uuid4().hex[:8]  # 8 chars of randomness
-                alert_id = f"{alert.alert_type}_{alert.environment}_{alert.namespace}_{timestamp_us}_{random_suffix}"
+            # Generate unique alert ID for this processing session
+            timestamp_us = now_us()
+            random_suffix = uuid.uuid4().hex[:8]
             
+            # Use content hash as base but make it unique per session
+            content_hash = self._generate_data_hash(data, length=8)
+            alert_id = f"{alert_type or 'unknown'}_{content_hash}_{timestamp_us}_{random_suffix}"
+            
+            # Store alert_type separately and all flexible data in alert_data JSON field 
             session_id = self.history_service.create_session(
                 alert_id=alert_id,
-                alert_data={
-                    'alert_type': alert.alert_type,
-                    'environment': alert.environment,
-                    'cluster': alert.cluster,
-                    'namespace': alert.namespace,
-                    'runbook': alert.runbook,
-                    'message': alert.message,
-                    'severity': alert.severity,
-                    'pod': getattr(alert, 'pod', None),
-                    'context': getattr(alert, 'context', None),
-                    'timestamp_us': now_us()  # Unix timestamp in microseconds
-                 },
+                alert_data=data,  # Store all flexible data in JSON field
                 agent_type=agent_type,
-                alert_type=alert.alert_type
+                alert_type=alert_type  # Store in separate column for fast routing
             )
             
             logger.info(f"Created history session {session_id} for alert {alert_id}")

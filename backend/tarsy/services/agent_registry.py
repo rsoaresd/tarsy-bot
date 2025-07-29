@@ -24,6 +24,7 @@ class AgentRegistry:
     
     # Static mappings defined in the registry itself
     _DEFAULT_MAPPINGS = {
+        "kubernetes": "KubernetesAgent",  # Generic kubernetes alerts  
         "NamespaceTerminating": "KubernetesAgent",
         # Future mappings will be added here:
         # "ArgoCD Sync Failed": "ArgoCDAgent", 

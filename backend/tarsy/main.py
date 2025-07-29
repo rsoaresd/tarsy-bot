@@ -8,10 +8,13 @@ import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Any
+import re
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 
 from tarsy.config.settings import get_settings
 from tarsy.controllers.history_controller import router as history_router
@@ -21,6 +24,7 @@ from tarsy.models.constants import AlertSessionStatus
 from tarsy.services.alert_service import AlertService
 from tarsy.services.websocket_manager import WebSocketManager
 from tarsy.utils.logger import get_module_logger, setup_logging
+from tarsy.utils.timestamp import now_us
 
 # Setup logger for this module
 logger = get_module_logger(__name__)
@@ -181,31 +185,209 @@ async def get_alert_types():
 
 
 @app.post("/alerts", response_model=AlertResponse)
-async def submit_alert(alert: Alert):
-    """Submit a new alert for processing."""
-    # Generate unique alert ID
-    alert_id = str(uuid.uuid4())
-    
-    # Initialize processing status
-    processing_status[alert_id] = ProcessingStatus(
-        alert_id=alert_id,
-        status="queued",
-        progress=0,
-        current_step="Alert received",
-        current_agent=None,
-        assigned_mcp_servers=None,
-        result=None,
-        error=None
-    )
-    
-    # Start background processing
-    asyncio.create_task(process_alert_background(alert_id, alert))
-    
-    return AlertResponse(
-        alert_id=alert_id,
-        status="queued",
-        message="Alert submitted for processing"
-    )
+async def submit_alert(request: Request):
+    """Submit a new alert for processing with flexible data structure and comprehensive error handling."""
+    try:
+        # Check content length (prevent extremely large payloads)
+        content_length = request.headers.get("content-length")
+        MAX_PAYLOAD_SIZE = 10 * 1024 * 1024  # 10MB limit
+        
+        if content_length and int(content_length) > MAX_PAYLOAD_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "error": "Payload too large",
+                    "message": f"Request payload exceeds maximum size of {MAX_PAYLOAD_SIZE/1024/1024}MB",
+                    "max_size_mb": MAX_PAYLOAD_SIZE/1024/1024
+                }
+            )
+        
+        # Parse JSON with error handling
+        try:
+            body = await request.body()
+            if not body:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "Empty request body",
+                        "message": "Request body is required and cannot be empty",
+                        "expected_fields": ["alert_type", "runbook", "data"]
+                    }
+                )
+            
+            raw_data = json.loads(body)
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "Invalid JSON",
+                    "message": f"Request body contains malformed JSON: {str(e)}",
+                    "line": getattr(e, 'lineno', None),
+                    "column": getattr(e, 'colno', None)
+                }
+            )
+        
+        # Validate and sanitize input data
+        try:
+            # Basic structure validation
+            if not isinstance(raw_data, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "Invalid data structure",
+                        "message": "Request body must be a JSON object",
+                        "received_type": type(raw_data).__name__
+                    }
+                )
+            
+            # Sanitize string fields to prevent XSS
+            def sanitize_string(value: str) -> str:
+                """Basic input sanitization to prevent XSS and injection attacks."""
+                if not isinstance(value, str):
+                    return value
+                # Remove potentially dangerous characters
+                sanitized = re.sub(r'[<>"\'\x00-\x1f\x7f-\x9f]', '', value)
+                # Limit string length
+                return sanitized[:10000]  # 10KB limit per string field
+            
+            # Deep sanitization of nested data
+            def deep_sanitize(obj):
+                """Recursively sanitize nested objects and arrays."""
+                if isinstance(obj, dict):
+                    return {k: deep_sanitize(v) for k, v in obj.items() if k}  # Remove empty keys
+                elif isinstance(obj, list):
+                    return [deep_sanitize(item) for item in obj[:1000]]  # Limit array size
+                elif isinstance(obj, str):
+                    return sanitize_string(obj)
+                else:
+                    return obj
+            
+            # Sanitize the entire payload
+            sanitized_data = deep_sanitize(raw_data)
+            
+            # Validate using Alert model
+            alert_data = Alert(**sanitized_data)
+            
+        except ValidationError as e:
+            # Provide detailed validation error messages
+            errors = []
+            for error in e.errors():
+                field_path = " -> ".join(str(loc) for loc in error["loc"])
+                errors.append({
+                    "field": field_path,
+                    "message": error["msg"],
+                    "invalid_value": error.get("input"),
+                    "expected_type": error["type"]
+                })
+            
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "Validation failed",
+                    "message": "One or more fields are invalid",
+                    "validation_errors": errors,
+                    "required_fields": ["alert_type", "runbook"],
+                    "optional_fields": ["data", "severity", "timestamp"]
+                }
+            )
+        
+        # Additional business logic validation
+        if not alert_data.alert_type or len(alert_data.alert_type.strip()) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "Invalid alert_type",
+                    "message": "alert_type cannot be empty or contain only whitespace",
+                    "field": "alert_type"
+                }
+            )
+        
+        if not alert_data.runbook or len(alert_data.runbook.strip()) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "Invalid runbook",
+                    "message": "runbook cannot be empty or contain only whitespace",
+                    "field": "runbook"
+                }
+            )
+        
+        # Check for suspicious patterns in runbook URL
+        if alert_data.runbook and not re.match(r'^https?://', alert_data.runbook):
+            logger.warning(f"Suspicious runbook URL format: {alert_data.runbook}")
+        
+        # Generate unique alert ID
+        alert_id = str(uuid.uuid4())
+        
+        # Apply defaults for missing fields (inline normalization)
+        normalized_data = alert_data.data.copy() if alert_data.data else {}
+        
+        # Apply defaults
+        if alert_data.severity is None:
+            normalized_data["severity"] = "warning"
+        else:
+            normalized_data["severity"] = alert_data.severity
+            
+        if alert_data.timestamp is None:
+            normalized_data["timestamp"] = now_us()
+        else:
+            # Convert datetime to unix microseconds if needed
+            if isinstance(alert_data.timestamp, datetime):
+                normalized_data["timestamp"] = int(alert_data.timestamp.timestamp() * 1000000)
+            else:
+                normalized_data["timestamp"] = alert_data.timestamp
+        
+        # Apply default environment if not present in data
+        if "environment" not in normalized_data:
+            normalized_data["environment"] = "production"
+        
+        # Add required fields to data
+        normalized_data["alert_type"] = alert_data.alert_type
+        normalized_data["runbook"] = alert_data.runbook
+        
+        # Create alert structure for processing  
+        alert = {
+            "alert_type": alert_data.alert_type,
+            "alert_data": normalized_data
+        }
+        
+        # Initialize processing status
+        processing_status[alert_id] = ProcessingStatus(
+            alert_id=alert_id,
+            status="queued",
+            progress=0,
+            current_step="Alert received and validated",
+            current_agent=None,
+            assigned_mcp_servers=None,
+            result=None,
+            error=None
+        )
+        
+        # Start background processing with normalized data
+        asyncio.create_task(process_alert_background(alert_id, alert))
+        
+        logger.info(f"Alert {alert_id} submitted successfully with type: {alert_data.alert_type}")
+        
+        return AlertResponse(
+            alert_id=alert_id,
+            status="queued",
+            message="Alert submitted for processing and validation completed"
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions (these are expected validation errors)
+        raise
+    except Exception as e:
+        # Handle unexpected errors
+        logger.error(f"Unexpected error in submit_alert: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Internal server error",
+                "message": "An unexpected error occurred while processing the alert",
+                "support_info": "Please check the server logs or contact support if this persists"
+            }
+        )
 
 
 @app.get("/processing-status/{alert_id}", response_model=ProcessingStatus)
@@ -288,49 +470,143 @@ async def dashboard_websocket_endpoint(websocket: WebSocket, user_id: str):
         websocket_manager.disconnect_dashboard(user_id)
 
 
-async def process_alert_background(alert_id: str, alert: Alert):
-    """Background task to process an alert with concurrency control."""
+async def process_alert_background(alert_id: str, alert: Dict[str, Any]):
+    """Background task to process an alert with comprehensive error handling and concurrency control."""
     async with alert_processing_semaphore:
+        start_time = datetime.now()
         try:
+            logger.info(f"Starting background processing for alert {alert_id}")
+            
+            # Validate alert structure before processing
+            if not alert or not isinstance(alert, dict):
+                raise ValueError("Invalid alert structure: alert must be a non-empty dictionary")
+            
+            if "alert_type" not in alert:
+                raise ValueError("Invalid alert structure: missing required field 'alert_type'")
+            
+            if "alert_data" not in alert or not isinstance(alert["alert_data"], dict):
+                raise ValueError("Invalid alert structure: missing or invalid 'alert_data' field")
+            
             # Update status: processing started
             await update_processing_status(
-                alert_id, "processing", 10, "Starting alert processing"
+                alert_id, "processing", 10, "Starting alert processing and validation"
             )
             
-            # Process the alert using AlertService
+            # Log alert processing start
+            alert_type = alert.get("alert_type", "unknown")
+            logger.info(f"Processing alert {alert_id} of type '{alert_type}' with {len(alert['alert_data'])} data fields")
+            
+            # Process the alert using AlertService with flexible data
             # The orchestrator sends progress as a dict with agent information
             def progress_handler(progress, step):
-                # Handle both simple (progress, step) and dict-based callbacks
-                if isinstance(progress, dict):
-                    # New format from agent callbacks
-                    agent_info = progress
-                    return asyncio.create_task(
-                        update_processing_status(
-                            alert_id,
-                            agent_info.get('status', 'processing'),
-                            agent_info.get('progress', 50),
-                            agent_info.get('message', step),
-                            current_agent=agent_info.get('agent'),
-                            assigned_mcp_servers=agent_info.get('assigned_mcp_servers')
+                try:
+                    # Handle both simple (progress, step) and dict-based callbacks
+                    if isinstance(progress, dict):
+                        # New format from agent callbacks
+                        agent_info = progress
+                        return asyncio.create_task(
+                            update_processing_status(
+                                alert_id,
+                                agent_info.get('status', 'processing'),
+                                agent_info.get('progress', 50),
+                                agent_info.get('message', step),
+                                current_agent=agent_info.get('agent'),
+                                assigned_mcp_servers=agent_info.get('assigned_mcp_servers')
+                            )
                         )
-                    )
-                else:
-                    # Legacy format (progress, step)
-                    return asyncio.create_task(
-                        update_processing_status(alert_id, "processing", progress, step)
-                    )
+                    else:
+                        # Legacy format (progress, step)
+                        return asyncio.create_task(
+                            update_processing_status(alert_id, "processing", progress, step)
+                        )
+                except Exception as e:
+                    logger.error(f"Error in progress_handler for alert {alert_id}: {str(e)}")
+                    # Don't let progress update failures stop processing
+                    return None
             
-            result = await alert_service.process_alert(alert, progress_callback=progress_handler)
+            # Process with timeout to prevent hanging
+            try:
+                # Set a reasonable timeout (e.g., 10 minutes for alert processing)
+                result = await asyncio.wait_for(
+                    alert_service.process_alert(alert, progress_callback=progress_handler),
+                    timeout=600  # 10 minutes
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"Alert processing exceeded timeout limit of 10 minutes")
+            
+            # Calculate processing duration
+            duration = (datetime.now() - start_time).total_seconds()
+            logger.info(f"Alert {alert_id} processed successfully in {duration:.2f} seconds")
             
             # Update status: completed
             await update_processing_status(
-                alert_id, AlertSessionStatus.COMPLETED, 100, "Processing completed", result
+                alert_id, AlertSessionStatus.COMPLETED, 100, "Processing completed successfully", result
+            )
+            
+        except ValueError as e:
+            # Configuration or data validation errors
+            error_msg = f"Invalid alert data: {str(e)}"
+            logger.error(f"Alert {alert_id} validation failed: {error_msg}")
+            await update_processing_status(
+                alert_id, "error", 0, "Validation failed", None, error_msg
+            )
+            
+        except TimeoutError as e:
+            # Processing timeout
+            error_msg = str(e)
+            logger.error(f"Alert {alert_id} processing timeout: {error_msg}")
+            await update_processing_status(
+                alert_id, "error", 0, "Processing timeout", None, error_msg
+            )
+            
+        except ConnectionError as e:
+            # Network or external service errors
+            error_msg = f"Connection error during processing: {str(e)}"
+            logger.error(f"Alert {alert_id} connection error: {error_msg}")
+            await update_processing_status(
+                alert_id, "error", 0, "Connection error", None, error_msg
+            )
+            
+        except json.JSONDecodeError as e:
+            # JSON parsing errors in agent processing
+            error_msg = f"JSON parsing error in agent processing: {str(e)}"
+            logger.error(f"Alert {alert_id} JSON error: {error_msg}")
+            await update_processing_status(
+                alert_id, "error", 0, "Data parsing error", None, error_msg
+            )
+            
+        except MemoryError as e:
+            # Memory issues with large payloads
+            error_msg = "Processing failed due to memory constraints (payload too large)"
+            logger.error(f"Alert {alert_id} memory error: {error_msg}")
+            await update_processing_status(
+                alert_id, "error", 0, "Memory limit exceeded", None, error_msg
             )
             
         except Exception as e:
-            # Update status: error
+            # Catch-all for unexpected errors
+            duration = (datetime.now() - start_time).total_seconds()
+            error_msg = f"Unexpected processing error: {str(e)}"
+            logger.error(
+                f"Alert {alert_id} unexpected error after {duration:.2f}s: {error_msg}", 
+                exc_info=True
+            )
+            
+            # Try to provide more context about the error
+            error_context = {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "processing_duration_seconds": duration,
+                "alert_type": alert.get("alert_type", "unknown") if alert else "unknown"
+            }
+            
             await update_processing_status(
-                alert_id, "error", 0, "Processing failed", None, str(e)
+                alert_id, 
+                "error", 
+                0, 
+                "Unexpected processing error", 
+                None, 
+                f"Processing failed: {error_msg} | Context: {error_context}"
             )
 
 

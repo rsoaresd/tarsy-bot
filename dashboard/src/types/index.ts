@@ -21,18 +21,9 @@ export interface DetailedSession extends Session {
   chronological_timeline: TimelineItem[];
 }
 
-// Phase 3: Original alert data structure
+// Flexible alert data structure supporting any fields
 export interface AlertData {
-  alert_type: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  message: string;
-  timestamp_us: number; // Unix timestamp (microseconds since epoch)
-  environment: 'development' | 'staging' | 'production';
-  cluster: string;
-  namespace: string;
-  pod?: string;
-  context?: string;
-  runbook?: string;
+  [key: string]: any; // Can contain any fields
 }
 
 // Phase 3: Timeline item structure

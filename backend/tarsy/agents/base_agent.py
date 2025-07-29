@@ -14,11 +14,11 @@ from typing import Any, Callable, Dict, List, Optional
 from tarsy.config.settings import get_settings
 from tarsy.integrations.llm.client import LLMClient
 from tarsy.integrations.mcp.client import MCPClient
-from tarsy.models.alert import Alert
 from tarsy.models.constants import AlertSessionStatus
 from tarsy.models.llm import LLMMessage
 from tarsy.services.mcp_server_registry import MCPServerRegistry
 from tarsy.utils.logger import get_module_logger
+from tarsy.utils.timestamp import now_us
 
 from .prompt_builder import PromptContext, get_prompt_builder
 
@@ -201,7 +201,7 @@ class BaseAgent(ABC):
                           session_id: str,
                           **kwargs) -> str:
         """Analyze an alert using the agent's LLM capabilities."""
-        logger.info(f"Starting alert analysis with {self.__class__.__name__} - Alert: {alert_data.get('alert', 'unknown')}")
+        logger.info(f"Starting alert analysis with {self.__class__.__name__} - Alert: {alert_data.get('alert_type', alert_data.get('alert', 'unknown'))}")
         
         # Build comprehensive prompt using agent-specific prompt building
         prompt = self.build_analysis_prompt(alert_data, runbook_content, mcp_data)
@@ -233,7 +233,7 @@ class BaseAgent(ABC):
                                 session_id: str,
                                 **kwargs) -> List[Dict]:
         """Determine which MCP tools to call based on alert and runbook."""
-        logger.info(f"Starting MCP tool selection with {self.__class__.__name__} - Alert: {alert_data.get('alert', 'unknown')}")
+        logger.info(f"Starting MCP tool selection with {self.__class__.__name__} - Alert: {alert_data.get('alert_type', alert_data.get('alert', 'unknown'))}")
         
         # Build prompt using agent-specific prompt building
         prompt = self.build_mcp_tool_selection_prompt(alert_data, runbook_content, available_tools)
@@ -394,29 +394,26 @@ class BaseAgent(ABC):
     
     async def process_alert(
         self,
-        alert: Alert,
+        alert_data: Dict[str, Any],
         runbook_content: str,
         session_id: str,
         callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
         """
-        Process an alert using the agent's specialized knowledge.
-        
-        This is the main processing method that orchestrates the analysis
-        using LLM and MCP tools. It follows an iterative approach with
-        bounded iterations.
+        Process an alert using the LLM-first approach.
         
         Args:
-            alert: The alert to process
-            runbook_content: The downloaded runbook content
-            callback: Optional callback for progress updates (overrides constructor callback)
+            alert_data: Complete alert data as flexible dictionary
+            runbook_content: The downloaded runbook content  
+            session_id: Session ID for timeline logging
+            callback: Optional callback for progress updates
             
         Returns:
             Dictionary containing the analysis result and metadata
         """
-        # Validate required session_id for timeline logging
-        if not session_id or not session_id.strip():
-            raise ValueError("session_id is required for alert processing and timeline logging")
+        # Basic validation - data validation should happen at API layer
+        if not session_id:
+            raise ValueError("session_id is required for alert processing")
                        
         try:
             # Use provided callback or fall back to constructor callback
@@ -435,10 +432,7 @@ class BaseAgent(ABC):
             # Get available tools from assigned MCP servers
             available_tools = await self._get_available_tools()
             
-            # Prepare context for LLM
-            alert_data = self._prepare_alert_data(alert)
-            
-            # Iterative analysis loop
+            # Iterative analysis loop with flexible data
             analysis_result = await self._iterative_analysis(
                 alert_data, 
                 runbook_content, 
@@ -459,10 +453,11 @@ class BaseAgent(ABC):
                 "agent": self.__class__.__name__,
                 "analysis": analysis_result,
                 "iterations": self._iteration_count,
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp_us": now_us()
             }
             
         except Exception as e:
+            # Simple error handling: log and fail
             error_msg = f"Agent processing failed: {str(e)}"
             logger.error(error_msg, exc_info=True)
             
@@ -476,23 +471,108 @@ class BaseAgent(ABC):
                 "status": "error",
                 "agent": self.__class__.__name__,
                 "error": error_msg,
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp_us": now_us()
             }
 
-    def _prepare_alert_data(self, alert: Alert) -> Dict:
-        """Convert Alert object to dictionary for prompt building."""
-        return {
-            "alert": alert.alert_type,
-            "message": alert.message,
-            "environment": alert.environment,
-            "severity": alert.severity,
-            "cluster": alert.cluster,
-            "namespace": alert.namespace,
-            "pod": alert.pod,
-            "timestamp": alert.timestamp,
-            "context": alert.context
-        }
-    
+    async def _iterative_analysis(
+        self,
+        alert_data: Dict[str, Any],
+        runbook_content: str,
+        available_tools: List[Dict[str, Any]],
+        progress_callback: Optional[Callable],
+        session_id: str
+    ) -> str:
+        """
+        Perform iterative analysis using flexible alert data (LLM-First Processing).
+        
+        Args:
+            alert_data: Complete flexible alert data dictionary
+            runbook_content: The runbook content
+            available_tools: List of available MCP tools
+            progress_callback: Optional progress callback
+            session_id: Session ID for timeline logging
+            
+        Returns:
+            Final analysis result
+        """
+        iteration_history = []
+        self._iteration_count = 0
+        
+        # Initial tool selection with flexible data
+        try:
+            initial_tools = await self.determine_mcp_tools(
+                alert_data, runbook_content, {"tools": available_tools}, session_id=session_id
+            )
+        except Exception as e:
+            logger.error(f"Initial tool selection failed: {str(e)}")
+            # Fall back to analysis without tools
+            return await self.analyze_alert(alert_data, runbook_content, {}, session_id=session_id)
+        
+        # Execute initial tools if any
+        mcp_data = {}
+        if initial_tools:
+            mcp_data = await self._execute_mcp_tools(initial_tools, session_id=session_id)
+            iteration_history.append({
+                "tools_called": initial_tools,
+                "mcp_data": mcp_data
+            })
+        
+        while self._iteration_count < self._max_iterations:
+            self._iteration_count += 1
+            
+            await self._update_progress(
+                progress_callback,
+                status="processing",
+                message=f"Analysis iteration {self._iteration_count}/{self._max_iterations}"
+            )
+            
+            # Determine if we need more tools
+            try:
+                next_action = await self.determine_next_mcp_tools(
+                    alert_data, runbook_content, {"tools": available_tools},
+                    iteration_history, self._iteration_count, session_id=session_id
+                )
+            except Exception as e:
+                logger.error(f"Next tool determination failed in iteration {self._iteration_count}: {str(e)}")
+                break
+            
+            # Check if we should continue
+            if not next_action.get("continue", False):
+                logger.info(f"Analysis complete after {self._iteration_count} iterations")
+                break
+            
+            # Execute additional tools
+            additional_tools = next_action.get("tools", [])
+            if additional_tools:
+                additional_mcp_data = await self._execute_mcp_tools(additional_tools, session_id=session_id)
+                # Merge with existing data
+                for server_name, server_data in additional_mcp_data.items():
+                    if server_name in mcp_data:
+                        if isinstance(mcp_data[server_name], list) and isinstance(server_data, list):
+                            mcp_data[server_name].extend(server_data)
+                        else:
+                            # Convert to list format if needed
+                            if not isinstance(mcp_data[server_name], list):
+                                mcp_data[server_name] = [mcp_data[server_name]]
+                            if isinstance(server_data, list):
+                                mcp_data[server_name].extend(server_data)
+                            else:
+                                mcp_data[server_name].append(server_data)
+                    else:
+                        mcp_data[server_name] = server_data
+                
+                iteration_history.append({
+                    "tools_called": additional_tools,
+                    "mcp_data": additional_mcp_data
+                })
+        
+        # Final analysis with all collected data
+        try:
+            return await self.analyze_alert(alert_data, runbook_content, mcp_data, session_id=session_id)
+        except Exception as e:
+            logger.error(f"Final analysis failed: {str(e)}")
+            return f"Analysis incomplete due to error: {str(e)}"
+
     def _compose_instructions(self) -> str:
         """
         Compose final instructions from three tiers.
@@ -583,104 +663,6 @@ class BaseAgent(ABC):
         except Exception as e:
             logger.error(f"Failed to retrieve tools for agent {self.__class__.__name__}: {str(e)}")
             return []
-    
-    async def _iterative_analysis(
-        self,
-        alert_data: Dict,
-        runbook_content: str,
-        available_tools: List[Dict[str, Any]],
-        progress_callback: Optional[Callable],
-        session_id: str
-    ) -> str:
-        """
-        Perform iterative analysis using LLM and MCP tools.
-        
-        Args:
-            alert_data: The alert data dictionary
-            runbook_content: The runbook content
-            available_tools: List of available MCP tools
-            progress_callback: Optional progress callback
-            
-        Returns:
-            Final analysis result
-        """
-        iteration_history = []
-        self._iteration_count = 0
-        
-        # Initial tool selection
-        try:
-            initial_tools = await self.determine_mcp_tools(
-                alert_data, runbook_content, {"tools": available_tools}, session_id=session_id
-            )
-        except Exception as e:
-            logger.error(f"Initial tool selection failed: {str(e)}")
-            # Fall back to analysis without tools
-            return await self.analyze_alert(alert_data, runbook_content, {}, session_id=session_id)
-        
-        # Execute initial tools if any
-        mcp_data = {}
-        if initial_tools:
-            mcp_data = await self._execute_mcp_tools(initial_tools, session_id=session_id)
-            iteration_history.append({
-                "tools_called": initial_tools,
-                "mcp_data": mcp_data
-            })
-        
-        while self._iteration_count < self._max_iterations:
-            self._iteration_count += 1
-            
-            await self._update_progress(
-                progress_callback,
-                status="processing",
-                message=f"Analysis iteration {self._iteration_count}/{self._max_iterations}"
-            )
-            
-            # Determine if we need more tools
-            try:
-                next_action = await self.determine_next_mcp_tools(
-                    alert_data, runbook_content, {"tools": available_tools},
-                    iteration_history, self._iteration_count, session_id=session_id
-                )
-            except Exception as e:
-                logger.error(f"Next tool determination failed in iteration {self._iteration_count}: {str(e)}")
-                break
-            
-            # Check if we should continue
-            if not next_action.get("continue", False):
-                logger.info(f"Analysis complete after {self._iteration_count} iterations")
-                break
-            
-            # Execute additional tools
-            additional_tools = next_action.get("tools", [])
-            if additional_tools:
-                additional_mcp_data = await self._execute_mcp_tools(additional_tools, session_id=session_id)
-                # Merge with existing data
-                for server_name, server_data in additional_mcp_data.items():
-                    if server_name in mcp_data:
-                        if isinstance(mcp_data[server_name], list) and isinstance(server_data, list):
-                            mcp_data[server_name].extend(server_data)
-                        else:
-                            # Convert to list format if needed
-                            if not isinstance(mcp_data[server_name], list):
-                                mcp_data[server_name] = [mcp_data[server_name]]
-                            if isinstance(server_data, list):
-                                mcp_data[server_name].extend(server_data)
-                            else:
-                                mcp_data[server_name].append(server_data)
-                    else:
-                        mcp_data[server_name] = server_data
-                
-                iteration_history.append({
-                    "tools_called": additional_tools,
-                    "mcp_data": additional_mcp_data
-                })
-        
-        # Final analysis with all collected data
-        try:
-            return await self.analyze_alert(alert_data, runbook_content, mcp_data, session_id=session_id)
-        except Exception as e:
-            logger.error(f"Final analysis failed: {str(e)}")
-            return f"Analysis incomplete due to error: {str(e)}"
 
     async def _execute_mcp_tools(self, tools_to_call: List[Dict], session_id: str) -> Dict[str, List[Dict]]:
         """Execute a list of MCP tool calls and return organized results."""

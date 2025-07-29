@@ -3,30 +3,21 @@ Alert data models for tarsy.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 
 class Alert(BaseModel):
-    """Alert model representing an incoming alert."""
+    """Flexible alert model with minimal required fields and arbitrary data payload."""
     
-    id: Optional[str] = Field(None, description="Optional alert identifier from external system")
-    alert_type: str = Field(..., description="Alert type")
-    severity: str = Field(..., description="Alert severity level")
-    environment: str = Field(..., description="Environment (production/staging)")
-    cluster: str = Field(..., description="Cluster URL")
-    namespace: str = Field(..., description="Affected namespace")
-    pod: Optional[str] = Field(None, description="Affected pod")
-    message: str = Field(..., description="Alert message")
-    runbook: str = Field(..., description="Runbook URL")
-    context: Optional[str] = Field(None, description="Additional context or details about the alert")
-    timestamp: Optional[datetime] = Field(default_factory=datetime.now)
+    alert_type: str = Field(..., description="Alert type for agent selection")
+    runbook: str = Field(..., description="Processing runbook URL or reference")
+    data: Dict[str, Any] = Field(default_factory=dict, description="Flexible alert payload")
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    # Optional fields with defaults (will be applied in API layer if not provided)
+    severity: Optional[str] = Field(None, description="Alert severity (defaults to 'warning')")
+    timestamp: Optional[int] = Field(None, description="Alert timestamp in unix microseconds (defaults to current time)")
 
 
 class AlertResponse(BaseModel):
