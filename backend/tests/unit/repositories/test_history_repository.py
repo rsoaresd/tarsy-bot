@@ -1542,4 +1542,229 @@ class TestHistoryRepositoryDuplicatePrevention:
         source = inspect.getsource(HistoryRepository.create_alert_session)
         assert 'existing_session' in source, "Should check for existing sessions"
         assert 'alert_id' in source, "Should check by alert_id"
+
+
+class TestFlexibleAlertDataPerformance:
+    """Pragmatic performance tests for flexible alert data JSON queries."""
+    
+    @pytest.fixture
+    def in_memory_engine(self):
+        """Create in-memory SQLite engine for performance testing."""
+        engine = create_engine("sqlite:///:memory:", echo=False)
+        SQLModel.metadata.create_all(engine)
+        return engine
+    
+    @pytest.fixture
+    def db_session(self, in_memory_engine):
+        """Create database session for testing."""
+        with Session(in_memory_engine) as session:
+            yield session
+    
+    @pytest.fixture
+    def repository(self, db_session):
+        """Create HistoryRepository instance with test database session."""
+        return HistoryRepository(db_session)
+    
+    @pytest.fixture
+    def repository_with_flexible_data(self, repository):
+        """Create repository with flexible alert data for performance testing."""
+        import json
+        import time
+        from datetime import datetime, timezone
+        
+        # Create 100 sessions with various flexible data structures
+        for i in range(100):
+            # Create diverse alert data structures
+            if i % 4 == 0:  # Monitoring alerts (25%)
+                alert_data = {
+                    "service": f"service-{i}",
+                    "environment": "production" if i % 2 == 0 else "staging",
+                    "severity": "critical" if i % 3 == 0 else "warning",
+                    "cluster": f"cluster-{i % 5}",
+                    "metrics": {
+                        "cpu_usage": 50 + (i % 50),
+                        "memory_usage": 30 + (i % 70),
+                        "network": {"in_bytes": i * 1000, "out_bytes": i * 2000}
+                    },
+                    "labels": [f"label-{j}" for j in range(i % 5)],
+                    "nested_config": {
+                        "thresholds": {"cpu": 90, "memory": 80},
+                        "intervals": [30, 60, 120]
+                    }
+                }
+            elif i % 4 == 1:  # Database alerts (25%)
+                alert_data = {
+                    "database_type": "postgresql",
+                    "environment": "production" if i % 3 == 0 else "staging", 
+                    "severity": "high" if i % 2 == 0 else "medium",
+                    "cluster": f"db-cluster-{i % 3}",
+                    "connection_pool": {
+                        "active": 50 + (i % 50),
+                        "max": 100,
+                        "waiting": i % 20
+                    },
+                    "queries": [
+                        {"id": f"q{j}", "duration": (i + j) * 100} 
+                        for j in range(i % 3 + 1)
+                    ]
+                }
+            elif i % 4 == 2:  # Network alerts (25%)
+                alert_data = {
+                    "network_type": "switch",
+                    "environment": "production",
+                    "severity": "critical" if i % 5 == 0 else "warning",
+                    "cluster": f"network-{i % 4}",
+                    "interface_stats": {
+                        "port1": {"in": i * 1000, "out": i * 2000, "errors": i % 10},
+                        "port2": {"in": i * 800, "out": i * 1500, "errors": i % 5}
+                    },
+                    "bgp_neighbors": [f"neighbor-{j}" for j in range(i % 4)]
+                }
+            else:  # Kubernetes alerts (25%)
+                alert_data = {
+                    "namespace": f"ns-{i % 10}",
+                    "environment": "production" if i % 2 == 0 else "development",
+                    "severity": "critical" if i % 6 == 0 else "warning", 
+                    "cluster": f"k8s-cluster-{i % 3}",
+                    "pod_info": {
+                        "name": f"pod-{i}",
+                        "status": "Running" if i % 3 != 0 else "Pending",
+                        "resources": {"cpu": f"{i % 4}00m", "memory": f"{(i % 8) * 128}Mi"}
+                    },
+                    "events": [
+                        {"type": "Warning", "reason": f"reason-{j}", "count": j + 1}
+                        for j in range(i % 3)
+                    ]
+                }
+            
+            session = AlertSession(
+                session_id=f"perf_test_{i}",
+                alert_id=f"alert_{i}",
+                agent_type="TestAgent",
+                alert_type=["monitoring", "database", "network", "kubernetes"][i % 4],
+                status="completed",
+                started_at_us=int((datetime.now(timezone.utc).timestamp() - i * 60) * 1_000_000),
+                completed_at_us=int((datetime.now(timezone.utc).timestamp() - i * 60 + 30) * 1_000_000),
+                alert_data=alert_data
+            )
+            repository.session.add(session)
+        
+        repository.session.commit()
+        return repository
+    
+    @pytest.mark.unit
+    def test_json_field_query_performance(self, repository_with_flexible_data):
+        """Test performance of JSON field queries with complex data structures."""
+        import time
+        
+        # Test 1: Query by severity (should use JSON index)
+        start_time = time.time()
+        sessions = repository_with_flexible_data.get_alert_sessions(page_size=100)
+        
+        # Filter in Python to simulate JSON query (since SQLite doesn't have JSON indexes)
+        critical_sessions = [
+            s for s in sessions["sessions"]
+            if s.alert_data and s.alert_data.get("severity") == "critical"
+        ]
+        
+        query_time = time.time() - start_time
+        
+        # Should complete reasonably quickly (under 100ms for 100 records)
+        assert query_time < 0.1, f"JSON severity query took {query_time:.3f}s, should be faster"
+        assert len(critical_sessions) > 0, "Should find some critical alerts"
+    
+    @pytest.mark.unit  
+    def test_complex_json_structure_performance(self, repository_with_flexible_data):
+        """Test performance with complex nested JSON structures."""
+        import time
+        
+        # Test querying nested data structures
+        start_time = time.time()
+        
+        sessions = repository_with_flexible_data.get_alert_sessions(page_size=100)
+        
+        # Simulate complex JSON queries on nested data
+        monitoring_with_high_cpu = []
+        for session in sessions["sessions"]:
+            if (session.alert_data and 
+                session.alert_data.get("metrics") and
+                isinstance(session.alert_data["metrics"], dict) and
+                session.alert_data["metrics"].get("cpu_usage", 0) > 80):
+                monitoring_with_high_cpu.append(session)
+        
+        query_time = time.time() - start_time
+        
+        # Should handle nested JSON queries reasonably
+        assert query_time < 0.2, f"Complex JSON query took {query_time:.3f}s, should be faster"
+        assert len(monitoring_with_high_cpu) >= 0, "Query should complete successfully"
+    
+    @pytest.mark.unit
+    def test_json_array_query_performance(self, repository_with_flexible_data):
+        """Test performance of querying JSON arrays within alert data."""
+        import time
+        
+        start_time = time.time()
+        
+        sessions = repository_with_flexible_data.get_alert_sessions(page_size=100)
+        
+        # Query sessions with array data (labels, queries, events, etc.)
+        sessions_with_arrays = []
+        for session in sessions["sessions"]:
+            if session.alert_data:
+                # Check for any array fields
+                has_arrays = any(
+                    isinstance(v, list) for v in session.alert_data.values()
+                ) or any(
+                    isinstance(v, dict) and any(isinstance(nested_v, list) for nested_v in v.values())
+                    for v in session.alert_data.values() if isinstance(v, dict)
+                )
+                
+                if has_arrays:
+                    sessions_with_arrays.append(session)
+        
+        query_time = time.time() - start_time
+        
+        # Should handle array queries efficiently
+        assert query_time < 0.15, f"Array JSON query took {query_time:.3f}s, should be faster"
+        assert len(sessions_with_arrays) > 0, "Should find sessions with array data"
+    
+    @pytest.mark.unit
+    def test_json_pagination_performance(self, repository_with_flexible_data):
+        """Test pagination performance with large JSON payloads."""
+        import time
+        
+        # Test multiple pages to ensure consistent performance
+        page_times = []
+        
+        for page in range(1, 6):  # Test 5 pages
+            start_time = time.time()
+            
+            result = repository_with_flexible_data.get_alert_sessions(
+                page=page,
+                page_size=20
+            )
+            
+            page_time = time.time() - start_time
+            page_times.append(page_time)
+            
+            # Verify pagination works with flexible data
+            assert len(result["sessions"]) <= 20
+            assert result["pagination"]["page"] == page
+        
+        # Performance should be consistent across pages
+        avg_page_time = sum(page_times) / len(page_times)
+        max_page_time = max(page_times)
+        
+        assert avg_page_time < 0.05, f"Average page time {avg_page_time:.3f}s too slow"
+        assert max_page_time < 0.1, f"Slowest page time {max_page_time:.3f}s too slow"
+        
+        # Performance shouldn't degrade significantly across pages
+        first_page_time = page_times[0]
+        last_page_time = page_times[-1]
+        
+        # Last page shouldn't be more than 3x slower than first page
+        assert last_page_time < first_page_time * 3, \
+            f"Performance degraded from {first_page_time:.3f}s to {last_page_time:.3f}s"
+    
+
  

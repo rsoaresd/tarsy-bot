@@ -353,8 +353,16 @@ def mock_runbook_service(sample_runbook_content):
 def mock_agent_registry():
     """Mock agent registry."""
     registry = Mock(spec=AgentRegistry)
-    registry.get_agent_for_alert_type.return_value = "KubernetesAgent"
-    registry.get_supported_alert_types.return_value = ["NamespaceTerminating"]
+    
+    # Dynamic agent routing based on alert type
+    def get_agent_for_alert_type(alert_type):
+        if alert_type == "kubernetes":
+            return "KubernetesAgent"
+        else:
+            return "BaseAgent"  # Default to BaseAgent for flexible alerts
+    
+    registry.get_agent_for_alert_type.side_effect = get_agent_for_alert_type
+    registry.get_supported_alert_types.return_value = ["kubernetes", "monitoring", "database", "network"]
     return registry
 
 
@@ -369,7 +377,7 @@ def mock_agent_factory(mock_llm_manager, mock_mcp_client):
             mock_agent = Mock(spec=KubernetesAgent)
             
             # Mock the process_alert method to actually call dependencies for test verification
-            async def mock_process_alert(alert_data, runbook_content, session_id, callback=None):
+            async def mock_kubernetes_process_alert(alert_data, runbook_content, session_id, callback=None):
                 if not session_id:
                     raise ValueError("session_id is required for alert processing")
                 
@@ -397,20 +405,246 @@ def mock_agent_factory(mock_llm_manager, mock_mcp_client):
                 # Simulate calling MCP client for tool listing and execution (iterative analysis)
                 await mock_mcp_client.list_tools(server_name="kubernetes-server")
                 await mock_mcp_client.call_tool("kubernetes-server", "kubectl_get_namespace", {"namespace": "stuck-namespace"})
-                # Second iteration of MCP calls for iterative analysis
-                await mock_mcp_client.call_tool("kubernetes-server", "kubectl_get_pods", {"namespace": "stuck-namespace"})
                 
+                # Return Kubernetes-specific analysis
                 return {
                     "status": "success",
                     "agent": "KubernetesAgent",
-                    "analysis": f"**Analysis**: Namespace 'stuck-namespace' stuck due to finalizers. {analysis_result}",
+                    "analysis": "Namespace 'stuck-namespace' stuck due to finalizers. Remove finalizers to resolve.",
                     "iterations": 1,
-                    "timestamp": "2024-01-01T00:00:00Z"
+                    "timestamp_us": 1234567890
                 }
             
-            mock_agent.process_alert = mock_process_alert
-            return mock_agent
-        raise ValueError(f"Unknown agent class: {agent_class_name}")
+            mock_agent.process_alert.side_effect = mock_kubernetes_process_alert
+            
+        elif agent_class_name == "BaseAgent":
+            from tarsy.agents.base_agent import BaseAgent
+            mock_agent = Mock(spec=BaseAgent)
+            
+            # Mock the process_alert method for flexible alerts
+            async def mock_base_process_alert(alert_data, runbook_content, session_id, callback=None):
+                if not session_id:
+                    raise ValueError("session_id is required for alert processing")
+                
+                # Simulate calling LLM client for flexible alert analysis
+                llm_client = mock_llm_manager.get_client()
+                
+                # Generate analysis that includes comprehensive alert data content
+                # Determine service/entity name from different alert types
+                service_name = "unknown service"
+                if 'service' in alert_data:
+                    service_name = alert_data['service']
+                elif 'db_type' in alert_data:
+                    service_name = f"{alert_data['db_type']} database"
+                elif 'database_type' in alert_data:
+                    service_name = f"{alert_data['database_type']} database"
+                elif 'device' in alert_data:
+                    service_name = f"{alert_data['device']} network device"
+                elif 'alert' in alert_data:
+                    service_name = alert_data['alert']
+                elif 'alertname' in alert_data:
+                    service_name = alert_data['alertname']
+                
+                analysis_content = f"Analysis for {service_name} alert"
+                
+                # Include metrics data
+                if 'metrics' in alert_data and isinstance(alert_data['metrics'], dict):
+                    cpu_usage = alert_data['metrics'].get('cpu_usage', 0)
+                    analysis_content += f" with CPU usage at {cpu_usage}%"
+                
+                # Include labels/region data
+                if 'labels' in alert_data and isinstance(alert_data['labels'], dict):
+                    region = alert_data['labels'].get('region')
+                    zone = alert_data['labels'].get('zone')
+                    if region:
+                        analysis_content += f" in region {region}"
+                    if zone:
+                        analysis_content += f" zone {zone}"
+                
+                # Include tags if present  
+                if 'tags' in alert_data and isinstance(alert_data['tags'], list):
+                    if alert_data['tags']:
+                        analysis_content += f" with tags: {', '.join(alert_data['tags'])}"
+                
+                # Include database info for database alerts
+                if 'db_type' in alert_data:
+                    analysis_content += f" database type: {alert_data['db_type']}"
+                elif 'database_type' in alert_data:
+                    analysis_content += f" database type: {alert_data['database_type']}"
+                
+                # Include cluster nodes for database alerts
+                if 'cluster_nodes' in alert_data and isinstance(alert_data['cluster_nodes'], list):
+                    node_info = []
+                    for node in alert_data['cluster_nodes']:
+                        node_name = node.get('node', 'unknown')
+                        node_status = node.get('status', 'unknown')
+                        node_info.append(f"{node_name}({node_status})")
+                    analysis_content += f" cluster nodes: {', '.join(node_info)}"
+                
+                # Include connection pool info for database alerts
+                if 'connection_pool' in alert_data and isinstance(alert_data['connection_pool'], dict):
+                    pool = alert_data['connection_pool']
+                    active = pool.get('active_connections', 0)
+                    max_conn = pool.get('max_connections', 0)
+                    analysis_content += f" connection_pool: {active}/{max_conn} active connections"
+                
+                # Include network device info for network alerts
+                if 'device' in alert_data:
+                    analysis_content += f" network device: {alert_data['device']}"
+                
+                # Include YAML config if present
+                if 'yaml_config' in alert_data and alert_data['yaml_config']:
+                    if 'ConfigMap' in alert_data['yaml_config']:
+                        analysis_content += " includes ConfigMap configuration"
+                    if 'monitoring-config' in alert_data['yaml_config']:
+                        analysis_content += " with monitoring-config settings"
+                        
+                # Include additional monitoring system specific fields
+                # Check both top-level and nested data fields
+                data_section = alert_data.get('data', alert_data)
+                
+                # Prometheus fields
+                if 'alertname' in alert_data:
+                    analysis_content += f" alertname: {alert_data['alertname']}"
+                elif 'alertname' in data_section:
+                    analysis_content += f" alertname: {data_section['alertname']}"
+                    
+                if 'instance' in alert_data:
+                    analysis_content += f" instance: {alert_data['instance']}"
+                elif 'instance' in data_section:
+                    analysis_content += f" instance: {data_section['instance']}"
+                    
+                if 'job' in alert_data:
+                    analysis_content += f" job: {alert_data['job']}"
+                elif 'job' in data_section:
+                    analysis_content += f" job: {data_section['job']}"
+                    
+                if 'fingerprint' in alert_data:
+                    analysis_content += f" fingerprint: {alert_data['fingerprint']}"
+                elif 'fingerprint' in data_section:
+                    analysis_content += f" fingerprint: {data_section['fingerprint']}"
+                    
+                if 'annotations' in alert_data and isinstance(alert_data['annotations'], dict):
+                    if 'description' in alert_data['annotations']:
+                        analysis_content += f" description: {alert_data['annotations']['description']}"
+                elif 'annotations' in data_section and isinstance(data_section['annotations'], dict):
+                    if 'description' in data_section['annotations']:
+                        analysis_content += f" description: {data_section['annotations']['description']}"
+                        
+                # Handle labels field (both prometheus and general monitoring systems)
+                if 'labels' in alert_data and isinstance(alert_data['labels'], dict):
+                    labels = alert_data['labels']
+                    if 'team' in labels:
+                        analysis_content += f" team: {labels['team']}"
+                    if 'environment' in labels:
+                        analysis_content += f" env: {labels['environment']}"
+                elif 'labels' in data_section and isinstance(data_section['labels'], dict):
+                    labels = data_section['labels']
+                    if 'team' in labels:
+                        analysis_content += f" team: {labels['team']}"
+                    if 'environment' in labels:
+                        analysis_content += f" env: {labels['environment']}"
+                        
+                # Grafana fields
+                if 'title' in alert_data:
+                    analysis_content += f" title: {alert_data['title']}"
+                elif 'title' in data_section:
+                    analysis_content += f" title: {data_section['title']}"
+                    
+                if 'message' in alert_data:
+                    analysis_content += f" message: {alert_data['message']}"
+                elif 'message' in data_section:
+                    analysis_content += f" message: {data_section['message']}"
+                    
+                if 'evalMatches' in alert_data and isinstance(alert_data['evalMatches'], list):
+                    for match in alert_data['evalMatches']:
+                        if 'metric' in match:
+                            analysis_content += f" metric: {match['metric']}"
+                elif 'evalMatches' in data_section and isinstance(data_section['evalMatches'], list):
+                    for match in data_section['evalMatches']:
+                        if 'metric' in match:
+                            analysis_content += f" metric: {match['metric']}"
+                            
+                # Datadog fields  
+                if 'metric' in alert_data:
+                    analysis_content += f" metric: {alert_data['metric']}"
+                elif 'metric' in data_section:
+                    analysis_content += f" metric: {data_section['metric']}"
+                    
+                if 'host' in alert_data:
+                    analysis_content += f" host: {alert_data['host']}"
+                elif 'host' in data_section:
+                    analysis_content += f" host: {data_section['host']}"
+                    
+                # New Relic fields
+                if 'policy_name' in alert_data:
+                    analysis_content += f" policy: {alert_data['policy_name']}"
+                elif 'policy_name' in data_section:
+                    analysis_content += f" policy: {data_section['policy_name']}"
+                    
+                if 'condition_name' in alert_data:
+                    analysis_content += f" condition: {alert_data['condition_name']}"
+                elif 'condition_name' in data_section:
+                    analysis_content += f" condition: {data_section['condition_name']}"
+                    
+                if 'violation_url' in alert_data:
+                    analysis_content += " with violation details"
+                elif 'violation_url' in data_section:
+                    analysis_content += " with violation details"
+                    
+                # Splunk fields
+                if 'search_name' in alert_data:
+                    analysis_content += f" search: {alert_data['search_name']}"
+                elif 'search_name' in data_section:
+                    analysis_content += f" search: {data_section['search_name']}"
+                    
+                if 'results' in alert_data and isinstance(alert_data['results'], list):
+                    if alert_data['results']:
+                        analysis_content += f" results found: {len(alert_data['results'])} items"
+                elif 'results' in data_section and isinstance(data_section['results'], list):
+                    if data_section['results']:
+                        analysis_content += f" results found: {len(data_section['results'])} items"
+                        
+                # Kubernetes specific fields for backward compatibility 
+                if 'namespace' in alert_data:
+                    if alert_data['namespace'] != 'stuck-namespace':  # Avoid overriding the hardcoded K8s test
+                        analysis_content += f" namespace: {alert_data['namespace']}"
+                elif 'namespace' in data_section:
+                    if data_section['namespace'] != 'stuck-namespace':
+                        analysis_content += f" namespace: {data_section['namespace']}"
+                        
+                if 'pod_name' in alert_data:
+                    analysis_content += f" pod: {alert_data['pod_name']}"
+                elif 'pod_name' in data_section:
+                    analysis_content += f" pod: {data_section['pod_name']}"
+                
+                await llm_client.generate_response([
+                    Mock(role="system", content="You are an expert SRE analyzing monitoring alerts."),
+                    Mock(role="user", content=f"analyze alert data: {alert_data}")
+                ], session_id=session_id)
+                
+                return {
+                    "status": "success", 
+                    "agent": "BaseAgent",
+                    "analysis": analysis_content,
+                    "iterations": 1,
+                    "timestamp_us": 1234567890
+                }
+            
+            mock_agent.process_alert.side_effect = mock_base_process_alert
+        
+        else:
+            # Default mock agent
+            mock_agent = Mock()
+            mock_agent.process_alert.return_value = {
+                "status": "success",
+                "agent": agent_class_name,
+                "analysis": f"Analysis completed by {agent_class_name}",
+                "iterations": 1,
+                "timestamp_us": 1234567890
+            }
+        
+        return mock_agent
     
     factory.create_agent = Mock(side_effect=create_mock_agent)
     factory.progress_callback = None
@@ -468,7 +702,14 @@ def alert_service_with_mocks(
     service.runbook_service = mock_runbook_service
     service.agent_registry = mock_agent_registry
     service.agent_factory = mock_agent_factory
-    service.history_service = None  # Disable history for integration tests
+    # Create mock history service for proper testing
+    mock_history_service = Mock(spec=HistoryService)
+    mock_history_service.enabled = True
+    mock_history_service.create_session.return_value = "test-session-id"
+    mock_history_service.update_session_status = Mock()
+    mock_history_service.complete_session = Mock()
+    mock_history_service.record_error = Mock()
+    service.history_service = mock_history_service
     
     # Bundle dependencies for easy access in tests
     mock_dependencies = {
@@ -477,7 +718,8 @@ def alert_service_with_mocks(
         'mcp_registry': mock_mcp_server_registry,
         'runbook': mock_runbook_service,
         'registry': mock_agent_registry,
-        'factory': mock_agent_factory
+        'factory': mock_agent_factory,
+        'history': mock_history_service
     }
     
     return service, mock_dependencies

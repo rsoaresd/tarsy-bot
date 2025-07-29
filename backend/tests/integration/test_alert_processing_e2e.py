@@ -540,3 +540,298 @@ class TestDataFlowValidation:
         result_lower = result.lower()
         analysis_indicators = ["analysis", "issue", "resolution", "status", "cause"]
         assert any(indicator in result_lower for indicator in analysis_indicators) 
+
+
+def flexible_alert_to_api_format(flexible_alert: dict) -> dict:
+    """
+    Convert flexible alert format to API format that AlertService expects.
+    """
+    normalized_data = flexible_alert.get("data", {}).copy()
+    
+    # Add core fields
+    normalized_data["runbook"] = flexible_alert["runbook"]
+    normalized_data["severity"] = flexible_alert.get("severity", "warning")
+    normalized_data["timestamp"] = flexible_alert.get("timestamp", now_us())
+    
+    # Add default environment if not present
+    if "environment" not in normalized_data:
+        normalized_data["environment"] = "production"
+    
+    return {
+        "alert_type": flexible_alert["alert_type"],
+        "alert_data": normalized_data
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+class TestFlexibleAlertProcessingE2E:
+    """End-to-end tests for flexible alert processing with various data structures."""
+
+    @pytest.fixture
+    def monitoring_alert_with_nested_data(self):
+        """Create a monitoring alert with complex nested data structure."""
+        return {
+            "alert_type": "monitoring",
+            "runbook": "https://company.com/runbooks/monitoring.md",
+            "severity": "critical",
+            "timestamp": now_us(),
+            "data": {
+                "environment": "production",
+                "service": "api-gateway",
+                "metrics": {
+                    "cpu_usage": 95.4,
+                    "memory_usage": 87.2,
+                    "disk_usage": 91.8,
+                    "network": {
+                        "in_bytes": 1024000,
+                        "out_bytes": 2048000,
+                        "dropped_packets": 15
+                    }
+                },
+                "labels": {
+                    "region": "us-east-1",
+                    "zone": "us-east-1a",
+                    "cluster": "prod-cluster",
+                    "namespace": "default"
+                },
+                "tags": ["high-priority", "customer-facing", "sla-critical"],
+                "alert_rules": [
+                    {
+                        "rule": "cpu_usage > 90",
+                        "duration": "5m",
+                        "severity": "critical"
+                    },
+                    {
+                        "rule": "memory_usage > 80",
+                        "duration": "3m", 
+                        "severity": "warning"
+                    }
+                ],
+                "yaml_config": """
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-config
+data:
+  threshold: "90"
+  interval: "30s"
+                """.strip()
+            }
+        }
+
+    @pytest.fixture
+    def database_alert_with_arrays(self):
+        """Create a database alert with array data structures."""
+        return {
+            "alert_type": "database",
+            "runbook": "https://company.com/runbooks/database.md",
+            "data": {
+                "environment": "production",
+                "database_type": "postgresql",
+                "cluster_nodes": [
+                    {"node": "db-01", "status": "healthy", "load": 0.75},
+                    {"node": "db-02", "status": "degraded", "load": 0.95},
+                    {"node": "db-03", "status": "healthy", "load": 0.68}
+                ],
+                "failing_queries": [
+                    {
+                        "query_id": "q1",
+                        "sql": "SELECT * FROM users WHERE status = 'active'",
+                        "duration_ms": 15000,
+                        "rows_examined": 1000000
+                    },
+                    {
+                        "query_id": "q2", 
+                        "sql": "UPDATE orders SET status = 'processed'",
+                        "duration_ms": 8500,
+                        "rows_affected": 50000
+                    }
+                ],
+                "connection_pool": {
+                    "active_connections": 95,
+                    "max_connections": 100,
+                    "idle_connections": 2,
+                    "waiting_queries": 45
+                },
+                "replication_lag_seconds": [0.1, 0.3, 2.1, 0.8],
+                "table_sizes_gb": {
+                    "users": 45.2,
+                    "orders": 123.7,
+                    "products": 8.9,
+                    "logs": 567.1
+                }
+            }
+        }
+
+    @pytest.fixture
+    def network_alert_minimal_data(self):
+        """Create a minimal network alert to test basic processing."""
+        return {
+            "alert_type": "network",
+            "runbook": "https://company.com/runbooks/network.md",
+            "data": {
+                "alert": "HighLatency",
+                "description": "Network latency above threshold"
+            }
+        }
+
+    @pytest.mark.asyncio
+    async def test_monitoring_alert_with_complex_nested_data(self, alert_service_with_mocks, monitoring_alert_with_nested_data):
+        """Test processing monitoring alert with complex nested data structures."""
+        alert_service, mock_dependencies = alert_service_with_mocks
+        progress_callback_mock = AsyncMock()
+
+        # Convert to API format
+        alert_dict = flexible_alert_to_api_format(monitoring_alert_with_nested_data)
+
+        result = await alert_service.process_alert(alert_dict, progress_callback_mock)
+
+        # Verify processing completed
+        assert isinstance(result, str)
+        assert len(result) > 100
+
+        # Verify nested data is preserved and included in analysis
+        assert "api-gateway" in result
+        assert "95.4" in result or "cpu" in result.lower()
+        assert "us-east-1" in result
+        assert "high-priority" in result or "sla-critical" in result
+
+        # Verify YAML config was included
+        assert "ConfigMap" in result or "monitoring-config" in result
+
+        # Verify progress callbacks were made
+        assert progress_callback_mock.call_count > 0
+
+    @pytest.mark.asyncio
+    async def test_database_alert_with_array_structures(self, alert_service_with_mocks, database_alert_with_arrays):
+        """Test processing database alert with array data structures."""
+        alert_service, mock_dependencies = alert_service_with_mocks
+        progress_callback_mock = AsyncMock()
+
+        # Convert to API format
+        alert_dict = flexible_alert_to_api_format(database_alert_with_arrays)
+
+        result = await alert_service.process_alert(alert_dict, progress_callback_mock)
+
+        # Verify processing completed
+        assert isinstance(result, str)
+        assert len(result) > 100
+
+        # Verify array data is preserved and included in analysis
+        assert "postgresql" in result
+        assert "db-01" in result or "db-02" in result or "db-03" in result
+        assert "degraded" in result or "healthy" in result
+        assert "connection_pool" in result or "connections" in result.lower()
+
+        # Verify progress callbacks were made
+        assert progress_callback_mock.call_count > 0
+
+    @pytest.mark.asyncio
+    async def test_minimal_network_alert_processing(self, alert_service_with_mocks, network_alert_minimal_data):
+        """Test processing alert with minimal data structure."""
+        alert_service, mock_dependencies = alert_service_with_mocks
+        progress_callback_mock = AsyncMock()
+
+        # Convert to API format
+        alert_dict = flexible_alert_to_api_format(network_alert_minimal_data)
+
+        result = await alert_service.process_alert(alert_dict, progress_callback_mock)
+
+        # Verify processing completed despite minimal data
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+        # Verify minimal data is included
+        assert "HighLatency" in result or "latency" in result.lower()
+        assert "network" in result.lower()
+
+        # Verify progress callbacks were made
+        assert progress_callback_mock.call_count > 0
+
+    @pytest.mark.asyncio
+    async def test_agent_selection_with_new_alert_types(self, alert_service_with_mocks):
+        """Test that agent selection works correctly with new alert types."""
+        alert_service, mock_dependencies = alert_service_with_mocks
+        
+        # Test different alert types and verify agent selection
+        test_cases = [
+            ("monitoring", "BaseAgent"),  # Should fall back to BaseAgent
+            ("database", "BaseAgent"),    # Should fall back to BaseAgent  
+            ("network", "BaseAgent"),     # Should fall back to BaseAgent
+            ("kubernetes", "KubernetesAgent")  # Should use KubernetesAgent
+        ]
+
+        registry_mock = mock_dependencies['registry']
+        
+        for alert_type, expected_agent in test_cases:
+            registry_mock.get_agent_for_alert_type.return_value = expected_agent
+            
+            alert_dict = {
+                "alert_type": alert_type,
+                "alert_data": {
+                    "alert_type": alert_type,
+                    "runbook": "https://example.com/runbook.md",
+                    "data": {"test": "data"}
+                }
+            }
+            
+            result = await alert_service.process_alert(alert_dict)
+            
+            # Verify agent was selected correctly
+            registry_mock.get_agent_for_alert_type.assert_called_with(alert_type)
+            
+            # Verify processing completed
+            assert isinstance(result, str)
+            assert len(result) > 0
+
+    @pytest.mark.asyncio 
+    async def test_data_preservation_through_processing_pipeline(self, alert_service_with_mocks, monitoring_alert_with_nested_data):
+        """Test that complex data structures are preserved throughout the processing pipeline."""
+        alert_service, mock_dependencies = alert_service_with_mocks
+        
+        # Mock agent to capture what data it receives
+        captured_data = {}
+        
+        async def capture_agent_data(alert_data, runbook_content, callback=None, session_id=None):
+            # Capture all arguments passed to process_alert
+            captured_data['alert_data'] = alert_data
+            captured_data['runbook_content'] = runbook_content
+            captured_data['callback'] = callback
+            captured_data['session_id'] = session_id
+            return {
+                "status": "success",
+                "agent": "TestAgent",
+                "analysis": "Test analysis",
+                "iterations": 1,
+                "timestamp_us": now_us()
+            }
+        
+        mock_agent = AsyncMock()
+        mock_agent.process_alert.side_effect = capture_agent_data
+        
+        # Override the factory's create_agent method directly
+        original_create_agent = alert_service.agent_factory.create_agent
+        alert_service.agent_factory.create_agent = lambda agent_class_name: mock_agent
+        
+        # Convert to API format
+        alert_dict = flexible_alert_to_api_format(monitoring_alert_with_nested_data)
+        
+        result = await alert_service.process_alert(alert_dict)
+        
+        # Verify data preservation
+        assert captured_data['alert_data'] is not None
+        captured_alert = captured_data['alert_data']
+        
+        # Verify nested structures are preserved
+        assert captured_alert.get('metrics', {}).get('cpu_usage') == 95.4
+        assert captured_alert.get('metrics', {}).get('network', {}).get('in_bytes') == 1024000
+        assert "high-priority" in captured_alert.get('tags', [])
+        assert len(captured_alert.get('alert_rules', [])) == 2
+        assert "ConfigMap" in captured_alert.get('yaml_config', '')
+        
+        # Verify session ID was passed
+        assert captured_data['session_id'] is not None
+        
+        # Verify runbook content was passed
+        assert captured_data['runbook_content'] is not None 

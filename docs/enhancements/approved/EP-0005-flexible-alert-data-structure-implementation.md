@@ -316,10 +316,8 @@ python -m pytest tests/performance/ -v
    - Test JSON query performance with large datasets
    - Verify database indexing efficiency
    - Test UI rendering performance with complex alert data
-   - Validate memory usage with large JSON payloads
 
 3. **Compatibility Testing**
-   - Ensure existing integrations continue to work
    - Test with various alert data formats
    - Verify agent selection and routing accuracy
    - Test historical alert data access

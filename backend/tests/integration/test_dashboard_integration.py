@@ -622,6 +622,5 @@ class TestDashboardErrorScenarios:
         for user_id, _ in users:
             connection_manager.disconnect(user_id)
 
-
 if __name__ == "__main__":
     pytest.main([__file__]) 
