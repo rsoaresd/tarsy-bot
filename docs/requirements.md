@@ -9,6 +9,7 @@ Tarsy-bot is an intelligent Site Reliability Engineering system that automates i
 This requirements document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant changes to system requirements are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
 
 ### Recent Changes
+- **EP-0006 (IMPLEMENTED)**: Configuration-Based Agents - Added YAML-based agent configuration system allowing deployment of new agents without code changes, supporting both traditional hardcoded agents and configuration-driven agents simultaneously
 - **EP-0005 (IMPLEMENTED)**: Flexible Alert Data Structure Support - Transformed rigid Kubernetes-specific alert model into flexible, agent-agnostic system supporting arbitrary JSON payloads with minimal validation
 - **EP-0004 (IMPLEMENTED)**: Dashboard UI for Alert History - Added standalone React dashboard for SRE operational monitoring with real-time WebSocket integration and historical alert analysis
 - **EP-0003 (IMPLEMENTED)**: Alert Processing History Service - Added comprehensive audit trail capture for all alert processing workflows with database persistence and API endpoints
@@ -69,7 +70,9 @@ For proposed changes or new requirements, see the [Enhancement Proposals directo
 
 **REQ-1.2.3: Specialized Agent Architecture**
 - The system shall implement specialized agents inheriting from a common base agent class
-- Each agent shall specify its required MCP server subset through abstract method implementation
+- The system shall support both traditional hardcoded agents and YAML configuration-based agents simultaneously
+- The system shall load agent configurations from filesystem-based YAML file without requiring code changes
+- Each agent shall specify its required MCP server subset through abstract method implementation or configuration
 - Agents shall process flexible alert data structures without preprocessing
 - Agents shall receive complete JSON payloads for intelligent LLM interpretation
 - Agents shall support diverse monitoring sources beyond Kubernetes through flexible data handling
@@ -384,9 +387,11 @@ For proposed changes or new requirements, see the [Enhancement Proposals directo
 ### 7.1 Agent Architecture Extensibility
 
 **REQ-7.1.1: Agent Plugin Architecture**
-- The system shall support adding new specialized agent classes through code deployment
+- The system shall support adding new specialized agent classes through code deployment (traditional approach)
+- The system shall support adding new agents through YAML configuration files without code changes (configuration-based approach)
 - The system shall provide a base agent class with common functionality for extension
 - The system shall support agent-specific customizations while maintaining common interfaces
+- The system shall maintain full backward compatibility between traditional and configuration-based agents
 
 **REQ-7.1.2: MCP Server Extensibility**
 - The system shall support adding new MCP servers to the global registry through configuration

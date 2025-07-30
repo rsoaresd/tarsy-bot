@@ -1,7 +1,8 @@
 # EP-0006: Configuration-Based Agents - Requirements Document
 
-**Status:** Approved  
-**Created:** 2025-07-29  
+**Status:** Implemented  
+**Created:** 2025-07-29
+**Implemented:** 2025-07-29
 
 ---
 

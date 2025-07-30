@@ -17,6 +17,14 @@ Inspired by the spirit of sci-fi AI, TARSy is your reliable SRE operations compa
 
 ## Key Features
 
+### 🛠️ Configuration-Based Agents (EP-0006)
+Deploy new agents without code changes:
+- **YAML Configuration**: Define agents and MCP servers in simple YAML files
+- **No Code Changes**: Add new agent types through configuration alone
+- **Full Compatibility**: Traditional hardcoded agents and configured agents work simultaneously
+- **Automatic Registry**: Agent configurations auto-populate alert type mappings
+- **Mixed MCP Access**: Configured agents can use both built-in and configured MCP servers
+
 ### 🔧 Flexible Alert Data Structure (EP-0005)
 Support for diverse monitoring sources beyond Kubernetes:
 - **Agent-Agnostic Design**: Accept arbitrary JSON payloads from any monitoring system
@@ -111,15 +119,15 @@ Tarsy implements a modern, multi-layer architecture:
 tarsy-bot/
 ├── backend/                # FastAPI backend with multi-layer agent architecture
 │   ├── tarsy/
-│   │   ├── agents/         # Specialized agent classes (KubernetesAgent, BaseAgent)
+│   │   ├── agents/         # Specialized agent classes (KubernetesAgent, ConfigurableAgent, BaseAgent)
 │   │   ├── controllers/    # API controllers and REST endpoints
 │   │   ├── database/       # Database initialization and schema management
 │   │   ├── hooks/          # Event hooks for automatic interaction capture
-│   │   ├── models/         # Data models (Alert, History, API schemas)
+│   │   ├── models/         # Data models (Alert, History, API schemas, Agent configs)
 │   │   ├── repositories/   # Database access layer with SQLModel
 │   │   ├── services/       # Business logic (AlertService, HistoryService, AgentRegistry)
 │   │   ├── integrations/   # External integrations (LLM providers, MCP servers)
-│   │   ├── config/         # Configuration management
+│   │   ├── config/         # Configuration management (Settings, Agent config loading)
 │   │   └── utils/          # Utility functions and logging
 │   ├── tests/              # Comprehensive test suite (unit, integration, e2e)
 │   ├── pyproject.toml      # Python dependencies and project configuration
@@ -269,8 +277,9 @@ The LLM-driven approach with flexible data structures means diverse alert types 
 
 ### Adding New Components
 
-- **Alert Types**: Add to `supported_alerts` in `config/settings.py` and create corresponding runbooks
-- **MCP Servers**: Update `mcp_servers` configuration in `settings.py` 
+- **Alert Types**: Add to `supported_alerts` in `config/settings.py` and create corresponding runbooks, or use configuration-based agents via `config/agents.yaml`
+- **MCP Servers**: Update `mcp_servers` configuration in `settings.py` or define in `config/agents.yaml`
+- **Agents**: Create traditional hardcoded agent classes extending BaseAgent, or define configuration-based agents in `config/agents.yaml`
 - **LLM Providers**: See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions
 
 ### Running Tests

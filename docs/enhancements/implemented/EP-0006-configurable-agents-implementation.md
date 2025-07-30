@@ -1,9 +1,10 @@
 # EP-0006: Configuration-Based Agents - Implementation Guidelines
 
-**Status:** Approved  
-**Created:** 2025-07-29  
-**Requirements:** `docs/enhancements/approved/EP-0006-configurable-agents-requirements.md`
-**Design:** `docs/enhancements/approved/EP-0006-configurable-agents-design.md`
+**Status:** Implemented  
+**Created:** 2025-07-29
+**Implemented:** 2025-07-29
+**Requirements:** `docs/enhancements/implemented/EP-0006-configurable-agents-requirements.md`
+**Design:** `docs/enhancements/implemented/EP-0006-configurable-agents-design.md`
 
 This document provides implementation guidelines for EP-0006: Configuration-Based Agents. This enhancement allows defining agents and MCP servers through YAML configuration files while maintaining full backward compatibility with existing hardcoded agents.
 

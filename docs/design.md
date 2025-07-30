@@ -20,6 +20,7 @@
 This design document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant architectural changes are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
 
 ### Recent Changes
+- **EP-0006 (IMPLEMENTED)**: Configuration-Based Agents - Added YAML-based agent configuration system allowing deployment of new agents without code changes, supporting both traditional hardcoded agents and configuration-driven agents simultaneously
 - **EP-0005 (IMPLEMENTED)**: Flexible Alert Data Structure Support - Transformed rigid Kubernetes-specific alert model into flexible, agent-agnostic system supporting arbitrary JSON payloads with minimal validation, enhanced database with JSON indexing, and updated UI for dynamic alert data rendering
 - **EP-0004 (IMPLEMENTED)**: Dashboard UI for Alert History - Added standalone React dashboard for SRE operational monitoring with real-time WebSocket integration, historical analysis, and multiplexed WebSocket architecture
 - **EP-0003 (IMPLEMENTED)**: Alert Processing History Service - Added comprehensive audit trail capture and database persistence with REST API endpoints for historical data access
@@ -39,14 +40,15 @@ Tarsy is a **distributed, event-driven system** designed to automate incident re
 
 1. **Multi-Layer Agent Architecture**: Orchestrator layer delegates processing to specialized agents based on alert type mappings
 2. **Agent Specialization**: Domain-specific agents with focused MCP server subsets and specialized instructions
-3. **Flexible Alert Data Structure**: Agent-agnostic system supporting arbitrary JSON payloads from diverse monitoring sources
-4. **LLM-First Processing**: Agents receive complete JSON payloads for intelligent interpretation without rigid field extraction
-5. **Iterative Intelligence**: Multi-step LLM-driven analysis that mimics human troubleshooting methodology
-6. **Dynamic Tool Selection**: Agents intelligently choose appropriate MCP tools from their assigned server subsets
-7. **Extensible Architecture**: Inheritance-based agent design for easy addition of new specialized agents
-8. **Real-time Communication**: WebSocket-based progress updates and status tracking with agent identification
-9. **Resilient Design**: Graceful degradation and comprehensive error handling across agent layers
-10. **Comprehensive Audit Trail**: Persistent history capture of all alert processing workflows with chronological timeline reconstruction
+3. **Configuration-Driven Extensibility**: Support for both hardcoded agents and YAML-configured agents without code changes
+4. **Flexible Alert Data Structure**: Agent-agnostic system supporting arbitrary JSON payloads from diverse monitoring sources
+5. **LLM-First Processing**: Agents receive complete JSON payloads for intelligent interpretation without rigid field extraction
+6. **Iterative Intelligence**: Multi-step LLM-driven analysis that mimics human troubleshooting methodology
+7. **Dynamic Tool Selection**: Agents intelligently choose appropriate MCP tools from their assigned server subsets
+8. **Extensible Architecture**: Inheritance-based agent design for easy addition of new specialized agents
+9. **Real-time Communication**: WebSocket-based progress updates and status tracking with agent identification
+10. **Resilient Design**: Graceful degradation and comprehensive error handling across agent layers
+11. **Comprehensive Audit Trail**: Persistent history capture of all alert processing workflows with chronological timeline reconstruction
 
 ### Technology Stack
 
@@ -294,18 +296,73 @@ class AgentRegistry:
 ```
 
 **Core Features:**
-- **Static Mappings**: Pre-defined alert type to agent class name mappings with default configurations
+- **Centralized Configuration**: Imports built-in mappings from `builtin_config.py` single source of truth
+- **Configuration Extension**: Supports both built-in and YAML-configured agent mappings simultaneously
 - **Fast Lookup**: O(1) dictionary-based agent resolution
-- **Default Configuration**: Built-in default mappings that can be overridden by configuration
+- **Conflict Detection**: Validates that alert types are handled by only one agent
 - **Error Handling**: Clear messages when no agent is available for alert type
 
-**Current Mappings:**
+**Current Mappings (from builtin_config.py):**
 ```
 Alert Type Mappings:
+"kubernetes" -> "KubernetesAgent"
 "NamespaceTerminating" -> "KubernetesAgent"
-# Future mappings:
-# "ArgoCD Sync Failed" -> "ArgoCDAgent"
+# Configuration-based agents create mappings like:
+# "SecurityBreach" -> "ConfigurableAgent:security-agent"
 ```
+
+### 3a. Centralized Built-in Configuration (EP-0006)
+
+Central configuration management for all built-in system components:
+
+```
+Location: backend/tarsy/config/builtin_config.py
+```
+
+**Core Features:**
+- **Single Source of Truth**: Centralized definitions for all built-in agents and MCP servers
+- **Import Path Management**: Maps agent class names to their full import paths for dynamic loading
+- **Alert Type Mappings**: Defines which built-in agents handle which alert types
+- **MCP Server Definitions**: Complete built-in MCP server configurations with connection parameters
+- **Conflict Prevention**: Provides authoritative lists for configuration validation
+
+**Built-in Component Definitions:**
+```python
+# Agent class imports for dynamic loading
+BUILTIN_AGENT_CLASS_IMPORTS = {
+    "KubernetesAgent": "tarsy.agents.kubernetes_agent.KubernetesAgent"
+}
+
+# Alert type to agent mappings  
+BUILTIN_AGENT_MAPPINGS = {
+    "kubernetes": "KubernetesAgent",
+    "NamespaceTerminating": "KubernetesAgent"
+}
+
+# Complete MCP server configurations
+BUILTIN_MCP_SERVERS = {
+    "kubernetes-server": {
+        "server_id": "kubernetes-server",
+        "server_type": "kubernetes", 
+        "enabled": True,
+        "connection_params": {...},
+        "instructions": "Kubernetes-specific LLM guidance..."
+    }
+}
+```
+
+**Module Integration:**
+- **AgentRegistry**: Imports `BUILTIN_AGENT_MAPPINGS` for alert type routing
+- **AgentFactory**: Imports `BUILTIN_AGENT_CLASS_IMPORTS` for dynamic class loading
+- **MCPServerRegistry**: Imports `BUILTIN_MCP_SERVERS` for server initialization
+- **ConfigurationLoader**: Imports all definitions for conflict detection with configured components
+
+**Adding New Built-in Components:**
+1. Edit only `builtin_config.py` - no changes needed elsewhere
+2. Add agent class import path to `BUILTIN_AGENT_CLASS_IMPORTS`
+3. Add alert type mapping to `BUILTIN_AGENT_MAPPINGS`
+4. Add MCP server configuration to `BUILTIN_MCP_SERVERS`
+5. All registries automatically inherit the new definitions
 
 ### 4. Agent Factory
 
@@ -459,11 +516,12 @@ class MCPServerRegistry:
 ```
 
 **Core Features:**
-- **Single Source of Truth**: Centralized MCP server configuration management
+- **Centralized Configuration**: Imports built-in server definitions from `builtin_config.py`
+- **Configuration Extension**: Merges built-in servers with YAML-configured servers seamlessly
 - **Default Configurations**: Built-in default server configurations with override capability
 - **Embedded Instructions**: Server-specific LLM instructions stored with configurations
-- **Agent Assignment**: Agents request specific server subsets from registry
-- **Static Configuration**: Immutable registry with simple dictionary-based lookup
+- **Agent Assignment**: Agents request specific server subsets from unified registry
+- **Conflict Detection**: Validates that configured servers don't conflict with built-in server IDs
 
 **Server Configuration Pattern:**
 ```
@@ -1238,16 +1296,22 @@ HISTORY_RETENTION_DAYS=90
 
 **New Agent Integration Pattern:**
 ```
-New Specialized Agent:
+Traditional Hardcoded Agent:
 1. Create agent class inheriting from BaseAgent
 2. Implement mcp_servers() method defining required server subset
 3. Implement custom_instructions() method for agent-specific guidance
 4. Add agent class to AgentFactory static registry
 5. Update agent registry configuration with alert type mapping
 6. Add required MCP servers to MCP Server Registry
+
+Configuration-Based Agent (EP-0006):
+1. Create YAML configuration entry in ./config/agents.yaml
+2. Define alert_types, mcp_servers, and custom_instructions in configuration
+3. System automatically creates ConfigurableAgent instances
+4. No code changes required - purely configuration-driven
 ```
 
-**Example: ArgoCD Agent**
+**Example: Traditional ArgoCD Agent**
 ```python
 class ArgoCDAgent(BaseAgent):
     def mcp_servers(self) -> List[str]:
@@ -1263,16 +1327,37 @@ class ArgoCDAgent(BaseAgent):
         """
 ```
 
+**Example: Configuration-Based Security Agent**
+```yaml
+# config/agents.yaml
+agents:
+  security-agent:
+    alert_types: ["SecurityBreach", "UnauthorizedAccess"]
+    mcp_servers: ["security-server", "audit-server"]
+    custom_instructions: |
+      For security incidents:
+      - Prioritize containment over investigation
+      - Check access logs and authentication patterns
+      - Identify affected systems and data exposure
+      - Follow incident response procedures
+```
+
 ### 2. MCP Server Extensions (Enhanced)
 
 **Agent-Aware Server Integration Pattern:**
 ```
 New MCP Server Integration:
-1. Add server configuration to MCP Server Registry
+Built-in MCP Server:
+1. Add server configuration to BUILTIN_MCP_SERVERS in builtin_config.py
 2. Include server-specific LLM instructions in configuration
-3. Assign server to appropriate agent types
-4. Update agent mcp_servers() methods as needed
-5. Test server integration with assigned agents
+3. Update agent mcp_servers() methods to reference the new server
+4. All registries automatically inherit the new server definition
+
+Configuration-Based MCP Server:
+1. Add server configuration to config/agents.yaml
+2. Include server-specific LLM instructions in YAML configuration  
+3. Assign server to appropriate agent types in the same file
+4. System automatically merges with built-in servers
 ```
 
 ### 3. Alert Type Extensions (Simplified)
@@ -1280,17 +1365,23 @@ New MCP Server Integration:
 **Configuration-Based Alert Processing:**
 ```
 Adding New Alert Types:
-1. Add MCP servers required for alert type to registry (if needed)
-2. Create or identify appropriate specialized agent class
-3. Add alert type mapping to agent registry configuration
-4. No code changes required - purely configuration-driven
+Built-in Agent Alert Types:
+1. Add alert type mapping to BUILTIN_AGENT_MAPPINGS in builtin_config.py
+2. Ensure corresponding agent class exists in BUILTIN_AGENT_CLASS_IMPORTS
+3. All registries automatically inherit the new mapping
+
+Configuration-Based Agent Alert Types:
+1. Add alert type to agent's alert_types field in config/agents.yaml
+2. System automatically creates alert type mappings to ConfigurableAgent
+3. No code changes required - purely configuration-driven
 ```
 
 **Dynamic Alert Processing Benefits:**
+- Centralized built-in definitions in single source of truth file
 - Specialized agents adapt to new alert types automatically
 - Agent-specific tool subsets optimize LLM decision making
 - Domain expertise through agent specialization
-- Configuration-driven extensibility
+- Configuration-driven extensibility for both built-in and custom components
 
 ---
 
