@@ -267,7 +267,7 @@ class TestAlertProcessing:
         )
         
         # Mock no agent available for type
-        dependencies['registry'].get_agent_for_alert_type.return_value = None
+        dependencies['registry'].get_agent_for_alert_type.side_effect = ValueError("No agent for alert type 'UnsupportedAlertType'. Available: ['kubernetes']")
         dependencies['registry'].get_supported_alert_types.return_value = ["kubernetes"]
         dependencies['llm_manager'].is_available.return_value = True
         
@@ -275,7 +275,7 @@ class TestAlertProcessing:
         alert_dict = alert_to_api_format(unsupported_alert)
         result = await service.process_alert(alert_dict)
         
-        assert "No specialized agent available for alert type: 'UnsupportedAlertType'" in result
+        assert "No agent for alert type 'UnsupportedAlertType'" in result
 
     @pytest.mark.asyncio 
     async def test_process_alert_agent_creation_failure(self, initialized_service, sample_alert):

@@ -169,30 +169,45 @@ class TestServerConfigRetrieval:
         assert docker_config.enabled is True
     
     def test_get_server_config_non_existing_server(self, sample_registry):
-        """Test getting configuration for non-existing servers returns None."""
-        assert sample_registry.get_server_config("non-existent-server") is None
-        assert sample_registry.get_server_config("unknown-server") is None
-        assert sample_registry.get_server_config("missing-server") is None
+        """Test getting configuration for non-existing servers raises ValueError."""
+        with pytest.raises(ValueError, match="MCP server 'non-existent-server' not found"):
+            sample_registry.get_server_config("non-existent-server")
+            
+        with pytest.raises(ValueError, match="MCP server 'unknown-server' not found"):
+            sample_registry.get_server_config("unknown-server")
+            
+        with pytest.raises(ValueError, match="MCP server 'missing-server' not found"):
+            sample_registry.get_server_config("missing-server")
     
     def test_get_server_config_case_sensitive(self, sample_registry):
         """Test that server config lookup is case sensitive."""
         # Exact case should work
         assert sample_registry.get_server_config("kubernetes-server") is not None
         
-        # Different case should return None
-        assert sample_registry.get_server_config("Kubernetes-Server") is None
-        assert sample_registry.get_server_config("KUBERNETES-SERVER") is None
-        assert sample_registry.get_server_config("kubernetes_server") is None
+        # Different case should raise ValueError
+        with pytest.raises(ValueError, match="MCP server 'Kubernetes-Server' not found"):
+            sample_registry.get_server_config("Kubernetes-Server")
+            
+        with pytest.raises(ValueError, match="MCP server 'KUBERNETES-SERVER' not found"):
+            sample_registry.get_server_config("KUBERNETES-SERVER")
+            
+        with pytest.raises(ValueError, match="MCP server 'kubernetes_server' not found"):
+            sample_registry.get_server_config("kubernetes_server")
     
     def test_get_server_config_with_special_characters(self, sample_registry):
         """Test server config lookup with special characters."""
         # Exact match should work
         assert sample_registry.get_server_config("kubernetes-server") is not None
         
-        # Different special characters should not match
-        assert sample_registry.get_server_config("kubernetes_server") is None
-        assert sample_registry.get_server_config("kubernetes.server") is None
-        assert sample_registry.get_server_config("kubernetes server") is None
+        # Different special characters should raise ValueError
+        with pytest.raises(ValueError, match="MCP server 'kubernetes_server' not found"):
+            sample_registry.get_server_config("kubernetes_server")
+            
+        with pytest.raises(ValueError, match="MCP server 'kubernetes.server' not found"):
+            sample_registry.get_server_config("kubernetes.server")
+            
+        with pytest.raises(ValueError, match="MCP server 'kubernetes server' not found"):
+            sample_registry.get_server_config("kubernetes server")
     
     def test_get_server_configs_multiple_existing_servers(self, sample_registry):
         """Test getting configurations for multiple existing servers."""
@@ -459,11 +474,17 @@ class TestEdgeCases:
         """Test get_server_config with non-string inputs."""
         registry = MCPServerRegistry()
         
-        # Should handle non-string inputs gracefully (dict.get behavior)
-        assert registry.get_server_config(123) is None
-        assert registry.get_server_config(None) is None
-        assert registry.get_server_config(True) is None
-        assert registry.get_server_config(False) is None
+        # Should handle non-string inputs by raising ValueError
+        with pytest.raises(ValueError, match="MCP server '123' not found"):
+            registry.get_server_config(123)
+            
+        with pytest.raises(ValueError, match="MCP server 'None' not found"):
+            registry.get_server_config(None)
+            
+        with pytest.raises(ValueError, match="MCP server 'True' not found"):
+            registry.get_server_config(True)
+        with pytest.raises(ValueError, match="MCP server 'False' not found"):
+            registry.get_server_config(False)
     
     def test_get_server_configs_with_non_string_input(self):
         """Test get_server_configs with non-string inputs in list."""
@@ -513,7 +534,7 @@ class TestRegistryLogging:
         assert len(registry_logs) > 0
         
         registry_log = registry_logs[0]
-        assert "2 servers" in registry_log
+        assert "2 total servers" in registry_log
     
     def test_initialization_logging_with_empty_config(self, caplog):
         """Test logging with empty configuration (falls back to defaults)."""
@@ -526,7 +547,7 @@ class TestRegistryLogging:
         assert len(registry_logs) > 0
         
         registry_log = registry_logs[0]
-        assert str(len(registry.static_servers)) + " servers" in registry_log
+        assert str(len(registry.static_servers)) + " total servers" in registry_log
 
 
 @pytest.mark.unit

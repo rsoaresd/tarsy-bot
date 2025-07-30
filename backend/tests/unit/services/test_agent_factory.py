@@ -168,15 +168,15 @@ class TestAgentCreation:
     
     def test_create_unknown_agent_failure(self, agent_factory):
         """Test failure when trying to create unknown agent."""
-        with pytest.raises(ValueError, match="Unknown agent class: UnknownAgent"):
+        with pytest.raises(ValueError, match="Unknown agent 'UnknownAgent'"):
             agent_factory.create_agent("UnknownAgent")
     
     def test_create_agent_case_sensitive(self, agent_factory):
         """Test that agent creation is case sensitive."""
-        with pytest.raises(ValueError, match="Unknown agent class: kubernetesagent"):
+        with pytest.raises(ValueError, match="Unknown agent 'kubernetesagent'"):
             agent_factory.create_agent("kubernetesagent")
         
-        with pytest.raises(ValueError, match="Unknown agent class: KUBERNETESAGENT"):
+        with pytest.raises(ValueError, match="Unknown agent 'KUBERNETESAGENT'"):
             agent_factory.create_agent("KUBERNETESAGENT")
     
     def test_create_agent_with_initialization_error(self, mock_dependencies):
@@ -429,7 +429,7 @@ class TestAgentFactoryLogging:
         
         # Should log agent creation
         log_messages = [record.message for record in caplog.records]
-        creation_logs = [msg for msg in log_messages if "Created agent instance" in msg]
+        creation_logs = [msg for msg in log_messages if "Created traditional agent instance" in msg]
         assert len(creation_logs) > 0
         
         creation_log = creation_logs[0]
@@ -457,7 +457,7 @@ class TestEdgeCases:
             mcp_registry=mock_dependencies['mcp_registry']
         )
         
-        with pytest.raises(ValueError, match="Unknown agent class: "):
+        with pytest.raises(ValueError, match="Unknown agent ''"):
             factory.create_agent("")
     
     def test_none_agent_name(self, mock_dependencies):
@@ -468,7 +468,7 @@ class TestEdgeCases:
             mcp_registry=mock_dependencies['mcp_registry']
         )
         
-        with pytest.raises((ValueError, TypeError)):
+        with pytest.raises((ValueError, TypeError, AttributeError)):
             factory.create_agent(None)
     
     def test_whitespace_agent_name(self, mock_dependencies):
@@ -479,7 +479,7 @@ class TestEdgeCases:
             mcp_registry=mock_dependencies['mcp_registry']
         )
         
-        with pytest.raises(ValueError, match="Unknown agent class:"):
+        with pytest.raises(ValueError, match="Unknown agent '   '"):
             factory.create_agent("   ")
     
     @patch('tarsy.agents.kubernetes_agent.KubernetesAgent')

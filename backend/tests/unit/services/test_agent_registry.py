@@ -83,7 +83,7 @@ class TestAgentRegistryInitialization:
 
 @pytest.mark.unit
 class TestAgentLookup:
-    """Test agent lookup functionality."""
+    """Test core agent lookup functionality."""
     
     @pytest.fixture
     def sample_registry(self):
@@ -103,35 +103,52 @@ class TestAgentLookup:
         assert sample_registry.get_agent_for_alert_type("DiskFull") == "SystemAgent"
     
     def test_get_agent_for_unknown_alert_type(self, sample_registry):
-        """Test getting agent for unknown alert types returns None."""
-        assert sample_registry.get_agent_for_alert_type("UnknownAlert") is None
-        assert sample_registry.get_agent_for_alert_type("NonExistentAlert") is None
-        assert sample_registry.get_agent_for_alert_type("RandomType") is None
+        """Test getting agent for unknown alert types raises ValueError."""
+        with pytest.raises(ValueError, match="No agent for alert type 'UnknownAlert'"):
+            sample_registry.get_agent_for_alert_type("UnknownAlert")
+            
+        with pytest.raises(ValueError, match="No agent for alert type 'NonExistentAlert'"):
+            sample_registry.get_agent_for_alert_type("NonExistentAlert")
+            
+        with pytest.raises(ValueError, match="No agent for alert type 'RandomType'"):
+            sample_registry.get_agent_for_alert_type("RandomType")
     
     def test_get_agent_case_sensitive(self, sample_registry):
         """Test that agent lookup is case sensitive."""
         # Exact case should work
         assert sample_registry.get_agent_for_alert_type("NamespaceTerminating") == "KubernetesAgent"
         
-        # Different case should return None
-        assert sample_registry.get_agent_for_alert_type("namespaceterminating") is None
-        assert sample_registry.get_agent_for_alert_type("NAMESPACETERMINATING") is None
-        assert sample_registry.get_agent_for_alert_type("namespaceTerminating") is None
+        # Different case should raise ValueError
+        with pytest.raises(ValueError, match="No agent for alert type 'namespaceterminating'"):
+            sample_registry.get_agent_for_alert_type("namespaceterminating")
+            
+        with pytest.raises(ValueError, match="No agent for alert type 'NAMESPACETERMINATING'"):
+            sample_registry.get_agent_for_alert_type("NAMESPACETERMINATING")
+            
+        with pytest.raises(ValueError, match="No agent for alert type 'namespaceTerminating'"):
+            sample_registry.get_agent_for_alert_type("namespaceTerminating")
     
     def test_get_agent_with_whitespace_handling(self, sample_registry):
         """Test agent lookup with whitespace."""
         # Whitespace should not match
-        assert sample_registry.get_agent_for_alert_type(" NamespaceTerminating") is None
-        assert sample_registry.get_agent_for_alert_type("NamespaceTerminating ") is None
-        assert sample_registry.get_agent_for_alert_type(" NamespaceTerminating ") is None
+        with pytest.raises(ValueError, match="No agent for alert type ' NamespaceTerminating'"):
+            sample_registry.get_agent_for_alert_type(" NamespaceTerminating")
+            
+        with pytest.raises(ValueError, match="No agent for alert type 'NamespaceTerminating '"):
+            sample_registry.get_agent_for_alert_type("NamespaceTerminating ")
+            
+        with pytest.raises(ValueError, match="No agent for alert type ' NamespaceTerminating '"):
+            sample_registry.get_agent_for_alert_type(" NamespaceTerminating ")
     
     def test_get_agent_with_empty_string(self, sample_registry):
         """Test agent lookup with empty string."""
-        assert sample_registry.get_agent_for_alert_type("") is None
+        with pytest.raises(ValueError, match="No agent for alert type ''"):
+            sample_registry.get_agent_for_alert_type("")
     
     def test_get_agent_with_none(self, sample_registry):
         """Test agent lookup with None input."""
-        assert sample_registry.get_agent_for_alert_type(None) is None
+        with pytest.raises(ValueError, match="No agent for alert type 'None'"):
+            sample_registry.get_agent_for_alert_type(None)
     
     def test_multiple_alert_types_same_agent(self, sample_registry):
         """Test multiple alert types mapping to same agent."""
@@ -322,10 +339,15 @@ class TestEdgeCases:
         """Test get_agent_for_alert_type with non-string inputs."""
         registry = AgentRegistry()
         
-        # Hashable non-string inputs should return None
-        assert registry.get_agent_for_alert_type(123) is None
-        assert registry.get_agent_for_alert_type(True) is None
-        assert registry.get_agent_for_alert_type(False) is None
+        # Hashable non-string inputs should raise ValueError
+        with pytest.raises(ValueError, match="No agent for alert type '123'"):
+            registry.get_agent_for_alert_type(123)
+            
+        with pytest.raises(ValueError, match="No agent for alert type 'True'"):
+            registry.get_agent_for_alert_type(True)
+            
+        with pytest.raises(ValueError, match="No agent for alert type 'False'"):
+            registry.get_agent_for_alert_type(False)
         
         # Unhashable inputs should raise TypeError (implementation behavior)
         with pytest.raises(TypeError):
@@ -367,7 +389,7 @@ class TestRegistryLogging:
         assert len(registry_logs) > 0
         
         registry_log = registry_logs[0]
-        assert "2 mappings" in registry_log
+        assert "2 total mappings" in registry_log
     
     def test_initialization_logging_with_empty_config(self, caplog):
         """Test logging with empty configuration (falls back to defaults)."""
@@ -380,4 +402,4 @@ class TestRegistryLogging:
         assert len(registry_logs) > 0
         
         registry_log = registry_logs[0]
-        assert str(len(registry.static_mappings)) + " mappings" in registry_log 
+        assert str(len(registry.static_mappings)) + " total mappings" in registry_log 

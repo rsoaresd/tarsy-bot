@@ -101,7 +101,7 @@ class TestMCPClientServerInitialization:
         """Test initializing with single enabled server."""
         # Setup mocks
         self.mock_registry.get_all_server_ids.return_value = ["enabled-server"]
-        self.mock_registry.get_server_config.return_value = self.enabled_server_config
+        self.mock_registry.get_server_config_safe.return_value = self.enabled_server_config
         
         mock_read_stream = Mock()
         mock_write_stream = Mock()
@@ -131,7 +131,7 @@ class TestMCPClientServerInitialization:
     async def test_initialize_skips_disabled_servers(self, mock_server_params, mock_stdio_client):
         """Test initialization skips disabled servers."""
         self.mock_registry.get_all_server_ids.return_value = ["disabled-server"]
-        self.mock_registry.get_server_config.return_value = self.disabled_server_config
+        self.mock_registry.get_server_config_safe.return_value = self.disabled_server_config
         
         await self.client.initialize()
         
@@ -145,7 +145,7 @@ class TestMCPClientServerInitialization:
     async def test_initialize_skips_none_configs(self, mock_server_params, mock_stdio_client):
         """Test initialization skips servers with None config."""
         self.mock_registry.get_all_server_ids.return_value = ["missing-server"]
-        self.mock_registry.get_server_config.return_value = None
+        self.mock_registry.get_server_config_safe.return_value = None
         
         await self.client.initialize()
         
@@ -549,19 +549,9 @@ class TestMCPClientCallTool:
         
         assert "MCP server not found: nonexistent-server" in str(exc_info.value)
         
-        # Hook context should not be completed with success
-        mock_ctx.complete_success.assert_not_called()
-    
-    @patch('tarsy.integrations.mcp.client.HookContext')
-    async def test_call_tool_session_error(self, mock_hook_context):
-        """Test call_tool handles session errors properly."""
-        mock_ctx = AsyncMock()
-        mock_ctx.get_request_id = Mock(return_value="req-error")
-        mock_hook_context.return_value.__aenter__.return_value = mock_ctx
-        
-        # Make session raise an exception
+        # Test tool execution failure
         self.mock_session.call_tool.side_effect = Exception("Tool execution failed")
-        
+        mock_ctx.get_request_id = Mock(return_value="req-error")
         with patch.object(self.client, '_log_mcp_error') as mock_log_error:
             with pytest.raises(Exception) as exc_info:
                 await self.client.call_tool("test-server", "test-tool", self.test_params, "test-session-123")
@@ -849,7 +839,7 @@ class TestMCPClientIntegrationScenarios:
             connection_params={"command": "test-cmd"}
         )
         self.mock_registry.get_all_server_ids.return_value = ["workflow-server"]
-        self.mock_registry.get_server_config.return_value = server_config
+        self.mock_registry.get_server_config_safe.return_value = server_config
         
         # Mock MCP SDK components
         with patch('tarsy.integrations.mcp.client.stdio_client') as mock_stdio, \

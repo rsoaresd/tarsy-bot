@@ -54,12 +54,10 @@ class TestAgentRegistryIntegration:
 
     def test_agent_registry_unknown_alert_type(self):
         """Test agent registry behavior with unknown alert types."""
-        # Act
+        # Act & Assert
         registry = AgentRegistry()
-        agent_class = registry.get_agent_for_alert_type("Unknown Alert Type")
-        
-        # Assert
-        assert agent_class is None
+        with pytest.raises(ValueError, match="No agent for alert type 'Unknown Alert Type'"):
+            registry.get_agent_for_alert_type("Unknown Alert Type")
 
 
 @pytest.mark.asyncio
@@ -127,7 +125,7 @@ class TestAgentFactoryIntegration:
         )
         
         # Act & Assert
-        with pytest.raises(ValueError, match="Unknown agent class"):
+        with pytest.raises(ValueError, match="Unknown agent 'UnknownAgent'"):
             factory.create_agent("UnknownAgent")
 
 

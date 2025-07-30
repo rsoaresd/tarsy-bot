@@ -214,15 +214,15 @@ class TestErrorHandlingScenarios:
         # Convert Alert to dict for the new interface
         alert_dict = alert_to_api_format(unknown_alert)
         
-        # Mock agent registry to return None for unknown type
-        with patch.object(alert_service.agent_registry, 'get_agent_for_alert_type', return_value=None):
+        # Mock agent registry to raise exception for unknown type
+        with patch.object(alert_service.agent_registry, 'get_agent_for_alert_type', side_effect=ValueError("No agent for alert type 'Unknown Alert Type'. Available: ['kubernetes']")):
             # Act
             result = await alert_service.process_alert(alert_dict, progress_callback_mock)
         
         # Assert - Should return error response
         assert result is not None
         assert "error" in result.lower() or "Error" in result
-        assert "no specialized agent" in result.lower()
+        assert "no agent for alert type" in result.lower()
         assert "Unknown Alert Type" in result
         
         # Should have called progress callback with error

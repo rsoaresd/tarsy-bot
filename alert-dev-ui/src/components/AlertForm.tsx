@@ -67,7 +67,7 @@ const AlertForm: React.FC<AlertFormProps> = ({ onAlertSubmitted }) => {
   const [keyValuePairs, setKeyValuePairs] = useState<KeyValuePair[]>([
     { id: generateId(), key: 'severity', value: 'critical' },
     { id: generateId(), key: 'environment', value: 'production' },
-    { id: generateId(), key: 'cluster', value: 'https://api.j98q5-kdt7u-y6y.b1e7.p3.openshiftapps.com:443' },
+    { id: generateId(), key: 'cluster', value: 'https://api.a9x7t-qs8zr-ajf.sztj.p3.openshiftapps.com:443' },
     { id: generateId(), key: 'namespace', value: 'superman-dev' },
     { id: generateId(), key: 'message', value: 'Namespace is stuck in terminating state' }
   ]);
