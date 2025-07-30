@@ -34,6 +34,7 @@ class ConfigurableAgent(BaseAgent):
         llm_client: Optional[LLMClient],
         mcp_client: Optional[MCPClient],
         mcp_registry: Optional[MCPServerRegistry],
+        agent_name: Optional[str] = None,
         progress_callback: Optional[Callable] = None
     ):
         """
@@ -44,6 +45,7 @@ class ConfigurableAgent(BaseAgent):
             llm_client: Client for LLM interactions (validated for None)
             mcp_client: Client for MCP server interactions (validated for None)
             mcp_registry: Registry of MCP server configurations (validated for None)
+            agent_name: Optional name for the agent (used for identification)
             progress_callback: Optional callback for progress updates
             
         Raises:
@@ -58,6 +60,7 @@ class ConfigurableAgent(BaseAgent):
             
             # Store configuration for behavior customization
             self._config = config
+            self._provided_agent_name = agent_name
             
             # Generate a descriptive agent name from config
             self._agent_name = self._generate_agent_name()
@@ -83,14 +86,22 @@ class ConfigurableAgent(BaseAgent):
         Generate a descriptive name for logging and identification.
         
         Returns:
-            Descriptive agent name based on configuration
+            Descriptive agent name based on provided name or configuration
         """
-        # Use the first alert type as the primary identifier
-        if self._config.alert_types:
+        # Use provided agent name if available
+        if self._provided_agent_name:
+            return f"ConfigurableAgent({self._provided_agent_name})"
+        # Otherwise use the first alert type as the primary identifier
+        elif self._config.alert_types:
             primary_alert = self._config.alert_types[0]
             return f"ConfigurableAgent({primary_alert})"
         else:
             return "ConfigurableAgent(unknown)"
+    
+    @property
+    def agent_name(self) -> str:
+        """Get the agent name for identification."""
+        return self._provided_agent_name if self._provided_agent_name else ""
     
     def get_supported_alert_types(self) -> List[str]:
         """
@@ -224,4 +235,21 @@ class ConfigurableAgent(BaseAgent):
             return self._config.custom_instructions
         except Exception as e:
             logger.error(f"Error retrieving custom instructions for {self._agent_name}: {e}")
-            raise RuntimeError(f"Failed to retrieve custom instructions: {e}") from e 
+            raise RuntimeError(f"Failed to retrieve custom instructions: {e}") from e
+    
+    @property
+    def config(self) -> AgentConfigModel:
+        """
+        Return the agent's configuration model.
+        
+        Returns:
+            The AgentConfigModel instance containing the agent's configuration
+            
+        Raises:
+            RuntimeError: If the agent is not properly initialized
+        """
+        if not hasattr(self, '_config') or self._config is None:
+            raise RuntimeError(
+                "ConfigurableAgent is not properly initialized - configuration is missing"
+            )
+        return self._config 

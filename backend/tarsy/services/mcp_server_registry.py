@@ -52,6 +52,9 @@ class MCPServerRegistry:
         # Static servers - no runtime changes, just a dictionary
         self.static_servers: Dict[str, MCPServerConfig] = {}
         
+        # Store configured servers for access (copy to prevent external modification)
+        self.configured_servers = configured_servers.copy() if configured_servers else None
+        
         # Start with built-in server configurations (config parameter or defaults)
         server_configs = config or self._DEFAULT_SERVERS
         
@@ -106,7 +109,7 @@ class MCPServerRegistry:
         if server_config is None:
             # Fail-fast with technical error details
             available_servers = list(self.static_servers.keys())
-            error_msg = f"MCP server '{server_id}' not found. Available: {available_servers}"
+            error_msg = f"MCP server '{server_id}' not found. Available: {', '.join(available_servers)}"
             logger.error(error_msg)
             raise ValueError(error_msg)
         

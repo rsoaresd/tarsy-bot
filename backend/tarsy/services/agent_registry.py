@@ -51,6 +51,9 @@ class AgentRegistry:
         # Start with built-in mappings (config parameter or defaults)
         self.static_mappings: Dict[str, str] = config or self._DEFAULT_MAPPINGS.copy()
         
+        # Store agent configs for access (copy to prevent external modification)
+        self.agent_configs = agent_configs.copy() if agent_configs else None
+        
         # Add configured agent mappings if provided
         if agent_configs:
             configured_mappings = self._create_configured_mappings(agent_configs)
@@ -100,7 +103,7 @@ class AgentRegistry:
         if agent_name is None:
             # Fail-fast with technical error details
             available_types = list(self.static_mappings.keys())
-            error_msg = f"No agent for alert type '{alert_type}'. Available: {available_types}"
+            error_msg = f"No agent for alert type '{alert_type}'. Available: {', '.join(available_types)}"
             logger.error(error_msg)
             raise ValueError(error_msg)
         

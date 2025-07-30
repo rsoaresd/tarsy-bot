@@ -424,7 +424,7 @@ class ConfigurationLoader:
         Returns:
             Formatted error message with context and suggestions
         """
-        base_msg = f"YAML parsing failed for {self.config_file_path}"
+        base_msg = f"Invalid YAML format in {self.config_file_path}"
         
         if hasattr(error, 'problem_mark') and error.problem_mark:
             line = error.problem_mark.line + 1  # Convert to 1-based line numbers

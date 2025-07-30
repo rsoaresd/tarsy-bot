@@ -7,6 +7,7 @@ agent classes and handles creation of both traditional agents and
 configuration-based agents.
 """
 
+import importlib
 from typing import Any, Dict, Optional, Type
 
 from tarsy.agents.base_agent import BaseAgent
@@ -56,13 +57,13 @@ class AgentFactory:
         self.mcp_client = mcp_client
         self.mcp_registry = mcp_registry
         self.progress_callback = progress_callback
-        self.agent_configs = agent_configs or {}
+        self.agent_configs = agent_configs
         
         # Static registry of available agent classes - loaded from central configuration
         self.static_agent_classes: Dict[str, Type[BaseAgent]] = {}
         self._load_builtin_agent_classes()
         
-        configured_count = len(self.agent_configs)
+        configured_count = len(self.agent_configs) if self.agent_configs else 0
         logger.info(f"Initialized Agent Factory with {len(self.static_agent_classes)} built-in agent classes and {configured_count} configured agents")
     
     def _load_builtin_agent_classes(self) -> None:
@@ -70,7 +71,6 @@ class AgentFactory:
         Dynamically load built-in agent classes from central configuration.
         Uses import paths to avoid circular imports.
         """
-        import importlib
         
         for class_name, import_path in BUILTIN_AGENT_CLASS_IMPORTS.items():
             try:
@@ -118,7 +118,8 @@ class AgentFactory:
                 return self._create_configured_agent(agent_class_name)
             
             # Simple technical error message
-            all_available = list(self.static_agent_classes.keys()) + [f"ConfigurableAgent:{name}" for name in self.agent_configs.keys()]
+            configurable_agents = [f"ConfigurableAgent:{name}" for name in self.agent_configs.keys()] if self.agent_configs else []
+            all_available = list(self.static_agent_classes.keys()) + configurable_agents
             raise ValueError(f"Unknown agent '{agent_class_name}'. Available: {all_available}")
             
         except Exception as e:
@@ -176,8 +177,8 @@ class AgentFactory:
         try:
             agent_name = agent_class_name.split(":", 1)[1]
             
-            if agent_name not in self.agent_configs:
-                available_configs = list(self.agent_configs.keys())
+            if not self.agent_configs or agent_name not in self.agent_configs:
+                available_configs = list(self.agent_configs.keys()) if self.agent_configs else []
                 raise ValueError(f"Unknown configured agent '{agent_name}'. Available: {available_configs}")
             
             # Validate dependencies before creation
@@ -191,6 +192,7 @@ class AgentFactory:
                 llm_client=self.llm_client,
                 mcp_client=self.mcp_client,
                 mcp_registry=self.mcp_registry,
+                agent_name=agent_name,
                 progress_callback=self.progress_callback
             )
             
