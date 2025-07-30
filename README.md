@@ -7,13 +7,32 @@ Inspired by the spirit of sci-fi AI, TARSy is your reliable SRE operations compa
 ## Documentation
 
 - **[README.md](README.md)**: This file - project overview and quick start
-- **[setup.sh](setup.sh)**: Automated setup script (run this first!)
+- **[Makefile](Makefile)**: Development workflow automation (run this first!)
 - **[DEPLOYMENT.md](DEPLOYMENT.md)**: Advanced deployment, production setup, and development
 - **[backend/DEVELOPMENT.md](backend/DEVELOPMENT.md)**: Development setup guide and testing workflow
-- **[docs/requirements.md](docs/requirements.md)**: Application requirements and specifications
+- **[docs/requirements.md](docs/requirements.md)**: Application requirements and specifications  
 - **[docs/design.md](docs/design.md)**: System design and architecture documentation
 
-> **New Users**: Run `./setup.sh` to get started quickly! 🎯
+> **New Users**: Run `make setup` to get started quickly! 🎯
+
+## Quick Start
+
+```bash
+# 1. Initial setup (one-time only)
+make setup
+
+# 2. Start all services  
+make dev
+```
+
+**Services will be available at:**
+- 🖥️ **SRE Dashboard**: http://localhost:5173 (operational monitoring)
+- 🛠️ **Alert Dev UI**: http://localhost:3001 (alert testing)  
+- 🔧 **Backend API**: http://localhost:8000 (docs at /docs)
+
+**Stop all services:** `make stop`
+
+> **Note**: Edit `backend/.env` with your API keys before starting services. See [DEPLOYMENT.md](DEPLOYMENT.md) for details.
 
 ## Key Features
 
@@ -152,94 +171,20 @@ tarsy-bot/
 │       ├── implemented/    # Completed EPs (EP-0002 Multi-Layer Agents, EP-0003 History Service)
 │       ├── pending/        # Pending enhancement proposals
 │       └── templates/      # EP document templates
-├── setup.sh                # Automated setup script
+├── Makefile                 # Development workflow automation
 ├── DEPLOYMENT.md           # Production deployment guide
 └── docker-compose.yml      # Docker development environment
 ```
 
-## Quick Start
-
-### Automated Setup (Recommended)
-
-```bash
-./setup.sh
-```
-
-This will automatically:
-- Check prerequisites
-- Set up both backend and alert dev UI
-- Create the environment file
-- Install all dependencies
-- Provide next steps for starting the services
-
-### Manual Setup
-
-For advanced users or troubleshooting, see [DEPLOYMENT.md](DEPLOYMENT.md) for detailed manual setup instructions.
-
-## Running the Applications
-
-After setup is complete, you can run both applications:
-
-### Backend (FastAPI Server)
-```bash
-# Make sure you're in the project root directory first
-cd backend
-source .venv/bin/activate
-uvicorn tarsy.main:app --reload --port 8000
-```
-The backend will be available at: http://localhost:8000
-
-### SRE Dashboard (React App)
-```bash
-# From the project root directory
-cd dashboard
-PORT=3000 npm start
-```
-The SRE dashboard will be available at: http://localhost:3000
-
-### Alert Dev UI (React App)
-```bash
-# From the project root directory
-cd alert-dev-ui
-PORT=3001 npm start
-```
-The development interface will be available at: http://localhost:3001
-
-> **Note**: Start the backend first, then the frontend applications. Both React apps are configured to proxy API requests to the backend.
-
-### Troubleshooting
-
-**If you get "No such file or directory" for .venv/bin/activate:**
-- Make sure you're in the `backend/` directory, not the project root
-- Run `pwd` to check your current location
-
-**If you get "ModuleNotFoundError" for sqlmodel or other packages:**
-```bash
-cd backend
-source .venv/bin/activate
-uv sync  # This reinstalls all dependencies
-uvicorn tarsy.main:app --reload --port 8000
-```
-
-### Environment Configuration
-
-The setup script will create `backend/.env` from the template. You'll need to add your API keys:
-
-- **Google (Gemini)**: Get from [Google AI Studio](https://aistudio.google.com/app/apikey)
-- **OpenAI**: Get from [OpenAI Platform](https://platform.openai.com/api-keys)
-- **xAI (Grok)**: Get from [xAI Console](https://console.x.ai/)
-- **GitHub Token**: Get from [GitHub Settings](https://github.com/settings/tokens)
-
-> **Note**: You need at least one LLM API key and the GitHub token for the agent to work.
-
 ## Usage
 
-1. **Start the Backend**: The FastAPI server runs on http://localhost:8000
-2. **Start the SRE Dashboard**: The operational dashboard runs on http://localhost:3000
-3. **Start the Alert Dev UI**: The development interface runs on http://localhost:3001
-4. **Submit an Alert**: Use the alert dev UI form to simulate an alert
-5. **Monitor via Dashboard**: Watch real-time progress updates and historical analysis in the SRE dashboard
-6. **View Results**: See detailed processing timelines and comprehensive LLM analysis
+1. **Start All Services**: Run `make dev` to start backend, dashboard, and alert UI
+2. **Submit an Alert**: Use the alert dev UI at http://localhost:3001 to simulate an alert
+3. **Monitor via Dashboard**: Watch real-time progress updates and historical analysis at http://localhost:5173
+4. **View Results**: See detailed processing timelines and comprehensive LLM analysis
+5. **Stop Services**: Run `make stop` when finished
+
+> **Tip**: Use `make urls` to see all available service endpoints and `make status` to check which services are running.
 
 ## Supported Alert Types
 

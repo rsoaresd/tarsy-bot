@@ -5,12 +5,12 @@ This guide covers advanced deployment scenarios, production setup, and troublesh
 ## Documentation Overview
 
 - **[README.md](README.md)**: Project overview, features, and quick start
-- **[setup.sh](setup.sh)**: Automated setup script (recommended for first-time users)
+- **[Makefile](Makefile)**: Development workflow automation (recommended for first-time users)
 - **[DEPLOYMENT.md](DEPLOYMENT.md)**: This file - advanced deployment and development
 - **[docs/requirements.md](docs/requirements.md)**: Application requirements and specifications
 - **[docs/design.md](docs/design.md)**: System design and architecture documentation
 
-> **Quick Start**: If you're new to the project, run `./setup.sh` for automated setup.
+> **Quick Start**: If you're new to the project, run `make setup` for automated setup.
 
 ## Overview
 
@@ -34,7 +34,7 @@ All environment variables are documented in `backend/env.template`. Key variable
 
 ## Manual Development Setup
 
-> **Note**: For automated setup, use `./setup.sh` instead of these manual steps.
+> **Note**: For automated setup, use `make setup` instead of these manual steps.
 
 ### 1. Backend Setup
 
