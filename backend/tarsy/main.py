@@ -20,6 +20,7 @@ from tarsy.config.settings import get_settings
 from tarsy.controllers.history_controller import router as history_router
 from tarsy.database.init_db import get_database_info, initialize_database
 from tarsy.models.alert import Alert, AlertResponse, ProcessingStatus
+from tarsy.models.alert_processing import AlertProcessingData, AlertKey
 from tarsy.models.constants import AlertSessionStatus
 from tarsy.services.alert_service import AlertService
 from tarsy.services.websocket_manager import WebSocketManager
@@ -31,6 +32,11 @@ logger = get_module_logger(__name__)
 
 # Global state for processing status tracking
 processing_status: Dict[str, ProcessingStatus] = {}
+
+# Track currently processing alert keys to prevent duplicates
+processing_alert_keys: Dict[str, str] = {}  # alert_key -> alert_id mapping
+alert_keys_lock = asyncio.Lock()  # Protect the processing_alert_keys dict
+
 alert_service: AlertService = None
 websocket_manager: WebSocketManager = None
 alert_processing_semaphore: asyncio.Semaphore = None
@@ -316,8 +322,7 @@ async def submit_alert(request: Request):
         if alert_data.runbook and not re.match(r'^https?://', alert_data.runbook):
             logger.warning(f"Suspicious runbook URL format: {alert_data.runbook}")
         
-        # Generate unique alert ID
-        alert_id = str(uuid.uuid4())
+
         
         # Apply defaults for missing fields (inline normalization)
         normalized_data = alert_data.data.copy() if alert_data.data else {}
@@ -345,11 +350,33 @@ async def submit_alert(request: Request):
         normalized_data["alert_type"] = alert_data.alert_type
         normalized_data["runbook"] = alert_data.runbook
         
-        # Create alert structure for processing  
-        alert = {
-            "alert_type": alert_data.alert_type,
-            "alert_data": normalized_data
-        }
+        # Create alert structure for processing using Pydantic model
+        alert = AlertProcessingData(
+            alert_type=alert_data.alert_type,
+            alert_data=normalized_data
+        )
+        
+        # Generate alert key for duplicate detection
+        alert_key = AlertKey.from_alert_data(alert)
+        alert_key_str = str(alert_key)
+        
+        # Check for duplicate alerts already in progress
+        async with alert_keys_lock:
+            if alert_key_str in processing_alert_keys:
+                existing_alert_id = processing_alert_keys[alert_key_str]
+                logger.info(f"Duplicate alert detected - same as {existing_alert_id} (key: {alert_key_str})")
+                
+                return AlertResponse(
+                    alert_id=existing_alert_id,  # Return the existing alert ID
+                    status="duplicate",
+                    message=f"Identical alert is already being processed (ID: {existing_alert_id}). Monitor that alert's progress instead."
+                )
+            
+            # Generate unique alert ID (only if not duplicate)
+            alert_id = str(uuid.uuid4())
+            
+            # Register this alert key as being processed
+            processing_alert_keys[alert_key_str] = alert_id
         
         # Initialize processing status
         processing_status[alert_id] = ProcessingStatus(
@@ -470,21 +497,21 @@ async def dashboard_websocket_endpoint(websocket: WebSocket, user_id: str):
         websocket_manager.disconnect_dashboard(user_id)
 
 
-async def process_alert_background(alert_id: str, alert: Dict[str, Any]):
+async def process_alert_background(alert_id: str, alert: AlertProcessingData):
     """Background task to process an alert with comprehensive error handling and concurrency control."""
     async with alert_processing_semaphore:
         start_time = datetime.now()
         try:
             logger.info(f"Starting background processing for alert {alert_id}")
             
-            # Validate alert structure before processing
-            if not alert or not isinstance(alert, dict):
-                raise ValueError("Invalid alert structure: alert must be a non-empty dictionary")
+            # Validate alert structure before processing (using Pydantic model)
+            if not alert:
+                raise ValueError("Invalid alert structure: alert object is required")
             
-            if "alert_type" not in alert:
+            if not alert.alert_type:
                 raise ValueError("Invalid alert structure: missing required field 'alert_type'")
             
-            if "alert_data" not in alert or not isinstance(alert["alert_data"], dict):
+            if not alert.alert_data or not isinstance(alert.alert_data, dict):
                 raise ValueError("Invalid alert structure: missing or invalid 'alert_data' field")
             
             # Update status: processing started
@@ -493,8 +520,8 @@ async def process_alert_background(alert_id: str, alert: Dict[str, Any]):
             )
             
             # Log alert processing start
-            alert_type = alert.get("alert_type", "unknown")
-            logger.info(f"Processing alert {alert_id} of type '{alert_type}' with {len(alert['alert_data'])} data fields")
+            alert_type = alert.alert_type or "unknown"
+            logger.info(f"Processing alert {alert_id} of type '{alert_type}' with {len(alert.alert_data)} data fields")
             
             # Process the alert using AlertService with flexible data
             # The orchestrator sends progress as a dict with agent information
@@ -597,7 +624,7 @@ async def process_alert_background(alert_id: str, alert: Dict[str, Any]):
                 "error_type": type(e).__name__,
                 "error_message": str(e),
                 "processing_duration_seconds": duration,
-                "alert_type": alert.get("alert_type", "unknown") if alert else "unknown"
+                "alert_type": alert.alert_type if alert else "unknown"
             }
             
             await update_processing_status(
@@ -608,6 +635,17 @@ async def process_alert_background(alert_id: str, alert: Dict[str, Any]):
                 None, 
                 f"Processing failed: {error_msg} | Context: {error_context}"
             )
+        
+        finally:
+            # Clean up alert key tracking regardless of success or failure
+            if alert:
+                alert_key = AlertKey.from_alert_data(alert)
+                alert_key_str = str(alert_key)
+                
+                async with alert_keys_lock:
+                    if alert_key_str in processing_alert_keys:
+                        del processing_alert_keys[alert_key_str]
+                        logger.debug(f"Cleaned up alert key tracking for {alert_key_str}")
 
 
 async def update_processing_status(

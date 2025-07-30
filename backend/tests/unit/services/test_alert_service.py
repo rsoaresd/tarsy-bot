@@ -15,6 +15,7 @@ import pytest
 
 from tarsy.config.settings import Settings
 from tarsy.models.alert import Alert
+from tarsy.models.alert_processing import AlertProcessingData, AlertKey
 from tarsy.services.alert_service import AlertService
 from tarsy.utils.timestamp import now_us
 from tests.conftest import alert_to_api_format
@@ -250,7 +251,7 @@ class TestAlertProcessing:
         
         # Verify agent was called with correct parameters
         call_args = mock_agent.process_alert.call_args
-        assert call_args[1]['alert_data'] == alert_dict["alert_data"]
+        assert call_args[1]['alert_data'] == alert_dict.alert_data
         assert call_args[1]['runbook_content'] == "Mock runbook content"
         assert call_args[1]['session_id'] is not None
     
@@ -412,7 +413,7 @@ class TestHistorySessionManagement:
         call_args = service.history_service.create_session.call_args[1]
         
         # Verify alert data is passed correctly
-        assert call_args['alert_data'] == alert_dict["alert_data"]
+        assert call_args['alert_data'] == alert_dict.alert_data
         assert call_args['agent_type'] == "KubernetesAgent"
     
     def test_create_history_session_disabled(self, alert_service_with_history, sample_alert):
@@ -547,7 +548,7 @@ class TestResponseFormatting:
         alert_dict = alert_to_api_format(sample_alert)
         
         result = alert_service._format_success_response(
-            alert_data=alert_dict,
+            alert=alert_dict,
             agent_name="KubernetesAgent",
             analysis="Detailed analysis result",
             iterations=3,
@@ -567,7 +568,7 @@ class TestResponseFormatting:
         alert_dict = alert_to_api_format(sample_alert)
         
         result = alert_service._format_success_response(
-            alert_data=alert_dict,
+            alert=alert_dict,
             agent_name="KubernetesAgent",
             analysis="Test analysis",
             iterations=1
@@ -582,7 +583,7 @@ class TestResponseFormatting:
         alert_dict = alert_to_api_format(sample_alert)
         
         result = alert_service._format_error_response(
-            alert_data=alert_dict,
+            alert=alert_dict,
             error="Test error occurred"
         )
         
@@ -595,7 +596,7 @@ class TestResponseFormatting:
         alert_dict = alert_to_api_format(sample_alert)
         
         result = alert_service._format_error_response(
-            alert_data=alert_dict,
+            alert=alert_dict,
             error="Agent processing failed",
             agent_name="KubernetesAgent"
         )
@@ -723,7 +724,7 @@ class TestAlertServiceDuplicatePrevention:
         
         # Verify the call arguments contain alert data
         call_args = mock_dependencies['history'].create_session.call_args[1]
-        assert call_args['alert_data'] == alert_dict["alert_data"]
+        assert call_args['alert_data'] == alert_dict.alert_data
     
     def test_alert_id_generation_with_existing_id(self, alert_service_with_dependencies, sample_alert):
         """Test alert processing with existing alert data."""
@@ -736,7 +737,13 @@ class TestAlertServiceDuplicatePrevention:
         
         # Add existing_id to alert data
         alert_dict = alert_to_api_format(sample_alert)
-        alert_dict['alert_data']['existing_id'] = "existing_alert_123"
+        # Since AlertProcessingData is immutable, create new instance with modified data
+        modified_alert_data = alert_dict.alert_data.copy()
+        modified_alert_data['existing_id'] = "existing_alert_123"
+        alert_dict = AlertProcessingData(
+            alert_type=alert_dict.alert_type,
+            alert_data=modified_alert_data
+        )
         
         session_id = service._create_history_session(alert_dict, "KubernetesAgent")
         
@@ -747,51 +754,20 @@ class TestAlertServiceDuplicatePrevention:
         call_args = mock_dependencies['history'].create_session.call_args[1]
         assert call_args['alert_data']['existing_id'] == "existing_alert_123"
 
-    @pytest.mark.asyncio
-    async def test_concurrent_alert_processing_prevention(self, alert_service_with_dependencies, sample_alert):
-        """Test that concurrent processing of same alert is prevented."""
-        service, mock_dependencies = alert_service_with_dependencies
-        
-        # Setup mocks for successful processing
-        mock_dependencies['llm_manager'].is_available.return_value = True
-        mock_dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
-        mock_dependencies['runbook'].download_runbook = AsyncMock(return_value="Mock runbook")
-        
-        mock_agent = AsyncMock()
-        mock_agent.process_alert.return_value = {
-            "status": "success",
-            "agent": "KubernetesAgent",
-            "analysis": "Test analysis",
-            "iterations": 1,
-            "timestamp_us": now_us()
-        }
-        service.agent_factory.create_agent.return_value = mock_agent
-        
-        alert_dict = alert_to_api_format(sample_alert)
-        
-        # Process same alert concurrently
-        tasks = [
-            asyncio.create_task(service.process_alert(alert_dict)),
-            asyncio.create_task(service.process_alert(alert_dict))
-        ]
-        
-        results = await asyncio.gather(*tasks)
-        
-        # Both should complete (one processes, other waits for first to complete)
-        assert len(results) == 2
-        assert all("Test analysis" in result for result in results)
+
 
     def test_alert_key_generation(self, alert_service_with_dependencies, sample_alert):
         """Test alert key generation for duplicate prevention."""
         service, _ = alert_service_with_dependencies
         
         alert_dict = alert_to_api_format(sample_alert)
-        alert_key = service._generate_alert_key(alert_dict)
+        alert_key = AlertKey.from_alert_data(alert_dict)
+        alert_key_str = str(alert_key)
         
         # Key should be in format: alert_type_hash
-        assert alert_key.startswith("kubernetes_")
-        assert len(alert_key.split("_")[1]) == 12  # Hash should be 12 characters
-        assert "_" in alert_key  # Should contain underscore separator
+        assert alert_key_str.startswith("kubernetes_")
+        assert len(alert_key_str.split("_")[1]) == 12  # Hash should be 12 characters
+        assert "_" in alert_key_str  # Should contain underscore separator
 
     def test_alert_key_truncation(self, alert_service_with_dependencies):
         """Test alert key truncation for very long messages."""
@@ -810,66 +786,13 @@ class TestAlertServiceDuplicatePrevention:
         )
         
         alert_dict = alert_to_api_format(long_message_alert)
-        alert_key = service._generate_alert_key(alert_dict)
+        alert_key = AlertKey.from_alert_data(alert_dict)
+        alert_key_str = str(alert_key)
         
         # Even with very long messages, key should still be in format: alert_type_hash
         # The hash should be deterministic regardless of message length
-        assert alert_key.startswith("kubernetes_")
-        assert len(alert_key.split("_")[1]) == 12  # Hash should still be 12 characters
-        assert "_" in alert_key  # Should contain underscore separator
+        assert alert_key_str.startswith("kubernetes_")
+        assert len(alert_key_str.split("_")[1]) == 12  # Hash should still be 12 characters
+        assert "_" in alert_key_str  # Should contain underscore separator
 
-    @pytest.mark.asyncio
-    async def test_alert_lock_cleanup(self, alert_service_with_dependencies, sample_alert):
-        """Test alert lock is properly cleaned up after processing."""
-        service, mock_dependencies = alert_service_with_dependencies
-        
-        # Setup for successful processing
-        mock_dependencies['llm_manager'].is_available.return_value = True
-        mock_dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
-        mock_dependencies['runbook'].download_runbook = AsyncMock(return_value="Mock runbook")
-        
-        mock_agent = AsyncMock()
-        mock_agent.process_alert.return_value = {
-            "status": "success",
-            "agent": "KubernetesAgent", 
-            "analysis": "Test analysis",
-            "iterations": 1,
-            "timestamp_us": now_us()
-        }
-        service.agent_factory.create_agent.return_value = mock_agent
-        
-        alert_dict = alert_to_api_format(sample_alert)
-        alert_key = service._generate_alert_key(alert_dict)
-        
-        # Process alert
-        result = await service.process_alert(alert_dict)
-        
-        # Verify processing completed successfully
-        assert "Test analysis" in result
-        
-        # Verify lock exists but is not locked (available for cleanup)
-        if alert_key in service._processing_locks:
-            lock = service._processing_locks[alert_key]
-            assert not lock.locked(), "Lock should be unlocked after processing"
-
-    @pytest.mark.asyncio
-    async def test_alert_lock_not_cleaned_when_locked(self, alert_service_with_dependencies, sample_alert):
-        """Test alert lock behavior when alert is being processed."""
-        service, mock_dependencies = alert_service_with_dependencies
-        
-        alert_dict = alert_to_api_format(sample_alert)
-        alert_key = service._generate_alert_key(alert_dict)
-        
-        # Manually acquire lock to simulate processing
-        alert_lock = await service._get_alert_lock(alert_key)
-        await alert_lock.acquire()
-        
-        # Verify lock exists
-        assert alert_key in service._processing_locks
-        
-        # Release lock and clean up
-        alert_lock.release()
-        await service._cleanup_alert_lock(alert_key)
-        
-        # Now lock should be cleaned up
-        assert alert_key not in service._processing_locks 
+ 

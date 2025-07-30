@@ -42,8 +42,8 @@ class TestEdgeCases:
             }
         )
         
-        # Convert to dict for new interface
-        alert_dict = long_alert.model_dump()
+        # Convert to AlertProcessingData format
+        alert_dict = alert_to_api_format(long_alert)
         
         result = await alert_service.process_alert(alert_dict, progress_callback_mock)
         
@@ -76,7 +76,7 @@ class TestEdgeCases:
         )
         
         # Convert to dict for new interface
-        alert_dict = special_alert.model_dump()
+        alert_dict = alert_to_api_format(special_alert)
         
         result = await alert_service.process_alert(alert_dict, progress_callback_mock)
         
@@ -96,7 +96,7 @@ class TestEdgeCases:
         )
         
         # Convert to dict for new interface
-        alert_dict = minimal_alert.model_dump()
+        alert_dict = alert_to_api_format(minimal_alert)
         
         result = await alert_service.process_alert(alert_dict, progress_callback_mock)
         
@@ -124,7 +124,7 @@ class TestEdgeCases:
         )
         
         # Convert to dict for new interface
-        alert_dict = old_alert.model_dump()
+        alert_dict = alert_to_api_format(old_alert)
         
         result = await alert_service.process_alert(alert_dict)
         
@@ -150,7 +150,7 @@ class TestEdgeCases:
         )
         
         # Convert to dict for new interface
-        alert_dict = malformed_alert.model_dump()
+        alert_dict = alert_to_api_format(malformed_alert)
         
         result = await alert_service.process_alert(alert_dict)
         

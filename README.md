@@ -1,4 +1,4 @@
-# Tarsy-bot 🤖
+# TARSy-bot 🤖
 
 An intelligent Site Reliability Engineering agent that automatically processes alerts, retrieves runbooks, and uses MCP (Model Context Protocol) servers to gather system information for comprehensive incident analysis.
 
@@ -26,7 +26,7 @@ make dev
 ```
 
 **Services will be available at:**
-- 🖥️ **SRE Dashboard**: http://localhost:5173 (operational monitoring)
+- 🖥️ **TARSy Dashboard**: http://localhost:5173 (operational monitoring)
 - 🛠️ **Alert Dev UI**: http://localhost:3001 (alert testing)  
 - 🔧 **Backend API**: http://localhost:8000 (docs at /docs)
 

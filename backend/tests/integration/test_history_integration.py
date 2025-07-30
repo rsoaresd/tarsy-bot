@@ -920,7 +920,7 @@ class TestDuplicatePreventionIntegration:
         for alert_id in generated_ids:
             assert alert_id.startswith("PodCrashLoopBackOff_")
             parts = alert_id.split('_')
-            assert len(parts) == 4  # alert_type_hash_timestamp_random
+            assert len(parts) == 3  # alert_type_unique_id_timestamp
     
     def test_retry_logic_doesnt_create_duplicates(self, history_service_with_test_db, sample_alert_data):
         """Test that retry logic doesn't create duplicate sessions."""

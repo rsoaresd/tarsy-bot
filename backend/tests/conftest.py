@@ -19,15 +19,15 @@ os.environ["TESTING"] = "true"
 
 # Import Alert model for fixtures
 from tarsy.models.alert import Alert
+from tarsy.models.alert_processing import AlertProcessingData
 from tarsy.utils.timestamp import now_us
 
 
-def alert_to_api_format(alert: Alert) -> dict:
+def alert_to_api_format(alert: Alert) -> AlertProcessingData:
     """
-    Convert an Alert object to the dictionary format that the API layer produces
-    and AlertService expects: {"alert_type": "...", "alert_data": {...}}
+    Convert an Alert object to the AlertProcessingData format that AlertService expects.
     
-    This matches the format created in main.py lines 349-352.
+    This matches the format created in main.py lines 350-353.
     """
     # Create normalized_data that matches what the API layer does
     normalized_data = alert.data.copy() if alert.data else {}
@@ -41,11 +41,11 @@ def alert_to_api_format(alert: Alert) -> dict:
     if "environment" not in normalized_data:
         normalized_data["environment"] = "production"
     
-    # Return in the format AlertService expects
-    return {
-        "alert_type": alert.alert_type,
-        "alert_data": normalized_data
-    }
+    # Return AlertProcessingData instance that AlertService expects
+    return AlertProcessingData(
+        alert_type=alert.alert_type,
+        alert_data=normalized_data
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
