@@ -188,14 +188,11 @@ class AlertService:
                 await progress_callback(5, "Selecting specialized agent")
             
             alert_type = alert_data.get("alert_type")
-            agent_class_name = self.agent_registry.get_agent_for_alert_type(alert_type)
-            
-            if not agent_class_name:
-                error_msg = (
-                    f"No specialized agent available for alert type: '{alert_type}'. "
-                    f"Supported alert types: {self.agent_registry.get_supported_alert_types()}"
-                )
-                logger.error(error_msg)
+            try:
+                agent_class_name = self.agent_registry.get_agent_for_alert_type(alert_type)
+            except ValueError as e:
+                error_msg = str(e)
+                logger.error(f"Agent selection failed: {error_msg}")
                 
                 # Update history session with error
                 self._update_session_error(session_id, error_msg)
@@ -427,7 +424,7 @@ class AlertService:
             
             # Use provided agent class name or determine it
             if agent_class_name is None:
-                agent_class_name = self.agent_registry.get_agent_for_alert_type(alert_type)
+                agent_class_name = self.agent_registry.get_agent_for_alert_type_safe(alert_type)
             agent_type = agent_class_name or 'unknown'
             
             # Generate unique alert ID for this processing session

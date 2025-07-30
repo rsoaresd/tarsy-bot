@@ -40,7 +40,7 @@ class MCPClient:
         all_server_ids = self.mcp_registry.get_all_server_ids()
         
         for server_id in all_server_ids:
-            server_config = self.mcp_registry.get_server_config(server_id)
+            server_config = self.mcp_registry.get_server_config_safe(server_id)
             if not server_config or not server_config.enabled:
                 continue
                 

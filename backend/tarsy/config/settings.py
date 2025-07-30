@@ -106,6 +106,12 @@ class Settings(BaseSettings):
         description="Timeout in seconds for alerts waiting in queue"
     )
     
+    # Agent Configuration
+    agent_config_path: str = Field(
+        default="./config/agents.yaml",
+        description="Path to agent and MCP server configuration file"
+    )
+    
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Set default database URL based on environment if not explicitly provided

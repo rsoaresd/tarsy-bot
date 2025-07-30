@@ -3,13 +3,20 @@ MCP Server Registry for managing MCP server configurations.
 
 This module provides a simple static registry for MCP server configurations
 with embedded LLM instructions. The registry is loaded once at startup and
-serves as the single source of truth for all MCP server configurations.
+serves as the single source of truth for all MCP server configurations,
+including both built-in and configured servers.
 """
 
 from typing import Dict, List, Optional
 
 from ..models.mcp_config import MCPServerConfig
 from ..utils.logger import get_module_logger
+from ..config.builtin_config import BUILTIN_MCP_SERVERS
+
+# Import for type hints only (avoid circular imports)
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..models.agent_config import MCPServerConfigModel
 
 logger = get_module_logger(__name__)
 
@@ -25,52 +32,44 @@ class MCPServerRegistry:
     This is the SINGLE SOURCE OF TRUTH for all MCP server configurations.
     """
     
-    # Static server configurations defined in the registry itself
-    _DEFAULT_SERVERS = {
-        "kubernetes-server": {
-            "server_id": "kubernetes-server",
-            "server_type": "kubernetes",
-            "enabled": True,
-            "connection_params": {
-                "command": "npx",
-                "args": ["-y", "kubernetes-mcp-server@latest"]
-            },
-            "instructions": """For Kubernetes operations:
-- Be careful with cluster-scoped resource listings in large clusters
-- Focus on namespace-specific resources first (kubectl get pods -n <namespace>)
-- Use kubectl describe before kubectl get for detailed information
-- Check pod logs only when necessary (they can be large)
-- Consider resource quotas and limits when analyzing issues
-- Look for events related to the problematic resources
-- Check node capacity and scheduling constraints for pod placement issues
-- Verify RBAC permissions when access issues occur
-- Consider network policies for connectivity problems
-- Check for resource conflicts and naming collisions"""
-        },
-        # Future servers can be added here:
-        # "argocd-server": {...},
-        # "aws-server": {...},
-    }
+    # Built-in server configurations imported from central configuration
+    _DEFAULT_SERVERS = BUILTIN_MCP_SERVERS
     
-    def __init__(self, config: Optional[Dict[str, Dict]] = None):
+    def __init__(
+        self, 
+        config: Optional[Dict[str, Dict]] = None,
+        configured_servers: Optional[Dict[str, "MCPServerConfigModel"]] = None
+    ):
         """
         Initialize the MCP server registry with configurations.
         
         Args:
             config: Optional dictionary of server configurations.
                    If None, uses default configurations defined in the registry.
+            configured_servers: Optional dictionary of configured MCP servers to include.
+                              These are merged with the built-in servers.
         """
         # Static servers - no runtime changes, just a dictionary
         self.static_servers: Dict[str, MCPServerConfig] = {}
         
-        # Use provided config or fall back to default configurations
+        # Start with built-in server configurations (config parameter or defaults)
         server_configs = config or self._DEFAULT_SERVERS
         
-        # Simple conversion to MCPServerConfig objects
+        # Convert built-in servers to MCPServerConfig objects
         for server_id, server_config in server_configs.items():
             self.static_servers[server_id] = MCPServerConfig(**server_config)
         
-        logger.info(f"Initialized MCP Server Registry with {len(self.static_servers)} servers")
+        # Add configured servers if provided
+        if configured_servers:
+            for server_id, server_config in configured_servers.items():
+                # Convert MCPServerConfigModel to internal format and merge
+                server_dict = server_config.model_dump()
+                self.static_servers[server_id] = MCPServerConfig(**server_dict)
+                logger.debug(f"Added configured MCP server: {server_id}")
+            
+            logger.info(f"Added {len(configured_servers)} configured MCP servers")
+        
+        logger.info(f"Initialized MCP Server Registry with {len(self.static_servers)} total servers")
     
     def get_server_configs(self, server_ids: List[str]) -> List[MCPServerConfig]:
         """
@@ -89,10 +88,35 @@ class MCPServerRegistry:
             if server_id in self.static_servers
         ]
     
-    def get_server_config(self, server_id: str) -> Optional[MCPServerConfig]:
+    def get_server_config(self, server_id: str) -> MCPServerConfig:
         """
         Get configuration for a single MCP server.
-        Simple dictionary lookup - no complex logic.
+        
+        Args:
+            server_id: The server ID to retrieve
+            
+        Returns:
+            MCPServerConfig for the requested server
+            
+        Raises:
+            ValueError: If server_id is not found
+        """
+        server_config = self.static_servers.get(server_id)
+        
+        if server_config is None:
+            # Fail-fast with technical error details
+            available_servers = list(self.static_servers.keys())
+            error_msg = f"MCP server '{server_id}' not found. Available: {available_servers}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        logger.debug(f"Found MCP server config for '{server_id}' (type: {server_config.server_type}, enabled: {server_config.enabled})")
+        return server_config
+    
+    def get_server_config_safe(self, server_id: str) -> Optional[MCPServerConfig]:
+        """
+        Get configuration for a single MCP server without failing.
+        Used by MCP client for optional server lookups where None is acceptable.
         
         Args:
             server_id: The server ID to retrieve
