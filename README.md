@@ -11,9 +11,8 @@ Inspired by the spirit of sci-fi AI, TARSy is your reliable SRE operations compa
 
 - **[README.md](README.md)**: This file - project overview and quick start
 - **[docs/architecture-overview.md](docs/architecture-overview.md)**: High-level architecture concepts and design principles
-- **[Makefile](Makefile)**: Development workflow automation (run this first!)
 - **[docs/requirements.md](docs/requirements.md)**: Application requirements and specifications  
-- **[docs/design.md](docs/design.md)**: System design and architecture documentation
+- **[docs/design.md](docs/design.md)**: Detailed system design and architecture documentation
 
 ## Prerequisites
 
