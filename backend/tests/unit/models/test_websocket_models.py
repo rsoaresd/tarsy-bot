@@ -21,6 +21,7 @@ from tarsy.models.websocket_models import (
     SystemHealthUpdate,
     WebSocketMessage,
 )
+from tarsy.models.constants import SystemHealthStatus
 
 
 class TestWebSocketMessage:
@@ -55,33 +56,25 @@ class TestWebSocketMessage:
 class TestSubscriptionMessage:
     """Test subscription message model."""
     
-    @pytest.mark.unit
-    def test_subscribe_message(self):
-        """Test subscribe message creation."""
-        message = SubscriptionMessage(type="subscribe", channel="dashboard_updates")
-        assert message.type == "subscribe"
-        assert message.channel == "dashboard_updates"
-    
-    @pytest.mark.unit
-    def test_unsubscribe_message(self):
-        """Test unsubscribe message creation."""
-        message = SubscriptionMessage(type="unsubscribe", channel="session_123")
-        assert message.type == "unsubscribe"
-        assert message.channel == "session_123"
-    
-    @pytest.mark.unit
-    def test_invalid_type(self):
-        """Test subscription message with invalid type."""
+    @pytest.mark.parametrize("message_data,expected_type,expected_channel", [
+        ({"type": "subscribe", "channel": "dashboard_updates"}, "subscribe", "dashboard_updates"),
+        ({"type": "unsubscribe", "channel": "session_123"}, "unsubscribe", "session_123"),
+    ])
+    def test_subscription_message_creation(self, message_data, expected_type, expected_channel):
+        """Test subscription message creation with various types."""
+        message = SubscriptionMessage(**message_data)
+        assert message.type == expected_type
+        assert message.channel == expected_channel
+
+    @pytest.mark.parametrize("invalid_data,expected_error", [
+        ({"type": "invalid", "channel": "test"}, "Invalid subscription type"),
+        ({"type": "subscribe"}, "Missing required field"),
+    ])
+    def test_subscription_message_validation(self, invalid_data, expected_error):
+        """Test subscription message validation errors."""
         with pytest.raises(ValidationError):
-            SubscriptionMessage(type="invalid", channel="test")
-    
-    @pytest.mark.unit
-    def test_missing_channel(self):
-        """Test subscription message without channel."""
-        with pytest.raises(ValidationError):
-            SubscriptionMessage(type="subscribe")
-    
-    @pytest.mark.unit
+            SubscriptionMessage(**invalid_data)
+
     def test_serialization(self):
         """Test subscription message serialization."""
         message = SubscriptionMessage(type="subscribe", channel="test")
@@ -234,10 +227,10 @@ class TestSystemHealthUpdate:
     def test_healthy_status(self):
         """Test healthy system status."""
         services = {"database": "healthy", "llm": "healthy"}
-        update = SystemHealthUpdate(status="healthy", services=services)
+        update = SystemHealthUpdate(status=SystemHealthStatus.HEALTHY, services=services)
         
         assert update.type == "system_health"
-        assert update.status == "healthy"
+        assert update.status == SystemHealthStatus.HEALTHY
         assert update.services == services
         assert update.channel == "system_health"
     
@@ -245,16 +238,14 @@ class TestSystemHealthUpdate:
     def test_degraded_status(self):
         """Test degraded system status."""
         services = {"database": "healthy", "llm": "degraded"}
-        update = SystemHealthUpdate(status="degraded", services=services)
-        assert update.status == "degraded"
+        update = SystemHealthUpdate(status=SystemHealthStatus.DEGRADED, services=services)
+        assert update.status == SystemHealthStatus.DEGRADED
     
     @pytest.mark.unit
     def test_invalid_status(self):
         """Test invalid system status."""
         with pytest.raises(ValidationError):
             SystemHealthUpdate(status="invalid", services={})
-
-
 
 class TestChannelType:
     """Test channel type utilities."""

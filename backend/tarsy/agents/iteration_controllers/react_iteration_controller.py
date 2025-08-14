@@ -49,6 +49,10 @@ class SimpleReActController(IterationController):
         """
         self.llm_client = llm_client
         self.prompt_builder = prompt_builder
+    
+    def needs_mcp_tools(self) -> bool:
+        """ReAct iteration requires MCP tool discovery."""
+        return True
         
     async def execute_analysis_loop(self, context: IterationContext) -> str:
         """Execute simple ReAct loop following the standard pattern."""
@@ -80,31 +84,12 @@ class SimpleReActController(IterationController):
                 messages = [
                     LLMMessage(
                         role="system", 
-                        content="""You are an expert SRE analyzing alerts. Follow the ReAct format EXACTLY as specified.
-
-CRITICAL FORMATTING RULES:
-1. ALWAYS include colons after section headers: "Thought:", "Action:", "Action Input:"
-2. For Action Input, provide ONLY the parameter values (no YAML, no code blocks, no triple backticks)
-3. STOP immediately after "Action Input:" line - do NOT generate "Observation:"
-4. NEVER write fake observations or continue the conversation
-
-CORRECT FORMAT:
-Thought: [your reasoning here]
-Action: [exact tool name]
-Action Input: [parameter values only]
-
-INCORRECT FORMATS TO AVOID:
-- "Thought" without colon
-- Action Input with ```yaml or code blocks
-- Adding "Observation:" section
-- Continuing with more Thought/Action pairs
-
-Focus on investigation and providing recommendations for human operators to execute."""
+                        content=self.prompt_builder.get_standard_react_system_message("investigation and providing recommendations")
                     ),
                     LLMMessage(role="user", content=prompt)
                 ]
                 
-                response = await self.llm_client.generate_response(messages, context.session_id)
+                response = await self.llm_client.generate_response(messages, context.session_id, agent.get_current_stage_execution_id())
                 logger.info(f"LLM Response (first 500 chars): {response[:500]}")
                 
                 # Parse ReAct response
@@ -158,22 +143,29 @@ Focus on investigation and providing recommendations for human operators to exec
                 elif not parsed['is_complete']:
                     # LLM didn't provide action but also didn't complete - prompt for action
                     logger.warning("ReAct response missing action, adding prompt to continue")
-                    react_history.append("Observation: Please specify what Action you want to take next, or provide your Final Answer if you have enough information.")
+                    react_history.extend(self.prompt_builder.get_react_continuation_prompt("general"))
+                    
+                    # Prevent context overflow by truncating history if needed
+                    if len(react_history) > 30:
+                        react_history = self.prompt_builder.truncate_conversation_history(react_history, max_entries=25)
                 
             except Exception as e:
                 logger.error(f"ReAct iteration {iteration + 1} failed: {str(e)}")
                 # Add error to history and try to continue
-                react_history.append(f"Observation: Error in reasoning: {str(e)}. Please try a different approach.")
+                react_history.extend(self.prompt_builder.get_react_error_continuation(str(e)))
                 continue
         
         # If we reach max iterations without completion
         logger.warning("ReAct analysis reached maximum iterations without final answer")
         
+        # Use utility method to flatten react history
+        flattened_history = self.prompt_builder._flatten_react_history(react_history)
+        
         # Try to get a final analysis with available information
         final_prompt = f"""Based on the investigation so far, provide your best analysis of the alert.
 
 Investigation History:
-{chr(10).join(react_history)}
+{chr(10).join(flattened_history)}
 
 Please provide a final answer based on what you've discovered, even if the investigation isn't complete."""
         
@@ -186,7 +178,7 @@ Please provide a final answer based on what you've discovered, even if the inves
                 LLMMessage(role="user", content=final_prompt)
             ]
             
-            fallback_response = await self.llm_client.generate_response(messages, context.session_id)
+            fallback_response = await self.llm_client.generate_response(messages, context.session_id, agent.get_current_stage_execution_id())
             return f"Analysis completed (reached max iterations):\n\n{fallback_response}"
             
         except Exception as e:

@@ -15,6 +15,7 @@ from tarsy.integrations.llm.client import LLMClient
 from tarsy.integrations.mcp.client import MCPClient
 
 from tarsy.models.llm import LLMMessage
+from tarsy.models.alert_processing import AlertProcessingData
 from .iteration_controllers import (
     IterationController, RegularIterationController, SimpleReActController, 
     IterationContext
@@ -79,8 +80,13 @@ class BaseAgent(ABC):
         self._configured_servers: Optional[List[str]] = None
         self._prompt_builder = get_prompt_builder()
         
+        # Stage execution tracking for chain processing
+        self._current_stage_execution_id: Optional[str] = None
+        
         # Create appropriate iteration controller based on configuration
         self._iteration_controller: IterationController = self._create_iteration_controller(iteration_strategy)
+        # Cache the iteration strategy to avoid redundant imports in property getter
+        self._iteration_strategy: IterationStrategy = iteration_strategy
     
     def _create_iteration_controller(self, strategy: IterationStrategy) -> IterationController:
         """
@@ -96,18 +102,28 @@ class BaseAgent(ABC):
             return RegularIterationController()
         elif strategy == IterationStrategy.REACT:
             return SimpleReActController(self.llm_client, self._prompt_builder)
+        elif strategy == IterationStrategy.REACT_TOOLS:
+            from .iteration_controllers.react_tools_controller import ReactToolsController
+            return ReactToolsController(self.llm_client, self._prompt_builder)
+        elif strategy == IterationStrategy.REACT_TOOLS_PARTIAL:
+            from .iteration_controllers.react_tools_partial_controller import ReactToolsPartialController
+            return ReactToolsPartialController(self.llm_client, self._prompt_builder)
+        elif strategy == IterationStrategy.REACT_FINAL_ANALYSIS:
+            from .iteration_controllers.react_final_analysis_controller import ReactFinalAnalysisController
+            return ReactFinalAnalysisController(self.llm_client, self._prompt_builder)
         else:
             raise ValueError(f"Unknown iteration strategy: {strategy}")
     
     @property
     def iteration_strategy(self) -> IterationStrategy:
         """Get the current iteration strategy for this agent."""
-        if isinstance(self._iteration_controller, RegularIterationController):
-            return IterationStrategy.REGULAR
-        elif isinstance(self._iteration_controller, SimpleReActController):
-            return IterationStrategy.REACT
-        else:
-            raise ValueError(f"Unknown controller type: {type(self._iteration_controller)}")
+        return self._iteration_strategy
+
+    # Strategy can be overridden per stage via AgentFactory
+    def set_iteration_strategy(self, strategy: IterationStrategy):
+        """Update iteration strategy (used by AgentFactory for stage-specific strategies)."""
+        self._iteration_controller = self._create_iteration_controller(strategy)
+        self._iteration_strategy = strategy
 
     @property
     def max_iterations(self) -> int:
@@ -195,7 +211,11 @@ class BaseAgent(ABC):
                              available_tools: Optional[Dict] = None,
                              iteration_history: Optional[List[Dict]] = None,
                              current_iteration: Optional[int] = None,
-                             max_iterations: Optional[int] = None) -> PromptContext:
+                             max_iterations: Optional[int] = None,
+                             stage_name: Optional[str] = None,
+                             is_final_stage: bool = False,
+                             previous_stages: Optional[List[str]] = None,
+                             stage_attributed_data: Optional[Dict[str, Any]] = None) -> PromptContext:
         """
         Create a PromptContext object with all necessary data for prompt building.
         
@@ -207,6 +227,10 @@ class BaseAgent(ABC):
             iteration_history: History of previous iterations (optional)
             current_iteration: Current iteration number (optional)
             max_iterations: Maximum number of iterations (optional)
+            stage_name: Name of current processing stage (optional)
+            is_final_stage: Whether this is the final stage in a chain (optional)
+            previous_stages: List of previous stage names (optional)
+            stage_attributed_data: MCP data with stage attribution preserved (optional)
             
         Returns:
             PromptContext object ready for prompt building
@@ -222,7 +246,11 @@ class BaseAgent(ABC):
             available_tools=available_tools,
             iteration_history=iteration_history,
             current_iteration=current_iteration,
-            max_iterations=max_iterations or self._max_iterations
+            max_iterations=max_iterations or self._max_iterations,
+            stage_name=stage_name,
+            is_final_stage=is_final_stage,
+            previous_stages=previous_stages,
+            stage_attributed_data=stage_attributed_data
         )
 
     def _get_server_specific_tool_guidance(self) -> str:
@@ -268,7 +296,7 @@ class BaseAgent(ABC):
         ]
         
         try:
-            result = await self.llm_client.generate_response(messages, session_id, **kwargs)
+            result = await self.llm_client.generate_response(messages, session_id, self._current_stage_execution_id, **kwargs)
             logger.info(f"Alert analysis completed with {self.__class__.__name__}")
             return result
         except Exception as e:
@@ -300,7 +328,7 @@ class BaseAgent(ABC):
         ]
         
         try:
-            response = await self.llm_client.generate_response(messages, session_id)
+            response = await self.llm_client.generate_response(messages, session_id, self._current_stage_execution_id)
             
             # Parse the JSON response
             tools_to_call = parse_llm_json_response(response, expected_type=list)
@@ -350,7 +378,7 @@ class BaseAgent(ABC):
         ]
         
         try:
-            response = await self.llm_client.generate_response(messages, session_id)
+            response = await self.llm_client.generate_response(messages, session_id, self._current_stage_execution_id)
             
             # Parse the JSON response
             next_action = parse_llm_json_response(response, expected_type=dict)
@@ -382,43 +410,75 @@ class BaseAgent(ABC):
 
     async def process_alert(
         self,
-        alert_data: Dict[str, Any],
-        runbook_content: str,
+        alert_data: AlertProcessingData,  # Unified alert processing model
         session_id: str
     ) -> Dict[str, Any]:
         """
-        Process an alert using the appropriate iteration strategy (ReAct or Regular).
+        Process alert with unified alert processing model using configured iteration strategy.
         
         Args:
-            alert_data: Complete alert data as flexible dictionary
-            runbook_content: The downloaded runbook content  
+            alert_data: Unified alert processing model containing:
+                       - alert_type, alert_data: Original alert information
+                       - runbook_content: Downloaded runbook content
+                       - stage_outputs: Results from previous chain stages (empty for single-stage)
             session_id: Session ID for timeline logging
-            
+        
         Returns:
-            Dictionary containing the analysis result and metadata
+            Dictionary containing analysis result and metadata
         """
-        # Basic validation - data validation should happen at API layer
+        # Basic validation
         if not session_id:
             raise ValueError("session_id is required for alert processing")
-                       
+        
         try:
+            # Extract data using type-safe helper methods
+            runbook_content = alert_data.get_runbook_content()
+            original_alert = alert_data.get_original_alert_data()
+            
+            # Get accumulated MCP data from all previous stages
+            initial_mcp_data = alert_data.get_all_mcp_results()
+            stage_attributed_mcp_data = alert_data.get_stage_attributed_mcp_results()
+            
+            # Log enriched data usage from previous stages
+            if alert_data.get_stage_result("data-collection"):
+                logger.info("Using enriched data from data-collection stage")
+                # MCP results are already merged via get_all_mcp_results()
+            
+            # Enhanced logging for stage attribution
+            if stage_attributed_mcp_data:
+                stages_with_data = list(stage_attributed_mcp_data.keys())
+                logger.info(f"Enhanced logging: Stage-attributed data available from stages: {stages_with_data}")
             
             # Configure MCP client with agent-specific servers
             await self._configure_mcp_client()
             
-            # Get available tools from assigned MCP servers
-            available_tools = await self._get_available_tools(session_id)
+            # Get available tools only if the iteration strategy needs them
+            if self._iteration_controller.needs_mcp_tools():
+                logger.info(f"Enhanced logging: Strategy {self.iteration_strategy.value} requires MCP tool discovery")
+                available_tools = await self._get_available_tools(session_id)
+                logger.info(f"Enhanced logging: Retrieved {len(available_tools)} tools for {self.iteration_strategy.value}")
+            else:
+                logger.info(f"Enhanced logging: Strategy {self.iteration_strategy.value} skips MCP tool discovery - Final analysis stage")
+                available_tools = []
             
             # Create iteration context for controller
             context = IterationContext(
-                alert_data=alert_data,
+                alert_data=original_alert,
                 runbook_content=runbook_content,
                 available_tools=available_tools,
                 session_id=session_id,
                 agent=self
             )
             
-            # Delegate to appropriate iteration controller - no conditionals!
+            # If we have initial MCP data from previous stages, add it to context
+            if initial_mcp_data:
+                context.initial_mcp_data = initial_mcp_data
+                
+            # Add stage-attributed data for enhanced context
+            if stage_attributed_mcp_data:
+                context.stage_attributed_data = stage_attributed_mcp_data
+            
+            # Delegate to appropriate iteration controller
             analysis_result = await self._iteration_controller.execute_analysis_loop(context)
             
             return {
@@ -426,6 +486,7 @@ class BaseAgent(ABC):
                 "agent": self.__class__.__name__,
                 "analysis": analysis_result,
                 "strategy": self.iteration_strategy.value,
+                "mcp_results": getattr(context, 'final_mcp_data', {}),
                 "timestamp_us": now_us()
             }
             
@@ -525,6 +586,14 @@ class BaseAgent(ABC):
         """
         return self._prompt_builder.get_general_instructions()
     
+    def set_current_stage_execution_id(self, stage_execution_id: Optional[str]):
+        """Set the current stage execution ID for chain processing context."""
+        self._current_stage_execution_id = stage_execution_id
+    
+    def get_current_stage_execution_id(self) -> Optional[str]:
+        """Get the current stage execution ID."""
+        return self._current_stage_execution_id
+    
     async def _configure_mcp_client(self):
         """Configure MCP client with agent-specific server subset."""
         mcp_server_ids = self.mcp_servers()
@@ -567,7 +636,7 @@ class BaseAgent(ABC):
             
             # Use only configured servers for this agent
             for server_name in self._configured_servers:
-                server_tools = await self.mcp_client.list_tools(session_id=session_id, server_name=server_name)
+                server_tools = await self.mcp_client.list_tools(session_id=session_id, server_name=server_name, stage_execution_id=self._current_stage_execution_id)
                 if server_name in server_tools:
                     for tool in server_tools[server_name]:
                         tool_with_server = tool.copy()
@@ -607,7 +676,7 @@ class BaseAgent(ABC):
                 if self._configured_servers and server_name not in self._configured_servers:
                     raise ValueError(f"Tool '{tool_name}' from server '{server_name}' not allowed for agent {self.__class__.__name__}")
                 
-                result = await self.mcp_client.call_tool(server_name, tool_name, tool_params, session_id)
+                result = await self.mcp_client.call_tool(server_name, tool_name, tool_params, session_id, self._current_stage_execution_id)
                 
                 # Organize results by server
                 if server_name not in results:

@@ -11,9 +11,10 @@ from unittest.mock import Mock
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from tarsy.models.history import AlertSession
+from tarsy.models.history import AlertSession, StageExecution
 from tarsy.models.unified_interactions import LLMInteraction, MCPInteraction
 from tarsy.repositories.history_repository import HistoryRepository
+from tests.utils import AlertFactory
 
 
 class TestHistoryRepository:
@@ -101,25 +102,27 @@ class TestHistoryRepository:
             success=True
         )
     
-    @pytest.mark.unit
-    def test_create_alert_session_success(self, repository, sample_alert_session):
-        """Test successful alert session creation."""
-        created_session = repository.create_alert_session(sample_alert_session)
-        
-        assert created_session.session_id == sample_alert_session.session_id
-        
-        # Verify session was saved to database
-        retrieved_session = repository.get_alert_session(created_session.session_id)
-        assert retrieved_session is not None
-        assert retrieved_session.alert_id == sample_alert_session.alert_id
-        assert retrieved_session.agent_type == sample_alert_session.agent_type
-        assert retrieved_session.status == sample_alert_session.status
-    
-    @pytest.mark.unit
-    def test_get_alert_session_not_found(self, repository):
-        """Test getting alert session that doesn't exist."""
-        session = repository.get_alert_session("non-existent-session")
-        assert session is None
+    @pytest.mark.parametrize("session_id,expected_result", [
+        ("test-session-123", "found"),
+        ("non-existent-session", None),
+    ])
+    def test_alert_session_retrieval(self, repository, sample_alert_session, session_id, expected_result):
+        """Test alert session creation and retrieval scenarios."""
+        if expected_result == "found":
+            # Create session first
+            created_session = repository.create_alert_session(sample_alert_session)
+            assert created_session.session_id == sample_alert_session.session_id
+            
+            # Verify session was saved to database
+            retrieved_session = repository.get_alert_session(session_id)
+            assert retrieved_session is not None
+            assert retrieved_session.alert_id == sample_alert_session.alert_id
+            assert retrieved_session.agent_type == sample_alert_session.agent_type
+            assert retrieved_session.status == sample_alert_session.status
+        else:
+            # Test getting non-existent session
+            session = repository.get_alert_session(session_id)
+            assert session is None
     
     @pytest.mark.unit
     def test_update_alert_session_success(self, repository, sample_alert_session):
@@ -1032,6 +1035,69 @@ class TestHistoryRepository:
         failed_interactions = [i for i in saved_interactions if not i.success]
         assert len(failed_interactions) == 1
         assert failed_interactions[0].error_message == "Connection timeout"
+
+    @pytest.mark.unit
+    def test_update_stage_execution_success(self, repository, sample_alert_session):
+        """Test successful stage execution update."""
+        from tarsy.models.history import now_us
+        from tarsy.models.constants import StageStatus
+        
+        # Create session first
+        repository.create_alert_session(sample_alert_session)
+        
+        # Create a stage execution
+        stage_execution = StageExecution(
+            execution_id="test-stage-123",
+            session_id=sample_alert_session.session_id,
+            stage_id="initial-analysis",
+            stage_index=0,
+            stage_name="Initial Analysis",
+            agent="KubernetesAgent",
+            status=StageStatus.ACTIVE.value,
+            started_at_us=now_us()
+        )
+        
+        # First create the stage execution
+        repository.session.add(stage_execution)
+        repository.session.commit()
+        repository.session.refresh(stage_execution)
+        
+        # Now update it to completed
+        stage_execution.status = StageStatus.COMPLETED.value
+        stage_execution.completed_at_us = now_us()
+        stage_execution.duration_ms = 5000
+        stage_execution.stage_output = {"result": "analysis complete"}
+        
+        # Update the stage execution
+        result = repository.update_stage_execution(stage_execution)
+        assert result == True
+        
+        # Verify the update was applied
+        updated_execution = repository.session.get(StageExecution, stage_execution.execution_id)
+        assert updated_execution.status == StageStatus.COMPLETED.value
+        assert updated_execution.completed_at_us is not None
+        assert updated_execution.duration_ms == 5000
+        assert updated_execution.stage_output == {"result": "analysis complete"}
+
+    @pytest.mark.unit
+    def test_update_stage_execution_not_found(self, repository):
+        """Test updating a non-existent stage execution raises ValueError."""
+        from tarsy.models.constants import StageStatus
+        
+        # Create a stage execution with non-existent ID
+        stage_execution = StageExecution(
+            execution_id="non-existent-id",
+            session_id="some-session",
+            stage_id="test-stage",
+            stage_index=0,
+            stage_name="Test Stage",
+            agent="TestAgent",
+            status=StageStatus.COMPLETED.value
+        )
+        
+        # Attempt to update should raise ValueError
+        with pytest.raises(ValueError, match="Stage execution with id non-existent-id not found"):
+            repository.update_stage_execution(stage_execution)
 
 
 class TestHistoryRepositoryErrorHandling:

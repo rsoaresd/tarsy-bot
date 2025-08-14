@@ -1,6 +1,8 @@
-import type { WebSocketMessage, SessionUpdate } from '../types';
+import type { WebSocketMessage, SessionUpdate, ChainProgressUpdate, StageProgressUpdate } from '../types';
 
 type WebSocketEventHandler = (data: SessionUpdate) => void;
+type ChainProgressHandler = (data: ChainProgressUpdate) => void;
+type StageProgressHandler = (data: StageProgressUpdate) => void;
 type WebSocketErrorHandler = (error: Event) => void;
 type WebSocketCloseHandler = (event: CloseEvent) => void;
 type SessionSpecificHandler = (data: any) => void; // For session-specific timeline updates
@@ -22,6 +24,8 @@ class WebSocketService {
     sessionCompleted: WebSocketEventHandler[];
     sessionFailed: WebSocketEventHandler[];
     dashboardUpdate: WebSocketEventHandler[]; // Add handler for dashboard updates
+    chainProgress: ChainProgressHandler[]; // Add handler for chain progress updates
+    stageProgress: StageProgressHandler[]; // Add handler for stage progress updates
     connectionChange: Array<(connected: boolean) => void>; // Add connection change handler
     error: WebSocketErrorHandler[];
     close: WebSocketCloseHandler[];
@@ -31,6 +35,8 @@ class WebSocketService {
     sessionCompleted: [],
     sessionFailed: [],
     dashboardUpdate: [], // Initialize dashboard update handlers
+    chainProgress: [], // Initialize chain progress handlers
+    stageProgress: [], // Initialize stage progress handlers
     connectionChange: [], // Initialize connection change handlers
     error: [],
     close: [],
@@ -259,6 +265,7 @@ class WebSocketService {
    */
   private handleMessage(message: WebSocketMessage): void {
     console.log('🔄 Processing WebSocket message:', message);
+    console.log('🔍 Message type:', message.type, 'Channel:', message.channel, 'Data type:', message.data?.type);
     
     // Handle message batches first
     if (message.type === 'message_batch' && message.messages) {
@@ -333,6 +340,13 @@ class WebSocketService {
           return;
         }
         
+        // Check if this is actually a stage_progress message disguised as dashboard_update
+        if (message.data && message.data.type === 'stage_progress') {
+          console.log('🎯 Found stage_progress message within dashboard_update, redirecting to stage progress handlers');
+          this.eventHandlers.stageProgress.forEach(handler => handler(message.data as StageProgressUpdate));
+          // Still continue with session-specific handling below
+        }
+        
         // Check if this is a session-specific update (has channel property)
         if (message.channel && message.channel.startsWith('session_')) {
           console.log(`📈 Handling dashboard_update with session data for channel: ${message.channel}`);
@@ -387,16 +401,46 @@ class WebSocketService {
       case 'subscription_response':
         console.log('📋 Subscription response received:', message.data || 'no data');
         break;
+      case 'chain_progress':
+        if (!message.data) {
+          console.log('⚠️  chain_progress message has no data property, skipping');
+          return;
+        }
+        console.log('🔗 Handling chain_progress, calling', this.eventHandlers.chainProgress.length, 'handlers');
+        this.eventHandlers.chainProgress.forEach(handler => handler(message.data as ChainProgressUpdate));
+        break;
+      case 'stage_progress':
+        if (!message.data) {
+          console.log('⚠️  stage_progress message has no data property, skipping');
+          return;
+        }
+        console.log('🎯 Handling stage_progress, calling', this.eventHandlers.stageProgress.length, 'handlers');
+        this.eventHandlers.stageProgress.forEach(handler => handler(message.data as StageProgressUpdate));
+        break;
       default:
         // Handle session-specific messages that might not match standard types
         if (message.channel && message.channel.startsWith('session_') && message.data) {
           console.log(`📈 Handling session-specific message for channel: ${message.channel}`);
+          
+          // Check if this is actually a stage_progress message
+          if (message.data && message.data.type === 'stage_progress') {
+            console.log('🎯 Found stage_progress message in session-specific handler, calling stage progress handlers');
+            this.eventHandlers.stageProgress.forEach(handler => handler(message.data as StageProgressUpdate));
+          }
+          
           const handlers = this.eventHandlers.sessionSpecific.get(message.channel);
           if (handlers) {
             handlers.forEach(handler => handler(message.data!));
           }
         } else {
           console.log('❓ Unknown message type:', message.type, 'Data present:', !!message.data);
+          // Log more details for debugging
+          console.log('❓ Message details:', {
+            type: message.type,
+            channel: message.channel,
+            dataType: message.data?.type,
+            dataKeys: message.data ? Object.keys(message.data) : []
+          });
         }
     }
   }
@@ -468,6 +512,32 @@ class WebSocketService {
       const index = this.eventHandlers.dashboardUpdate.indexOf(handler);
       if (index > -1) {
         this.eventHandlers.dashboardUpdate.splice(index, 1);
+      }
+    };
+  }
+
+  /**
+   * Add event listener for chain progress updates
+   */
+  onChainProgress(handler: ChainProgressHandler): () => void {
+    this.eventHandlers.chainProgress.push(handler);
+    return () => {
+      const index = this.eventHandlers.chainProgress.indexOf(handler);
+      if (index > -1) {
+        this.eventHandlers.chainProgress.splice(index, 1);
+      }
+    };
+  }
+
+  /**
+   * Add event listener for stage progress updates
+   */
+  onStageProgress(handler: StageProgressHandler): () => void {
+    this.eventHandlers.stageProgress.push(handler);
+    return () => {
+      const index = this.eventHandlers.stageProgress.indexOf(handler);
+      if (index > -1) {
+        this.eventHandlers.stageProgress.splice(index, 1);
       }
     };
   }

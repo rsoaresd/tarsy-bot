@@ -12,9 +12,11 @@ import pytest
 from tarsy.config.settings import Settings
 from tarsy.models.alert import Alert
 from tarsy.models.alert_processing import AlertKey, AlertProcessingData
+from tarsy.models.chains import ChainDefinitionModel, ChainStageModel
 from tarsy.services.alert_service import AlertService
 from tarsy.utils.timestamp import now_us
 from tests.conftest import alert_to_api_format
+from tests.utils import MockFactory, AlertFactory
 
 
 @pytest.mark.unit
@@ -24,48 +26,42 @@ class TestAlertServiceInitialization:
     @pytest.fixture
     def mock_settings(self):
         """Mock settings for testing."""
-        settings = Mock(spec=Settings)
-        settings.github_token = "test_token"
-        settings.history_enabled = True
-        return settings
+        return MockFactory.create_mock_settings(
+            github_token="test_token",
+            history_enabled=True,
+            agent_config_path=None  # No agent config for unit tests
+        )
     
     @pytest.fixture
     def mock_dependencies(self):
         """Mock all AlertService dependencies."""
+        return MockFactory.create_mock_alert_service_dependencies()
+    
+    def test_initialization_success(self, mock_settings):
+        """Test successful AlertService initialization."""
         with patch('tarsy.services.alert_service.RunbookService') as mock_runbook, \
              patch('tarsy.services.alert_service.get_history_service') as mock_history, \
-             patch('tarsy.services.alert_service.AgentRegistry') as mock_registry, \
+             patch('tarsy.services.alert_service.ChainRegistry') as mock_chain_registry, \
              patch('tarsy.services.alert_service.MCPServerRegistry') as mock_mcp_registry, \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
              patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager:
             
-            yield {
-                'runbook': mock_runbook.return_value,
-                'history': mock_history.return_value,
-                'registry': mock_registry.return_value,
-                'mcp_registry': mock_mcp_registry.return_value,
-                'mcp_client': mock_mcp_client.return_value,
-                'llm_manager': mock_llm_manager.return_value
-            }
-    
-    def test_initialization_success(self, mock_settings, mock_dependencies):
-        """Test successful AlertService initialization."""
-        service = AlertService(mock_settings)
-        
-        assert service.settings == mock_settings
-        assert service.runbook_service == mock_dependencies['runbook']
-        assert service.history_service == mock_dependencies['history']
-        assert service.agent_registry == mock_dependencies['registry']
-        assert service.mcp_server_registry == mock_dependencies['mcp_registry']
-        assert service.mcp_client == mock_dependencies['mcp_client']
-        assert service.llm_manager == mock_dependencies['llm_manager']
-        assert service.agent_factory is None  # Not initialized yet
+            service = AlertService(mock_settings)
+            
+            assert service.settings == mock_settings
+            assert service.runbook_service == mock_runbook.return_value
+            assert service.history_service == mock_history.return_value
+            assert service.chain_registry == mock_chain_registry.return_value
+            assert service.mcp_server_registry == mock_mcp_registry.return_value
+            assert service.mcp_client == mock_mcp_client.return_value
+            assert service.llm_manager == mock_llm_manager.return_value
+            assert service.agent_factory is None  # Not initialized yet
     
     def test_initialization_with_dependencies(self, mock_settings):
         """Test that dependencies are created with correct parameters."""
         with patch('tarsy.services.alert_service.RunbookService') as mock_runbook, \
              patch('tarsy.services.alert_service.get_history_service') as mock_history, \
-             patch('tarsy.services.alert_service.AgentRegistry') as mock_registry, \
+             patch('tarsy.services.alert_service.ChainRegistry') as mock_chain_registry, \
              patch('tarsy.services.alert_service.MCPServerRegistry') as mock_mcp_registry, \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
              patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager:
@@ -96,7 +92,7 @@ class TestAlertServiceAsyncInitialization:
         
         with patch('tarsy.services.alert_service.RunbookService'), \
              patch('tarsy.services.alert_service.get_history_service'), \
-             patch('tarsy.services.alert_service.AgentRegistry'), \
+             patch('tarsy.services.alert_service.ChainRegistry'), \
              patch('tarsy.services.alert_service.MCPServerRegistry'), \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
              patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager, \
@@ -158,11 +154,8 @@ class TestAlertProcessing:
     @pytest.fixture
     def sample_alert(self):
         """Create a sample alert for testing."""
-        return Alert(
-            alert_type="kubernetes",
-            runbook="https://github.com/company/runbooks/blob/main/k8s.md",
+        return AlertFactory.create_kubernetes_alert(
             severity="critical",
-            timestamp=now_us(),
             data={
                 "environment": "production",
                 "cluster": "main-cluster",
@@ -175,38 +168,33 @@ class TestAlertProcessing:
     @pytest.fixture
     async def initialized_service(self, sample_alert):
         """Create fully initialized AlertService."""
-        mock_settings = Mock(spec=Settings)
-        mock_settings.github_token = "test_token"
-        mock_settings.history_enabled = True
+        mock_settings = MockFactory.create_mock_settings(
+            github_token="test_token",
+            history_enabled=True,
+            agent_config_path=None  # No agent config for unit tests
+        )
         
-        # Create dependencies  
-        with patch('tarsy.services.alert_service.RunbookService') as mock_runbook, \
-             patch('tarsy.services.alert_service.get_history_service') as mock_history, \
-             patch('tarsy.services.alert_service.AgentRegistry') as mock_registry, \
-             patch('tarsy.services.alert_service.MCPServerRegistry') as mock_mcp_registry, \
-             patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
-             patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager:
-            
-            # Set up async methods for MCP client
-            mock_mcp_client.return_value.initialize = AsyncMock()
-            mock_mcp_client.return_value.close = AsyncMock()
-            
-            dependencies = {
-                'runbook': mock_runbook.return_value,
-                'history': mock_history.return_value,
-                'registry': mock_registry.return_value,
-                'mcp_registry': mock_mcp_registry.return_value,
-                'mcp_client': mock_mcp_client.return_value,
-                'llm_manager': mock_llm_manager.return_value
-            }
-            
-            # Create service
-            service = AlertService(mock_settings)
-            
-            # Initialize agent factory
-            service.agent_factory = Mock()
-            
-            yield service, dependencies
+        # Create dependencies using our factory
+        dependencies = MockFactory.create_mock_alert_service_dependencies()
+        
+        # Create service
+        service = AlertService(mock_settings)
+        
+        # Initialize agent factory with get_agent method
+        service.agent_factory = Mock()
+        service.agent_factory.get_agent = Mock()
+        
+        # Create mock history service for proper testing
+        from tarsy.services.history_service import HistoryService
+        mock_history_service = Mock(spec=HistoryService)
+        mock_history_service.enabled = True
+        mock_history_service.create_session.return_value = "test-session-id"
+        mock_history_service.update_session_status = Mock()
+        mock_history_service.log_llm_interaction = Mock()
+        mock_history_service.log_mcp_interaction = Mock()
+        service.history_service = mock_history_service
+        
+        yield service, dependencies
     
     @pytest.mark.asyncio
     async def test_process_alert_success(self, initialized_service, sample_alert):
@@ -222,8 +210,20 @@ class TestAlertProcessing:
             "iterations": 1,
             "timestamp_us": now_us()
         }
-        dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
+        
+        # Set up the service with our mocked dependencies
+        service.chain_registry = dependencies['chain_registry']
+        service.runbook_service = dependencies['runbook']
+        service.llm_manager = dependencies['llm_manager']
+        
+        dependencies['chain_registry'].get_chain_for_alert_type.return_value = ChainDefinitionModel(
+            chain_id='kubernetes-agent-chain',
+            alert_types=['kubernetes'],
+            stages=[ChainStageModel(name='analysis', agent='KubernetesAgent')],
+            description='Test chain'
+        )
         service.agent_factory.create_agent.return_value = mock_agent
+        service.agent_factory.get_agent.return_value = mock_agent
         
         # Mock runbook download
         dependencies['runbook'].download_runbook = AsyncMock(return_value="Mock runbook content")
@@ -240,19 +240,26 @@ class TestAlertProcessing:
         # Assertions - check that the analysis result is included in the formatted response
         assert "Test analysis result" in result
         assert "# Alert Analysis Report" in result
-        assert "**Processing Agent:** KubernetesAgent" in result
+        assert "**Processing Chain:** kubernetes-agent-chain" in result  # Chain architecture format
         mock_agent.process_alert.assert_called_once()
         
         # Verify agent was called with correct parameters
         call_args = mock_agent.process_alert.call_args
-        assert call_args[1]['alert_data'] == alert_dict.alert_data
-        assert call_args[1]['runbook_content'] == "Mock runbook content"
-        assert call_args[1]['session_id'] is not None
+        alert_processing_data = call_args[0][0]  # First positional arg
+        session_id = call_args[0][1]  # Second positional arg
+        assert alert_processing_data.alert_data == alert_dict.alert_data
+        assert alert_processing_data.runbook_content == "Mock runbook content"
+        assert session_id is not None
     
     @pytest.mark.asyncio
     async def test_process_alert_unsupported_type(self, initialized_service):
         """Test error handling for unsupported alert type."""
         service, dependencies = initialized_service
+        
+        # Set up the service with our mocked dependencies
+        service.chain_registry = dependencies['chain_registry']
+        service.runbook_service = dependencies['runbook']
+        service.llm_manager = dependencies['llm_manager']
         
         # Create unsupported alert
         unsupported_alert = Alert(
@@ -262,8 +269,8 @@ class TestAlertProcessing:
         )
         
         # Mock no agent available for type
-        dependencies['registry'].get_agent_for_alert_type.side_effect = ValueError("No agent for alert type 'UnsupportedAlertType'. Available: ['kubernetes']")
-        dependencies['registry'].get_supported_alert_types.return_value = ["kubernetes"]
+        dependencies['chain_registry'].get_chain_for_alert_type.side_effect = ValueError("No agent for alert type 'UnsupportedAlertType'. Available: ['kubernetes']")
+        dependencies['chain_registry'].list_available_alert_types.return_value = ["kubernetes"]
         dependencies['llm_manager'].is_available.return_value = True
         
         # Convert to dict and test
@@ -277,7 +284,17 @@ class TestAlertProcessing:
         """Test error handling when agent creation fails."""
         service, dependencies = initialized_service
         
-        dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
+        # Set up the service with our mocked dependencies
+        service.chain_registry = dependencies['chain_registry']
+        service.runbook_service = dependencies['runbook']
+        service.llm_manager = dependencies['llm_manager']
+        
+        dependencies['chain_registry'].get_chain_for_alert_type.return_value = ChainDefinitionModel(
+            chain_id='kubernetes-agent-chain',
+            alert_types=['kubernetes'],
+            stages=[ChainStageModel(name='analysis', agent='KubernetesAgent')],
+            description='Test chain'
+        )
         dependencies['llm_manager'].is_available.return_value = True
         service.agent_factory.create_agent.side_effect = ValueError("Agent creation failed")
         
@@ -296,24 +313,40 @@ class TestAlertProcessing:
         """Test error handling when agent processing fails.""" 
         service, dependencies = initialized_service
         
+        # Set up the service with our mocked dependencies
+        service.chain_registry = dependencies['chain_registry']
+        service.runbook_service = dependencies['runbook']
+        service.llm_manager = dependencies['llm_manager']
+        
         # Mock agent that fails during processing
         mock_agent = AsyncMock()
         mock_agent.process_alert.side_effect = Exception("Agent processing failed")
         
-        dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
+        dependencies['chain_registry'].get_chain_for_alert_type.return_value = ChainDefinitionModel(
+            chain_id='kubernetes-agent-chain',
+            alert_types=['kubernetes'],
+            stages=[ChainStageModel(name='analysis', agent='KubernetesAgent')],
+            description='Test chain'
+        )
         dependencies['llm_manager'].is_available.return_value = True
         dependencies['runbook'].download_runbook = AsyncMock(return_value="Mock runbook")
         service.agent_factory.create_agent.return_value = mock_agent
+        service.agent_factory.get_agent.return_value = mock_agent
         
         alert_dict = alert_to_api_format(sample_alert)
         result = await service.process_alert(alert_dict)
         
-        assert "Agent processing failed" in result
+        assert "Chain processing failed" in result  # Chain architecture error format
 
     @pytest.mark.asyncio
     async def test_process_alert_llm_unavailable(self, initialized_service, sample_alert):
         """Test error handling when LLM is unavailable."""
         service, dependencies = initialized_service
+        
+        # Set up the service with our mocked dependencies
+        service.chain_registry = dependencies['chain_registry']
+        service.runbook_service = dependencies['runbook']
+        service.llm_manager = dependencies['llm_manager']
         
         dependencies['llm_manager'].is_available.return_value = False
         
@@ -326,6 +359,11 @@ class TestAlertProcessing:
     async def test_process_alert_agent_factory_not_initialized(self, initialized_service, sample_alert):
         """Test error handling when agent factory is not initialized."""
         service, dependencies = initialized_service
+        
+        # Set up the service with our mocked dependencies
+        service.chain_registry = dependencies['chain_registry']
+        service.runbook_service = dependencies['runbook']
+        service.llm_manager = dependencies['llm_manager']
         
         service.agent_factory = None
         dependencies['llm_manager'].is_available.return_value = True
@@ -340,7 +378,17 @@ class TestAlertProcessing:
         """Test error handling when runbook download fails."""
         service, dependencies = initialized_service
         
-        dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent" 
+        # Set up the service with our mocked dependencies
+        service.chain_registry = dependencies['chain_registry']
+        service.runbook_service = dependencies['runbook']
+        service.llm_manager = dependencies['llm_manager']
+        
+        dependencies['chain_registry'].get_chain_for_alert_type.return_value = ChainDefinitionModel(
+            chain_id='kubernetes-agent-chain',
+            alert_types=['kubernetes'],
+            stages=[ChainStageModel(name='analysis', agent='KubernetesAgent')],
+            description='Test chain'
+        ) 
         dependencies['llm_manager'].is_available.return_value = True
         dependencies['runbook'].download_runbook = AsyncMock(side_effect=Exception("Runbook download failed"))
         
@@ -358,10 +406,11 @@ class TestHistorySessionManagement:
     def alert_service_with_history(self):
         """Create AlertService with mocked history service."""
         mock_settings = Mock(spec=Settings)
+        mock_settings.agent_config_path = None  # No agent config for unit tests
         
         with patch('tarsy.services.alert_service.RunbookService'), \
              patch('tarsy.services.alert_service.get_history_service') as mock_history, \
-             patch('tarsy.services.alert_service.AgentRegistry'), \
+             patch('tarsy.services.alert_service.ChainRegistry'), \
              patch('tarsy.services.alert_service.MCPServerRegistry'), \
              patch('tarsy.services.alert_service.MCPClient'), \
              patch('tarsy.services.alert_service.LLMManager'):
@@ -369,7 +418,6 @@ class TestHistorySessionManagement:
             service = AlertService(mock_settings)
             service.history_service = Mock()
             service.history_service.enabled = True
-            service.agent_registry = Mock()
             
             yield service
     
@@ -393,7 +441,12 @@ class TestHistorySessionManagement:
     def test_create_history_session_success(self, alert_service_with_history, sample_alert):
         """Test successful history session creation."""
         service = alert_service_with_history
-        service.agent_registry.get_agent_for_alert_type.return_value = "KubernetesAgent"
+        service.chain_registry.get_chain_for_alert_type.return_value = ChainDefinitionModel(
+            chain_id='kubernetes-agent-chain',
+            alert_types=['kubernetes'],
+            stages=[ChainStageModel(name='analysis', agent='KubernetesAgent')],
+            description='Test chain'
+        )
         service.history_service.create_session.return_value = "session_123"
         
         # Convert Alert to dict for the new interface
@@ -510,10 +563,11 @@ class TestResponseFormatting:
     def alert_service(self):
         """Create basic AlertService for formatting tests."""
         mock_settings = Mock(spec=Settings)
+        mock_settings.agent_config_path = None  # No agent config for unit tests
         
         with patch('tarsy.services.alert_service.RunbookService'), \
              patch('tarsy.services.alert_service.get_history_service'), \
-             patch('tarsy.services.alert_service.AgentRegistry'), \
+             patch('tarsy.services.alert_service.ChainRegistry'), \
              patch('tarsy.services.alert_service.MCPServerRegistry'), \
              patch('tarsy.services.alert_service.MCPClient'), \
              patch('tarsy.services.alert_service.LLMManager'):
@@ -608,10 +662,11 @@ class TestCleanup:
     async def alert_service_with_resources(self):
         """Create AlertService with resource mocks."""
         mock_settings = Mock(spec=Settings)
+        mock_settings.agent_config_path = None  # No agent config for unit tests
         
         with patch('tarsy.services.alert_service.RunbookService') as mock_runbook, \
              patch('tarsy.services.alert_service.get_history_service'), \
-             patch('tarsy.services.alert_service.AgentRegistry'), \
+             patch('tarsy.services.alert_service.ChainRegistry'), \
              patch('tarsy.services.alert_service.MCPServerRegistry'), \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
              patch('tarsy.services.alert_service.LLMManager'):
@@ -672,7 +727,7 @@ class TestAlertServiceDuplicatePrevention:
         """Mock all AlertService dependencies."""
         with patch('tarsy.services.alert_service.RunbookService') as mock_runbook, \
              patch('tarsy.services.alert_service.get_history_service') as mock_history, \
-             patch('tarsy.services.alert_service.AgentRegistry') as mock_registry, \
+             patch('tarsy.services.alert_service.ChainRegistry') as mock_chain_registry, \
              patch('tarsy.services.alert_service.MCPServerRegistry') as mock_mcp_registry, \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
              patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager:
@@ -680,7 +735,7 @@ class TestAlertServiceDuplicatePrevention:
             yield {
                 'runbook': mock_runbook.return_value,
                 'history': mock_history.return_value,
-                'registry': mock_registry.return_value,
+                'chain_registry': mock_chain_registry.return_value,
                 'mcp_registry': mock_mcp_registry.return_value,
                 'mcp_client': mock_mcp_client.return_value,
                 'llm_manager': mock_llm_manager.return_value
@@ -692,6 +747,7 @@ class TestAlertServiceDuplicatePrevention:
         mock_settings = Mock(spec=Settings) 
         mock_settings.github_token = "test_token"
         mock_settings.history_enabled = True
+        mock_settings.agent_config_path = None  # No agent config for unit tests
         
         service = AlertService(mock_settings)
         service.agent_factory = Mock()
@@ -704,7 +760,12 @@ class TestAlertServiceDuplicatePrevention:
         
         # Mock successful processing setup
         mock_dependencies['llm_manager'].is_available.return_value = True
-        mock_dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
+        mock_dependencies['chain_registry'].get_chain_for_alert_type.return_value = ChainDefinitionModel(
+            chain_id='kubernetes-agent-chain',
+            alert_types=['kubernetes'],
+            stages=[ChainStageModel(name='analysis', agent='KubernetesAgent')],
+            description='Test chain'
+        )
         mock_dependencies['history'].create_session.return_value = "session_123"
         
         alert_dict = alert_to_api_format(sample_alert)
@@ -726,7 +787,12 @@ class TestAlertServiceDuplicatePrevention:
         
         # Setup mocks
         mock_dependencies['llm_manager'].is_available.return_value = True
-        mock_dependencies['registry'].get_agent_for_alert_type.return_value = "KubernetesAgent"
+        mock_dependencies['chain_registry'].get_chain_for_alert_type.return_value = ChainDefinitionModel(
+            chain_id='kubernetes-agent-chain',
+            alert_types=['kubernetes'],
+            stages=[ChainStageModel(name='analysis', agent='KubernetesAgent')],
+            description='Test chain'
+        )
         mock_dependencies['history'].create_session.return_value = "session_456"
         
         # Add existing_id to alert data
@@ -800,6 +866,7 @@ class TestAlertServiceValidationAndCaching:
         settings = Mock(spec=Settings)
         settings.github_token = "test_token"
         settings.history_enabled = True
+        settings.agent_config_path = None  # No agent config for unit tests
         return settings
     
     @pytest.fixture
@@ -807,7 +874,7 @@ class TestAlertServiceValidationAndCaching:
         """Mock all AlertService dependencies."""
         with patch('tarsy.services.alert_service.RunbookService') as mock_runbook, \
              patch('tarsy.services.alert_service.get_history_service') as mock_history, \
-             patch('tarsy.services.alert_service.AgentRegistry') as mock_registry, \
+             patch('tarsy.services.alert_service.ChainRegistry') as mock_chain_registry, \
              patch('tarsy.services.alert_service.MCPServerRegistry') as mock_mcp_registry, \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
              patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager:
@@ -815,7 +882,7 @@ class TestAlertServiceValidationAndCaching:
             yield {
                 'runbook': mock_runbook.return_value,
                 'history': mock_history.return_value,
-                'registry': mock_registry.return_value,
+                'chain_registry': mock_chain_registry.return_value,
                 'mcp_registry': mock_mcp_registry.return_value,
                 'mcp_client': mock_mcp_client.return_value,
                 'llm_manager': mock_llm_manager.return_value
@@ -957,4 +1024,4 @@ class TestAlertServiceValidationAndCaching:
         long_alert_id = "a" * 1000
         assert not alert_service.alert_exists(long_alert_id)
         alert_service.register_alert_id(long_alert_id)
-        assert alert_service.alert_exists(long_alert_id) 
+        assert alert_service.alert_exists(long_alert_id)

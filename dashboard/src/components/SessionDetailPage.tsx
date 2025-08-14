@@ -19,7 +19,7 @@ import type { DetailedSession, SessionUpdate } from '../types';
 import SessionHeader from './SessionHeader';
 import OriginalAlertCard from './OriginalAlertCard';
 import FinalAnalysisCard from './FinalAnalysisCard';
-import TimelineVisualization from './TimelineVisualization';
+import NestedAccordionTimeline from './NestedAccordionTimeline';
 
 
 /**
@@ -147,6 +147,18 @@ function SessionDetailPage() {
         // Handle session status changes - update session state without refetching
         if (data.type === 'session_status_change') {
           console.log('Session status change detected, updating session state');
+          
+          // Check if this is a chain session that might have stage changes
+          const isChainSession = session?.chain_id && session?.chain_execution;
+          
+          // For chain sessions, we need to refetch to get updated stage information
+          // because stage progress updates are critical for the UI
+          if (isChainSession && (data.status === 'in_progress' || data.current_stage_index !== undefined)) {
+            console.log('Chain session stage-related status change detected, fetching updated session data');
+            fetchSessionDetail(sessionId);
+            return;
+          }
+          
           setSession(prevSession => {
             if (!prevSession) return prevSession;
             
@@ -210,6 +222,39 @@ function SessionDetailPage() {
             // Fallback to basic session update without timeline details
           }
         }
+        // Handle stage progress updates - update chain execution smoothly without full refresh
+        else if (data.type === 'stage_progress') {
+          console.log('Stage progress update detected, updating chain execution smoothly');
+          
+          try {
+            // Fetch updated session data to get latest stage information
+            const updatedSessionData = await apiClient.getSessionDetail(sessionId);
+            
+            setSession(prevSession => {
+              if (!prevSession) return updatedSessionData;
+              
+              // Only update the chain execution and essential fields, preserve everything else
+              return {
+                ...prevSession,
+                chain_execution: updatedSessionData.chain_execution || prevSession.chain_execution,
+                current_stage_index: updatedSessionData.current_stage_index ?? prevSession.current_stage_index,
+                completed_stages: updatedSessionData.completed_stages ?? prevSession.completed_stages,
+                failed_stages: updatedSessionData.failed_stages ?? prevSession.failed_stages,
+                status: updatedSessionData.status || prevSession.status,
+                duration_ms: updatedSessionData.duration_ms ?? prevSession.duration_ms,
+                completed_at_us: updatedSessionData.completed_at_us ?? prevSession.completed_at_us,
+                final_analysis: updatedSessionData.final_analysis || prevSession.final_analysis,
+                error_message: updatedSessionData.error_message || prevSession.error_message
+              };
+            });
+            
+            console.log(`Stage progress updated smoothly for stage: ${data.stage_name} (${data.status})`);
+          } catch (error) {
+            console.error('Failed to fetch updated stage data:', error);
+          }
+          
+          return;
+        }
         // Handle individual timeline interactions (fallback) - rarely used now
         else if (data.interaction_type === 'llm' || data.interaction_type === 'mcp') {
           console.log('Individual timeline interaction detected, updating timeline smoothly');
@@ -238,7 +283,7 @@ function SessionDetailPage() {
           }
         } 
         // Handle individual LLM/MCP interactions - refresh timeline to show new interactions
-        else if (data.type === 'llm_interaction' || data.type === 'mcp_communication') {
+        else if (data.type === 'llm_interaction' || data.type === 'mcp_communication' || data.type === 'mcp_tool_list') {
           console.log(`New ${data.type} detected, refreshing timeline to show latest interactions`);
           
           try {
@@ -251,9 +296,8 @@ function SessionDetailPage() {
               return {
                 ...prevSession,
                 chronological_timeline: updatedSessionData.chronological_timeline,
-                llm_interactions: updatedSessionData.llm_interactions,
-                mcp_communications: updatedSessionData.mcp_communications,
-                interactions_count: updatedSessionData.interactions_count
+                llm_interaction_count: updatedSessionData.llm_interaction_count,
+                mcp_communication_count: updatedSessionData.mcp_communication_count
               };
             });
             
@@ -292,6 +336,9 @@ function SessionDetailPage() {
         }
       };
 
+      // Note: Stage progress updates are now handled smoothly in handleSessionSpecificUpdate above
+      // to avoid full page refreshes
+
       // Handle WebSocket connection changes - refresh data on reconnection
       const handleConnectionChange = (connected: boolean) => {
         if (connected) {
@@ -308,6 +355,10 @@ function SessionDetailPage() {
       const unsubscribeCompleted = webSocketService.onSessionCompleted(handleSessionCompleted);
       const unsubscribeFailed = webSocketService.onSessionFailed(handleSessionFailed);
       const unsubscribeConnection = webSocketService.onConnectionChange(handleConnectionChange);
+      
+      // Note: Stage progress events are now handled in session-specific updates
+      // No need for separate stage progress subscription
+      const unsubscribeStageProgress = () => {};
 
       // Subscribe to session-specific channel for timeline updates
       const sessionChannel = `session_${sessionId}`;
@@ -316,10 +367,10 @@ function SessionDetailPage() {
         handleSessionSpecificUpdate
       );
 
-      return { handleSessionUpdate, handleSessionSpecificUpdate, unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeConnection, unsubscribeSessionSpecific };
+      return { unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeConnection, unsubscribeStageProgress, unsubscribeSessionSpecific };
     };
 
-    const { unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeConnection, unsubscribeSessionSpecific } = setupHandlers();
+    const { unsubscribeUpdate, unsubscribeCompleted, unsubscribeFailed, unsubscribeConnection, unsubscribeStageProgress, unsubscribeSessionSpecific } = setupHandlers();
 
     // Cleanup subscriptions
     return () => {
@@ -328,6 +379,7 @@ function SessionDetailPage() {
       unsubscribeCompleted();
       unsubscribeFailed();
       unsubscribeConnection();
+      unsubscribeStageProgress();
       unsubscribeSessionSpecific();
       
       // Unsubscribe from session-specific channel
@@ -478,11 +530,30 @@ function SessionDetailPage() {
             <OriginalAlertCard alertData={session.alert_data} />
 
             {/* Enhanced Processing Timeline */}
-            <TimelineVisualization 
-              timelineItems={session.chronological_timeline}
-              isActive={session.status === 'in_progress' || session.status === 'pending'}
-              sessionId={session.session_id}
-            />
+            {session.chain_execution ? (
+              <NestedAccordionTimeline
+                chainExecution={session.chain_execution}
+                timelineItems={session.chronological_timeline}
+              />
+            ) : (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                <Typography variant="h6" gutterBottom>
+                  Backend Chain Execution Error
+                </Typography>
+                <Typography variant="body2">
+                  This session is missing chain execution data. All sessions should be processed as chains.
+                  This indicates a backend bug where stage execution records were not created properly.
+                </Typography>
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Session ID: {session.session_id}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Agent Type: {session.agent_type}
+                  </Typography>
+                </Box>
+              </Alert>
+            )}
 
             {/* Final AI Analysis */}
             <FinalAnalysisCard 

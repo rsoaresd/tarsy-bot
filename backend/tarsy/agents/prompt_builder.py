@@ -24,6 +24,11 @@ class PromptContext:
     iteration_history: Optional[List[Dict]] = None
     current_iteration: Optional[int] = None
     max_iterations: Optional[int] = None
+    # Stage context for chain processing
+    stage_name: Optional[str] = None
+    is_final_stage: bool = False
+    previous_stages: Optional[List[str]] = None
+    stage_attributed_data: Optional[Dict[str, Any]] = None  # MCP data with stage attribution
 
 class PromptBuilder:
     """
@@ -472,10 +477,54 @@ Focus on root cause analysis and sustainable solutions."""
         """Get system message for iterative MCP tool selection."""
         return "You are an expert SRE analyzing alerts through multi-step runbooks. Based on the alert, runbook, available MCP tools, and previous iteration results, determine what tools should be called next or if the analysis is complete. Return only a valid JSON object with no additional text."
     
+    def get_standard_react_system_message(self, task_focus: str = "investigation and providing recommendations") -> str:
+        """Get the standard ReAct system message with consistent formatting rules."""
+        return f"""You are an expert SRE analyzing alerts. Follow the ReAct format EXACTLY as specified.
+
+CRITICAL FORMATTING RULES:
+1. ALWAYS include colons after section headers: "Thought:", "Action:", "Action Input:"
+2. For Action Input, provide ONLY the parameter values (no YAML, no code blocks, no triple backticks)
+3. STOP immediately after "Action Input:" line - do NOT generate "Observation:"
+4. NEVER write fake observations or continue the conversation
+
+CORRECT FORMAT:
+Thought: [your reasoning here]
+Action: [exact tool name]
+Action Input: [parameter values only]
+
+INCORRECT FORMATS TO AVOID:
+- "Thought" without colon
+- Action Input with ```yaml or code blocks
+- Adding "Observation:" section
+- Continuing with more Thought/Action pairs
+
+Focus on {task_focus} for human operators to execute."""
+    
 
     # ====================================================================
     # Standard ReAct Framework Methods 
     # ====================================================================
+
+    def _flatten_react_history(self, react_history: List) -> List[str]:
+        """
+        Utility method to flatten react history and ensure all elements are strings.
+        
+        This handles cases where react_history contains nested lists from 
+        continuation prompts or error handling.
+        
+        Args:
+            react_history: List that may contain strings or nested lists
+            
+        Returns:
+            Flattened list with all elements converted to strings
+        """
+        flattened_history = []
+        for item in react_history:
+            if isinstance(item, list):
+                flattened_history.extend(str(subitem) for subitem in item)
+            else:
+                flattened_history.append(str(item))
+        return flattened_history
 
     def build_standard_react_prompt(self, context: PromptContext, react_history: List[str] = None) -> str:
         """Build standard ReAct prompt following the established ReAct pattern."""
@@ -483,7 +532,8 @@ Focus on root cause analysis and sustainable solutions."""
         # Build the ReAct history from previous iterations
         history_text = ""
         if react_history:
-            history_text = "\n".join(react_history) + "\n"
+            flattened_history = self._flatten_react_history(react_history)
+            history_text = "\n".join(flattened_history) + "\n"
         
         available_actions = self._format_available_actions(context.available_tools)
         action_names = self._get_action_names(context.available_tools)
@@ -720,6 +770,40 @@ Be thorough in your investigation before providing the final answer."""
         
         return parsed
 
+    def get_react_continuation_prompt(self, context_type: str = "general") -> List[str]:
+        """
+        Get ReAct continuation prompts for when LLM provides incomplete responses.
+        
+        Args:
+            context_type: Type of ReAct context ("general", "data_collection", "analysis")
+            
+        Returns:
+            List of strings to add to react_history for proper continuation
+        """
+        prompts = {
+            "general": "Observation: Please specify what Action you want to take next, or provide your Final Answer if you have enough information.",
+            "data_collection": "Observation: Please specify what Action you want to take next, or provide your Final Answer if you have collected sufficient data.",
+            "analysis": "Observation: Please specify what Action you want to take next, or provide your Final Answer with both collected data and analysis."
+        }
+        
+        continuation_message = prompts.get(context_type, prompts["general"])
+        return [continuation_message, "Thought:"]
+    
+    def get_react_error_continuation(self, error_message: str) -> List[str]:
+        """
+        Get ReAct continuation prompts for error recovery.
+        
+        Args:
+            error_message: The error message to include
+            
+        Returns:
+            List of strings to add to react_history for error recovery
+        """
+        return [
+            f"Observation: Error in reasoning: {error_message}. Please try a different approach.",
+            "Thought:"
+        ]
+
     def convert_action_to_tool_call(self, action: str, action_input: str) -> Dict[str, Any]:
         """Convert ReAct Action/Action Input to MCP tool call format."""
         if not action:
@@ -809,6 +893,200 @@ Be thorough in your investigation before providing the final answer."""
                 observations.append(f"{server}: {json.dumps(results, indent=2)}")
         
         return '\n'.join(observations) if observations else "Action completed but no specific data returned."
+
+    # ====================================================================
+    # Chain-Specific ReAct Prompt Methods
+    # ====================================================================
+
+    def _format_react_question_for_data_collection(self, context: PromptContext) -> str:
+        """Format ReAct question specifically for data collection stages."""
+        alert_type = context.alert_data.get('alert_type', context.alert_data.get('alert', 'Unknown Alert'))
+        
+        question = f"""Collect comprehensive data about this {alert_type} alert for the next analysis stage.
+
+## Alert Details
+{self._build_alert_section(context.alert_data)}
+
+{self._build_runbook_section(context.runbook_content)}
+
+## Previous Stage Data
+{self._build_mcp_data_section(context.mcp_data) if context.mcp_data else "No previous stage data available."}
+
+## Your Task: DATA COLLECTION ONLY
+Use available tools to systematically collect information about:
+1. Current system state related to this alert
+2. Historical patterns or trends
+3. Related resource status
+4. Configuration details
+
+DO NOT provide analysis or conclusions - focus purely on gathering comprehensive data.
+Your Final Answer should summarize what data was collected, not analyze it."""
+        
+        return question
+
+    def _format_react_question_for_partial_analysis(self, context: PromptContext) -> str:
+        """Format ReAct question for data collection + stage-specific analysis."""
+        alert_type = context.alert_data.get('alert_type', context.alert_data.get('alert', 'Unknown Alert'))
+        
+        question = f"""Investigate this {alert_type} alert and provide stage-specific analysis.
+
+## Alert Details
+{self._build_alert_section(context.alert_data)}
+
+{self._build_runbook_section(context.runbook_content)}
+
+## Previous Stage Data
+{self._build_mcp_data_section(context.mcp_data) if context.mcp_data else "No previous stage data available."}
+
+## Your Task: COLLECTION + PARTIAL ANALYSIS
+1. First, collect additional data specific to this analysis stage
+2. Then, provide preliminary analysis of the collected information
+3. Focus on stage-specific insights, not final conclusions
+
+Your Final Answer should include both the data collected and your stage-specific analysis."""
+        
+        return question
+
+    def build_data_collection_react_prompt(self, context: PromptContext, react_history: List[str] = None) -> str:
+        """Build ReAct prompt for data collection using existing ReAct infrastructure."""
+        # Create modified context with data collection question (preserve all context fields)
+        data_collection_context = PromptContext(
+            agent_name=context.agent_name,
+            alert_data=context.alert_data,
+            runbook_content=context.runbook_content,
+            mcp_data=context.mcp_data,
+            mcp_servers=context.mcp_servers,
+            server_guidance=context.server_guidance,
+            agent_specific_guidance=context.agent_specific_guidance,
+            available_tools=context.available_tools,
+            iteration_history=context.iteration_history,
+            current_iteration=context.current_iteration,
+            max_iterations=context.max_iterations,
+            stage_name=context.stage_name,
+            is_final_stage=context.is_final_stage,
+            previous_stages=context.previous_stages,
+            stage_attributed_data=context.stage_attributed_data
+        )
+        
+        # Override the question formatting temporarily
+        original_format_method = self._format_react_question
+        self._format_react_question = self._format_react_question_for_data_collection
+        
+        try:
+            # Use existing standard ReAct prompt builder
+            prompt = self.build_standard_react_prompt(data_collection_context, react_history)
+            return prompt
+        finally:
+            # Restore original method
+            self._format_react_question = original_format_method
+
+    def build_partial_analysis_react_prompt(self, context: PromptContext, react_history: List[str] = None) -> str:
+        """Build ReAct prompt for partial analysis using existing ReAct infrastructure."""
+        # Create modified context with partial analysis question (preserve all context fields)
+        partial_analysis_context = PromptContext(
+            agent_name=context.agent_name,
+            alert_data=context.alert_data,
+            runbook_content=context.runbook_content,
+            mcp_data=context.mcp_data,
+            mcp_servers=context.mcp_servers,
+            server_guidance=context.server_guidance,
+            agent_specific_guidance=context.agent_specific_guidance,
+            available_tools=context.available_tools,
+            iteration_history=context.iteration_history,
+            current_iteration=context.current_iteration,
+            max_iterations=context.max_iterations,
+            stage_name=context.stage_name,
+            is_final_stage=context.is_final_stage,
+            previous_stages=context.previous_stages,
+            stage_attributed_data=context.stage_attributed_data
+        )
+        
+        # Override the question formatting temporarily
+        original_format_method = self._format_react_question
+        self._format_react_question = self._format_react_question_for_partial_analysis
+        
+        try:
+            # Use existing standard ReAct prompt builder
+            prompt = self.build_standard_react_prompt(partial_analysis_context, react_history)
+            return prompt
+        finally:
+            # Restore original method
+            self._format_react_question = original_format_method
+
+    def build_final_analysis_prompt(self, context: PromptContext) -> str:
+        """Build prompt for final analysis without ReAct format (no tools)."""
+        sections = [
+            "# Final Analysis Task"
+        ]
+        
+        # Add stage context if available
+        if context.stage_name:
+            stage_info = f"\n**Stage:** {context.stage_name}"
+            if context.is_final_stage:
+                stage_info += " (Final Analysis Stage)"
+            if context.previous_stages:
+                stage_info += f"\n**Previous Stages:** {', '.join(context.previous_stages)}"
+            stage_info += "\n"
+            sections.append(stage_info)
+        
+        sections.extend([
+            self._build_context_section(context),
+            self._build_alert_section(context.alert_data),
+            self._build_runbook_section(context.runbook_content)
+        ])
+        
+        # Include all accumulated data from previous stages
+        if context.stage_attributed_data:
+            # Use stage-attributed format for better clarity
+            formatted_data = self._format_stage_attributed_data(context.stage_attributed_data)
+            sections.append(f"## Complete Investigation Data\n{formatted_data}")
+        elif context.mcp_data:
+            # Fallback to merged format
+            sections.append(f"## Complete Investigation Data\n{json.dumps(context.mcp_data, indent=2)}")
+        
+        sections.append("""## Instructions
+Provide comprehensive final analysis based on ALL collected data:
+1. Root cause analysis
+2. Impact assessment  
+3. Recommended actions
+4. Prevention strategies
+
+Do NOT call any tools - use only the provided data.""")
+        
+        return "\n\n".join(sections)
+
+    def _format_stage_attributed_data(self, stage_attributed_data: Dict[str, Any]) -> str:
+        """Format stage-attributed MCP data for clear presentation."""
+        if not stage_attributed_data:
+            return "No investigation data from previous stages."
+        
+        sections = []
+        for stage_name, stage_data in stage_attributed_data.items():
+            sections.append(f"### Data from '{stage_name}' stage:")
+            
+            if not stage_data:
+                sections.append("*No MCP data collected in this stage*")
+                continue
+            
+            for server_name, server_results in stage_data.items():
+                if not server_results:
+                    continue
+                    
+                sections.append(f"**{server_name} server:**")
+                
+                # Handle both list and single result formats
+                results_list = server_results if isinstance(server_results, list) else [server_results]
+                
+                for i, result in enumerate(results_list, 1):
+                    if isinstance(result, dict):
+                        tool_name = result.get('tool', 'unknown_tool')
+                        sections.append(f"  {i}. {tool_name}:")
+                        sections.append(f"     {json.dumps(result, indent=6)}")
+                    else:
+                        sections.append(f"  {i}. {json.dumps(result, indent=4)}")
+                sections.append("")  # Add spacing between servers
+        
+        return "\n".join(sections)
 
 
 # Shared instance since PromptBuilder is stateless

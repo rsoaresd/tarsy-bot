@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from tarsy.config.settings import get_settings
 from tarsy.models.constants import AlertSessionStatus
-from tarsy.models.history import AlertSession, now_us
+from tarsy.models.history import AlertSession, StageExecution, now_us
 from tarsy.models.unified_interactions import LLMInteraction, MCPInteraction
 from tarsy.repositories.base_repository import DatabaseManager
 from tarsy.repositories.history_repository import HistoryRepository
@@ -175,7 +175,9 @@ class HistoryService:
         alert_id: str,
         alert_data: Dict[str, Any],
         agent_type: str,
-        alert_type: Optional[str] = None
+        alert_type: Optional[str] = None,
+        chain_id: Optional[str] = None,
+        chain_definition: Optional[Dict[str, Any]] = None
     ) -> Optional[str]:
         """
         Create a new alert processing session with retry logic.
@@ -185,6 +187,8 @@ class HistoryService:
             alert_data: Original alert payload
             agent_type: Processing agent type (e.g., 'kubernetes', 'base')
             alert_type: Alert type for filtering (e.g., 'pod_crash', 'high_cpu')
+            chain_id: Chain identifier for chain processing (optional)
+            chain_definition: Complete chain definition for chain processing (optional)
             
         Returns:
             Session ID if created successfully, None if failed
@@ -204,7 +208,9 @@ class HistoryService:
                     alert_data=alert_data,
                     agent_type=agent_type,
                     alert_type=alert_type,
-                    status=AlertSessionStatus.PENDING
+                    status=AlertSessionStatus.PENDING.value,
+                    chain_id=chain_id,
+                    chain_definition=chain_definition
                 )
                 
                 created_session = repo.create_alert_session(session)
@@ -253,7 +259,7 @@ class HistoryService:
                     session.error_message = error_message
                 if final_analysis:
                     session.final_analysis = final_analysis
-                if status in AlertSessionStatus.TERMINAL_STATUSES:
+                if status in AlertSessionStatus.terminal_values():
                     session.completed_at_us = now_us()
                 
                 success = repo.update_alert_session(session)
@@ -295,6 +301,73 @@ class HistoryService:
         
         result = self._retry_database_operation("update_session_status", _update_status_operation)
         return result if result is not None else False
+
+    # Stage Execution Methods for Chain Processing
+    async def create_stage_execution(self, stage_execution: StageExecution) -> str:
+        """Create a new stage execution record."""
+        def _create_stage_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    raise RuntimeError("History repository unavailable - cannot create stage execution record")
+                return repo.create_stage_execution(stage_execution)
+        
+        result = self._retry_database_operation("create_stage_execution", _create_stage_operation)
+        if result is None:
+            raise RuntimeError(f"Failed to create stage execution record for stage '{stage_execution.stage_name}'. Chain processing cannot continue without proper stage tracking.")
+        return result
+    
+    async def update_stage_execution(self, stage_execution: StageExecution):
+        """Update an existing stage execution record."""
+        def _update_stage_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    logger.warning("History repository unavailable - stage execution not updated")
+                    return False
+                return repo.update_stage_execution(stage_execution)
+        
+        result = self._retry_database_operation("update_stage_execution", _update_stage_operation)
+        return result if result is not None else False
+    
+    async def update_session_current_stage(
+        self, 
+        session_id: str, 
+        current_stage_index: int, 
+        current_stage_id: str
+    ):
+        """Update the current stage information for a session."""
+        def _update_current_stage_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    logger.warning("History repository unavailable - current stage not updated")
+                    return False
+                return repo.update_session_current_stage(session_id, current_stage_index, current_stage_id)
+        
+        result = self._retry_database_operation("update_session_current_stage", _update_current_stage_operation)
+        return result if result is not None else False
+    
+    async def get_session_with_stages(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get session with all stage execution details."""
+        def _get_session_with_stages_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    logger.warning("History repository unavailable - session with stages not retrieved")
+                    return None
+                return repo.get_session_with_stages(session_id)
+        
+        result = self._retry_database_operation("get_session_with_stages", _get_session_with_stages_operation)
+        return result
+    
+    async def get_stage_execution(self, execution_id: str) -> Optional[StageExecution]:
+        """Get a single stage execution by ID."""
+        def _get_stage_execution_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    logger.warning("History repository unavailable - stage execution not retrieved")
+                    return None
+                return repo.get_stage_execution(execution_id)
+        
+        result = self._retry_database_operation("get_stage_execution", _get_stage_execution_operation)
+        return result
     
     # LLM Interaction Logging
     def log_llm_interaction(self, interaction: LLMInteraction) -> bool:
@@ -542,7 +615,7 @@ class HistoryService:
                     return {
                         "agent_types": [],
                         "alert_types": [],
-                        "status_options": AlertSessionStatus.ALL_STATUSES,
+                        "status_options": AlertSessionStatus.values(),
                         "time_ranges": [
                             {"label": "Last Hour", "value": "1h"},
                             {"label": "Last 4 Hours", "value": "4h"},
@@ -558,7 +631,7 @@ class HistoryService:
             return {
                 "agent_types": [],
                 "alert_types": [],
-                "status_options": AlertSessionStatus.ALL_STATUSES,
+                "status_options": AlertSessionStatus.values(),
                 "time_ranges": [
                     {"label": "Last Hour", "value": "1h"},
                     {"label": "Last 4 Hours", "value": "4h"},
@@ -592,7 +665,7 @@ class HistoryService:
                 
                 # Find all sessions in active states (pending or in_progress)
                 active_sessions_result = repo.get_alert_sessions(
-                    status=AlertSessionStatus.ACTIVE_STATUSES,
+                    status=AlertSessionStatus.active_values(),
                     page_size=1000  # Get a large batch to handle all orphaned sessions
                 )
                 
@@ -606,7 +679,7 @@ class HistoryService:
                 for session in active_sessions:
                     try:
                         # Mark session as failed with appropriate error message
-                        session.status = AlertSessionStatus.FAILED
+                        session.status = AlertSessionStatus.FAILED.value
                         session.error_message = "Backend was restarted - session terminated unexpectedly"
                         session.completed_at_us = now_us()
                         
