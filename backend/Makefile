@@ -21,7 +21,7 @@ NC := \033[0m # No Color
 help: ## Show this help message
 	@echo "$(GREEN)Tarsy Backend - Available Commands$(NC)"
 	@echo "==================================="
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "$(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
 
 # Setup and Installation
 .PHONY: install
@@ -42,9 +42,13 @@ install-dev: ## Install development dependencies (includes test)
 
 # Testing
 .PHONY: test
-test: install ## Run all tests (unit + integration)
-	@echo "$(GREEN)Running all tests...$(NC)"
-	$(PYTEST) $(TEST_DIR)/ -v --tb=short
+test: install ## Run all tests (unit + integration + e2e) with proper isolation
+	@echo "$(GREEN)Running all tests with proper isolation...$(NC)"
+	@echo "$(YELLOW)Running unit and integration tests...$(NC)"
+	@$(PYTEST) $(TEST_DIR)/unit/ $(TEST_DIR)/integration/ -v --tb=short
+	@echo "$(YELLOW)Running e2e tests in isolated session...$(NC)"  
+	@$(PYTEST) $(TEST_DIR)/e2e/ -v --tb=short -m e2e
+	@echo "$(GREEN)All tests completed with proper isolation!$(NC)"
 
 .PHONY: test-unit
 test-unit: install ## Run unit tests only
@@ -55,6 +59,11 @@ test-unit: install ## Run unit tests only
 test-integration: install ## Run integration tests only
 	@echo "$(GREEN)Running integration tests...$(NC)"
 	$(PYTEST) $(TEST_DIR)/integration/ -v --tb=short
+
+.PHONY: test-e2e
+test-e2e: install ## Run end-to-end tests only
+	@echo "$(GREEN)Running end-to-end tests...$(NC)"
+	$(PYTEST) $(TEST_DIR)/e2e/ -v --tb=short -m e2e
 
 .PHONY: test-verbose
 test-verbose: ## Run all tests with verbose output

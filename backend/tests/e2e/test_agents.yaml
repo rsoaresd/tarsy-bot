@@ -20,7 +20,7 @@ agents:
       Be thorough but efficient. Collect all relevant data before stopping.
     mcp_servers:
       - "kubernetes-server"  # Use built-in kubernetes server for simplicity
-    
+
   # Analysis Agent for root cause analysis
   AnalysisAgent:
     alert_types:
@@ -40,24 +40,6 @@ agents:
     mcp_servers:
       - "kubernetes-server"  # Use built-in kubernetes server
     
-  # Remediation Agent for fixing issues
-  RemediationAgent:
-    alert_types:
-      - "test-kubernetes-remediation"
-    iteration_strategy: "react-tools"
-    custom_instructions: |
-      You are a Kubernetes remediation specialist. Based on the analysis from previous stages,
-      execute the appropriate remediation steps to resolve the identified issues.
-      
-      For namespace terminating issues:
-      - Remove blocking finalizers safely
-      - Patch stuck resources as needed
-      - Verify successful resolution
-      
-      Always verify your remediation actions were successful.
-    mcp_servers:
-      - "kubernetes-server"  # Use built-in kubernetes server
-
 # MCP servers configuration for test environment
 # We use the built-in kubernetes-server for simplicity in testing
 mcp_servers: {}
@@ -73,28 +55,10 @@ agent_chains:
       - name: "data-collection"
         agent: "DataCollectionAgent"
         iteration_strategy: "react-tools"
-      - name: "remediation"
-        agent: "RemediationAgent" 
-        iteration_strategy: "react-tools"
       - name: "verification"
         agent: "KubernetesAgent"     # This is a built-in agent that should to be available
         iteration_strategy: "react-tools"
       - name: "analysis"  
         agent: "AnalysisAgent"
         iteration_strategy: "react-final-analysis"
-    description: "Multi-stage chain: data collection → remediation → built-in agent verification → final analysis"
-    
-  # Additional test chain for broader kubernetes issues
-  # NOTE: This chain is here only to test that multiple chains load correctly.
-  # We do not test the actual execution of this chain - only the first chain above is tested.
-  kubernetes-general-chain:
-    alert_types:
-      - "kubernetes-general"
-    stages:
-      - name: "investigation"
-        agent: "DataCollectionAgent"
-        iteration_strategy: "react-tools"
-      - name: "diagnosis"
-        agent: "AnalysisAgent" 
-        iteration_strategy: "react-final-analysis"
-    description: "Two-stage chain for general Kubernetes issue investigation"
+    description: "Multi-stage chain: data collection → built-in agent verification → final analysis"

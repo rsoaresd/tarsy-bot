@@ -8,23 +8,31 @@ Uses Unix timestamps (microseconds since epoch) throughout for optimal
 performance and consistency with the rest of the system.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+
+from tarsy.utils.logger import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 
 from tarsy.models.api_models import (
     ErrorResponse,
     HealthCheckResponse,
+    InteractionSummary,
     PaginationInfo,
     SessionDetailResponse,
     SessionsListResponse,
     SessionSummary,
-    TimelineEvent,
     ChainExecution,
     StageExecution,
 )
 from tarsy.models.history import now_us
 from tarsy.services.history_service import HistoryService, get_history_service
+
+# Valid event types expected from the repository
+VALID_EVENT_TYPES = {'llm', 'mcp', 'system'}
 
 router = APIRouter(prefix="/api/v1/history", tags=["history"])
 
@@ -223,8 +231,13 @@ async def get_session_detail(
         # Extract session information
         session_info = session_data.get('session', {})
         timeline = session_data.get('chronological_timeline', [])
-        # No summary in repository response - create empty dict for now
-        summary = {}
+        
+        # Calculate session summary statistics using service method (reuse logic)
+        # Merge chain execution data for chain statistics if available
+        if chain_execution_data:
+            session_data['stages'] = chain_execution_data.get('stages', [])
+        
+        summary = history_service.calculate_session_summary(session_data)
         
         # Calculate total duration if completed
         duration_ms = None
@@ -240,8 +253,50 @@ async def get_session_detail(
             stage_executions = []
             
             for stage_data in stages_data:
+                execution_id = stage_data.get('execution_id', '')
+                
+                # Build chronological timeline for this stage only
+                stage_timeline = []
+                for event in timeline:
+                    if event.get('stage_execution_id') == execution_id:
+                        # Validate event_id is present - no fallbacks
+                        event_id = event.get('event_id')
+                        if not event_id:
+                            raise ValueError(f"Missing required event_id for event: {event}")
+                        
+                        # Validate event type - fail fast on unknown types
+                        event_type = event.get('type')
+                        if event_type not in VALID_EVENT_TYPES:
+                            raise ValueError(f"Unknown event type: {event_type}. Expected one of: {VALID_EVENT_TYPES}")
+                        
+                        stage_timeline.append({
+                            'event_id': event_id,
+                            'type': event_type,  # Already normalized from repository
+                            'timestamp_us': event.get('timestamp_us'),
+                            'step_description': event.get('step_description'),
+                            'duration_ms': event.get('duration_ms'),
+                            'details': event.get('details', {})
+                        })
+                
+                # Sort chronologically
+                stage_timeline.sort(key=lambda x: x['timestamp_us'])
+                
+                # Calculate interaction summary
+                llm_count = len([e for e in stage_timeline if e.get('type') == 'llm'])
+                mcp_count = len([e for e in stage_timeline if e.get('type') == 'mcp'])
+                
+                # Sum all durations, defaulting to 0 for None values, keep None only if total is 0
+                total_duration_ms = sum(e.get('duration_ms') or 0 for e in stage_timeline)
+                
+                interaction_summary = InteractionSummary(
+                    llm_count=llm_count,
+                    mcp_count=mcp_count,
+                    total_count=len(stage_timeline),
+                    duration_ms=total_duration_ms if total_duration_ms > 0 else None
+                )
+                
                 stage_execution = StageExecution(
-                    execution_id=stage_data.get('execution_id', ''),
+                    execution_id=execution_id,
                     stage_id=stage_data.get('stage_id', ''),
                     stage_index=stage_data.get('stage_index', 0),
                     stage_name=stage_data.get('stage_name', ''),
@@ -251,8 +306,10 @@ async def get_session_detail(
                     started_at_us=stage_data.get('started_at_us'),
                     completed_at_us=stage_data.get('completed_at_us'),
                     duration_ms=stage_data.get('duration_ms'),
-                    stage_output=stage_data.get('stage_output'),  # Changed from output_data
-                    error_message=stage_data.get('error_message')
+                    stage_output=stage_data.get('stage_output'),
+                    error_message=stage_data.get('error_message'),
+                    timeline=stage_timeline,
+                    interaction_summary=interaction_summary
                 )
                 stage_executions.append(stage_execution)
             
@@ -263,20 +320,8 @@ async def get_session_detail(
                 current_stage_id=session_info.get('current_stage_id'),
                 stages=stage_executions
             )
-        
-        # Convert timeline to response models
-        timeline_events = []
-        for event in timeline:
-            timeline_event = TimelineEvent(
-                event_id=event.get('event_id', event.get('interaction_id', event.get('communication_id', 'unknown'))),
-                type=event.get('type', 'unknown'),
-                timestamp_us=event['timestamp_us'],
-                step_description=event.get('step_description', 'No description available'),
-                details=event.get('details', {}),
-                duration_ms=event.get('duration_ms'),
-                stage_execution_id=event.get('stage_execution_id')  # Add chain context
-            )
-            timeline_events.append(timeline_event)
+            
+            # Chain statistics are now calculated in the service layer
         
         return SessionDetailResponse(
             session_id=session_info['session_id'],
@@ -291,8 +336,7 @@ async def get_session_detail(
             final_analysis=session_info.get('final_analysis'),
             duration_ms=duration_ms,
             session_metadata=session_info.get('session_metadata', {}),
-            chain_execution=chain_execution,  # Add chain execution data
-            chronological_timeline=timeline_events,
+            chain_execution=chain_execution,  # Chain execution now contains stage-specific timelines
             summary=summary
         )
         
@@ -302,6 +346,51 @@ async def get_session_detail(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve session details: {str(e)}"
+        )
+
+@router.get(
+    "/sessions/{session_id}/summary",
+    response_model=Dict[str, Any],
+    responses={
+        404: {"model": ErrorResponse, "description": "Session not found"},
+        500: {"model": ErrorResponse, "description": "Internal server error"}
+    },
+    summary="Get Session Summary Statistics",
+    description="""
+    Retrieve just the summary statistics for a session (lightweight).
+    
+    Returns updated counts for LLM interactions, MCP communications, 
+    total interactions, errors, and chain progress without fetching 
+    the full session timeline.
+    """
+)
+async def get_session_summary(
+    session_id: str = Path(..., description="Unique session identifier"),
+    history_service: HistoryService = Depends(get_history_service)
+) -> Dict[str, Any]:
+    """Get summary statistics for a specific session (lightweight)."""
+    try:
+        logger.info(f"Fetching summary statistics for session {session_id}")
+        
+        # Use service method to get summary (reuses same logic as main endpoint)
+        summary = await history_service.get_session_summary(session_id)
+        
+        if summary is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found"
+            )
+        
+        logger.info(f"Summary statistics calculated for session {session_id}: {summary}")
+        return summary
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get session summary for {session_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve session summary: {str(e)}"
         )
 
 @router.get(

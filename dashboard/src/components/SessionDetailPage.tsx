@@ -21,6 +21,10 @@ import OriginalAlertCard from './OriginalAlertCard';
 import FinalAnalysisCard from './FinalAnalysisCard';
 import NestedAccordionTimeline from './NestedAccordionTimeline';
 
+// Helper function to compute total timeline length across all stages
+const totalTimelineLength = (stages?: { timeline?: {}[] }[]) =>
+  stages?.reduce((total, stage) => total + (stage.timeline?.length || 0), 0) || 0;
+
 
 /**
  * SessionDetailPage component - Phase 3
@@ -34,6 +38,29 @@ function SessionDetailPage() {
   const [session, setSession] = useState<DetailedSession | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch just session summary statistics (lightweight)
+  const refreshSessionSummary = async (id: string) => {
+    try {
+      console.log('🔄 Refreshing session summary statistics for:', id);
+      const summaryData = await apiClient.getSessionSummary(id);
+      
+      // Update only the summary part of the session
+      setSession(prevSession => {
+        if (!prevSession) return prevSession;
+        
+        console.log('📊 Updating session summary with fresh data:', summaryData);
+        return {
+          ...prevSession,
+          summary: summaryData
+        };
+      });
+      
+    } catch (error) {
+      console.error('Failed to refresh session summary:', error);
+      // Don't show error UI for summary refresh failures, just log them
+    }
+  };
 
   // Fetch session detail data
   const fetchSessionDetail = async (id: string) => {
@@ -188,35 +215,31 @@ function SessionDetailPage() {
         else if (data.type === 'batched_session_updates' && data.updates) {
           console.log('Timeline batch update detected, fetching new timeline items smoothly');
           
-          // Get the current timeline length to detect new items
-          const currentTimelineLength = session?.chronological_timeline?.length || 0;
-          
           // WebSocket updates only contain previews, so we need to refetch for complete details
           // But we'll do it smartly to avoid full screen refresh
           try {
             const updatedSessionData = await apiClient.getSessionDetail(sessionId);
             
-            // Only update if we actually have new timeline items
-            if (updatedSessionData.chronological_timeline.length > currentTimelineLength) {
-              setSession(prevSession => {
-                if (!prevSession) return updatedSessionData;
-                
-                // Merge with existing session data, only updating timeline and essential fields
-                return {
-                  ...prevSession,
-                  chronological_timeline: updatedSessionData.chronological_timeline,
-                  status: updatedSessionData.status,
-                  duration_ms: updatedSessionData.duration_ms,
-                  completed_at_us: updatedSessionData.completed_at_us,
-                  final_analysis: updatedSessionData.final_analysis || prevSession.final_analysis,
-                  error_message: updatedSessionData.error_message || prevSession.error_message
-                };
-              });
-              
-              console.log(`Timeline updated smoothly: ${updatedSessionData.chronological_timeline.length - currentTimelineLength} new items added`);
-            } else {
-              console.log('No new timeline items detected, skipping update');
-            }
+            // Only update if we actually have new timeline items (calculate from all stages)
+            const newTimelineLength = totalTimelineLength(updatedSessionData.chain_execution?.stages);
+            setSession(prevSession => {
+              if (!prevSession) return updatedSessionData;
+              const currentTimelineLength = totalTimelineLength(prevSession?.chain_execution?.stages);
+              if (newTimelineLength <= currentTimelineLength) {
+                console.log('No new timeline items detected, skipping update');
+                return prevSession;
+              }
+              console.log(`Timeline updated smoothly: ${newTimelineLength - currentTimelineLength} new items added`);
+              return {
+                ...prevSession,
+                chain_execution: updatedSessionData.chain_execution,
+                status: updatedSessionData.status,
+                duration_ms: updatedSessionData.duration_ms,
+                completed_at_us: updatedSessionData.completed_at_us,
+                final_analysis: updatedSessionData.final_analysis || prevSession.final_analysis,
+                error_message: updatedSessionData.error_message || prevSession.error_message
+              };
+            });
           } catch (error) {
             console.error('Failed to fetch updated timeline:', error);
             // Fallback to basic session update without timeline details
@@ -261,23 +284,25 @@ function SessionDetailPage() {
           // Use the same smooth update approach as batched updates
           try {
             const updatedSessionData = await apiClient.getSessionDetail(sessionId);
-            const currentTimelineLength = session?.chronological_timeline?.length || 0;
             
-            if (updatedSessionData.chronological_timeline.length > currentTimelineLength) {
-              setSession(prevSession => {
-                if (!prevSession) return updatedSessionData;
-                
-                return {
-                  ...prevSession,
-                  chronological_timeline: updatedSessionData.chronological_timeline,
-                  status: updatedSessionData.status,
-                  duration_ms: updatedSessionData.duration_ms,
-                  completed_at_us: updatedSessionData.completed_at_us,
-                  final_analysis: updatedSessionData.final_analysis || prevSession.final_analysis,
-                  error_message: updatedSessionData.error_message || prevSession.error_message
-                };
-              });
-            }
+            const newTimelineLength = totalTimelineLength(updatedSessionData.chain_execution?.stages);
+            
+            setSession(prevSession => {
+              if (!prevSession) return updatedSessionData;
+              const currentTimelineLength = totalTimelineLength(prevSession?.chain_execution?.stages);
+              if (newTimelineLength <= currentTimelineLength) {
+                return prevSession;
+              }
+              return {
+                ...prevSession,
+                chain_execution: updatedSessionData.chain_execution,
+                status: updatedSessionData.status,
+                duration_ms: updatedSessionData.duration_ms,
+                completed_at_us: updatedSessionData.completed_at_us,
+                final_analysis: updatedSessionData.final_analysis || prevSession.final_analysis,
+                error_message: updatedSessionData.error_message || prevSession.error_message
+              };
+            });
           } catch (error) {
             console.error('Failed to fetch updated timeline for individual interaction:', error);
           }
@@ -295,7 +320,7 @@ function SessionDetailPage() {
               
               return {
                 ...prevSession,
-                chronological_timeline: updatedSessionData.chronological_timeline,
+                chain_execution: updatedSessionData.chain_execution,
                 llm_interaction_count: updatedSessionData.llm_interaction_count,
                 mcp_communication_count: updatedSessionData.mcp_communication_count
               };
@@ -524,7 +549,7 @@ function SessionDetailPage() {
         {session && !loading && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* Session Header */}
-            <SessionHeader session={session} />
+            <SessionHeader session={session} onRefresh={() => sessionId && refreshSessionSummary(sessionId)} />
 
             {/* Original Alert Data */}
             <OriginalAlertCard alertData={session.alert_data} />
@@ -533,7 +558,6 @@ function SessionDetailPage() {
             {session.chain_execution ? (
               <NestedAccordionTimeline
                 chainExecution={session.chain_execution}
-                timelineItems={session.chronological_timeline}
               />
             ) : (
               <Alert severity="error" sx={{ mb: 2 }}>

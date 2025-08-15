@@ -141,7 +141,9 @@ class APIClient {
         sessionId,
         hasAlertData: !!response.data?.alert_data,
         hasFinalAnalysis: !!response.data?.final_analysis,
-        timelineItems: response.data?.chronological_timeline?.length || 0,
+        timelineItems: response.data?.chain_execution?.stages?.reduce(
+          (total, stage) => total + (stage.timeline?.length || 0), 0
+        ) || 0,
         status: response.data?.status
       });
       
@@ -156,6 +158,24 @@ class APIClient {
         throw new Error('Session not found');
       }
       throw error instanceof Error ? error : new Error('Failed to fetch session detail');
+    }
+  }
+
+  /**
+   * Get session summary statistics only (lightweight)
+   */
+  async getSessionSummary(sessionId: string): Promise<any> {
+    try {
+      console.log(`📊 Fetching summary statistics for session: ${sessionId}`);
+      const response = await this.client.get(`/api/v1/history/sessions/${sessionId}/summary`);
+      console.log('📊 Session summary API response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch session summary:', error);
+      if (error instanceof Error && error.message.includes('404')) {
+        throw new Error('Session not found');
+      }
+      throw error instanceof Error ? error : new Error('Failed to fetch session summary');
     }
   }
 
