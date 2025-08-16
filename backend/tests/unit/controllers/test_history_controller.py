@@ -6,7 +6,7 @@ to ensure proper request/response handling and API contract compliance.
 """
 
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -34,22 +34,13 @@ class TestHistoryControllerEndpoints:
     
     @pytest.fixture
     def mock_history_service(self):
-        """Create mock history service."""
-        service = Mock(spec=HistoryService)
-        service.enabled = True
-        service.is_enabled = True
-        service.get_sessions_list.return_value = ([], 0)
-        service.get_session_timeline.return_value = None
-        service.test_database_connection.return_value = True
+        """Create mock history service using factory."""
+        from tests.utils import MockFactory
         
-        # Add settings mock
-        mock_settings = Mock()
-        mock_settings.history_database_url = "sqlite:///test_history.db"
-        mock_settings.history_enabled = True
-        mock_settings.history_retention_days = 90
-        service.settings = mock_settings
+        # Use the comprehensive factory that creates all the defaults we need
+        service = MockFactory.create_mock_history_service()
         
-        # Add calculate_session_summary mock with default return value
+        # Add legacy calculate_session_summary mock for backward compatibility
         service.calculate_session_summary.return_value = {
             "total_interactions": 2,
             "llm_interactions": 1,
@@ -64,40 +55,50 @@ class TestHistoryControllerEndpoints:
     @pytest.mark.unit
     def test_get_sessions_list_success(self, app, client, mock_history_service):
         """Test successful sessions list retrieval."""
-        # Mock response data
-        session1 = Mock()
-        session1.session_id = "session-1"
-        session1.alert_id = "alert-1"
-        session1.alert_type = "NamespaceTerminating"
-        session1.agent_type = "KubernetesAgent"
-        session1.status = "completed"
+        # Phase 4: Mock using new models
+        from tarsy.models.history_models import SessionOverview, PaginatedSessions, PaginationInfo
+        from tarsy.models.constants import AlertSessionStatus
+        
         now_us_time = now_us()
-        session1.started_at_us = now_us_time - 60000000  # 1 minute ago in microseconds
-        session1.completed_at_us = now_us_time
-        session1.error_message = None
-        session1.llm_interactions = []
-        session1.mcp_communications = []
-        # Add the new dynamic attributes expected by the controller
-        session1.llm_interaction_count = 0
-        session1.mcp_communication_count = 0
+        session1 = SessionOverview(
+            session_id="session-1",
+            alert_id="alert-1",
+            alert_type="NamespaceTerminating",
+            agent_type="KubernetesAgent", 
+            status=AlertSessionStatus.COMPLETED,
+            started_at_us=now_us_time - 60000000,  # 1 minute ago in microseconds
+            completed_at_us=now_us_time,
+            error_message=None,
+            llm_interaction_count=0,
+            mcp_communication_count=0,
+            total_interactions=0,
+            chain_id="chain-1"
+        )
         
-        session2 = Mock()
-        session2.session_id = "session-2"
-        session2.alert_id = "alert-2"
-        session2.alert_type = "HighCPU"
-        session2.agent_type = "KubernetesAgent"
-        session2.status = "in_progress"
-        session2.started_at_us = now_us_time - 300000000  # 5 minutes ago in microseconds
-        session2.completed_at_us = None
-        session2.error_message = None
-        session2.llm_interactions = []
-        session2.mcp_communications = []
-        # Add the new dynamic attributes expected by the controller
-        session2.llm_interaction_count = 0
-        session2.mcp_communication_count = 0
+        session2 = SessionOverview(
+            session_id="session-2", 
+            alert_id="alert-2",
+            alert_type="HighCPU",
+            agent_type="KubernetesAgent",
+            status=AlertSessionStatus.IN_PROGRESS,
+            started_at_us=now_us_time - 300000000,  # 5 minutes ago in microseconds
+            completed_at_us=None,
+            error_message=None,
+            llm_interaction_count=0,
+            mcp_communication_count=0,
+            total_interactions=0,
+            chain_id="chain-2"
+        )
         
-        mock_sessions = [session1, session2]
-        mock_history_service.get_sessions_list.return_value = (mock_sessions, 2)
+        # Create PaginatedSessions response
+        paginated_sessions = PaginatedSessions(
+            sessions=[session1, session2],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=1, total_items=2),
+            filters_applied={}
+        )
+        
+        # Mock the new internal method 
+        mock_history_service.get_sessions_list.return_value = paginated_sessions
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -131,7 +132,13 @@ class TestHistoryControllerEndpoints:
     @pytest.mark.unit
     def test_get_sessions_list_with_filters(self, app, client, mock_history_service):
         """Test sessions list with query parameters."""
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -167,7 +174,13 @@ class TestHistoryControllerEndpoints:
     def test_get_sessions_list_with_single_status_filter(self, app, client, mock_history_service):
         """Test that single status filtering still works (backward compatibility)."""
         # Arrange
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -193,7 +206,13 @@ class TestHistoryControllerEndpoints:
     def test_get_sessions_list_with_multiple_status_filter(self, app, client, mock_history_service):
         """Test multiple status filtering (the new feature)."""
         # Arrange
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -224,11 +243,30 @@ class TestHistoryControllerEndpoints:
     def test_get_sessions_list_multiple_status_historical_use_case(self, app, client, mock_history_service):
         """Test the specific use case for historical alerts (completed + failed)."""
         # Arrange
+        from tests.utils import SessionFactory
+        from tarsy.models.constants import AlertSessionStatus
+        
         mock_sessions = [
-            create_mock_session("session-1", "completed"),
-            create_mock_session("session-2", "failed"),
+            SessionFactory.create_session_overview(
+                session_id="session-1",
+                alert_id="alert-session-1", 
+                status=AlertSessionStatus.COMPLETED
+            ),
+            SessionFactory.create_session_overview(
+                session_id="session-2",
+                alert_id="alert-session-2",
+                status=AlertSessionStatus.FAILED,
+                llm_interaction_count=0,
+                total_interactions=1
+            )
         ]
-        mock_history_service.get_sessions_list.return_value = (mock_sessions, 2)
+        paginated_sessions = SessionFactory.create_paginated_sessions(
+            sessions=mock_sessions,
+            total_items=2,
+            page_size=20,
+            filters_applied={"status": ["completed", "failed"]}
+        )
+        mock_history_service.get_sessions_list.return_value = paginated_sessions
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -260,11 +298,33 @@ class TestHistoryControllerEndpoints:
     def test_get_sessions_list_multiple_status_active_use_case(self, app, client, mock_history_service):
         """Test filtering for active alerts (pending + in_progress)."""
         # Arrange
+        from tests.utils import SessionFactory
+        from tarsy.models.constants import AlertSessionStatus
+        
         mock_sessions = [
-            create_mock_session("session-1", "pending"),
-            create_mock_session("session-2", "in_progress"),
+            SessionFactory.create_session_overview(
+                session_id="session-1",
+                alert_id="alert-session-1",
+                status=AlertSessionStatus.PENDING,
+                completed_at_us=None,  # Still pending
+                llm_interaction_count=0,
+                mcp_communication_count=0,
+                total_interactions=0
+            ),
+            SessionFactory.create_session_overview(
+                session_id="session-2",
+                alert_id="alert-session-2", 
+                status=AlertSessionStatus.IN_PROGRESS,
+                completed_at_us=None  # Still in progress
+            )
         ]
-        mock_history_service.get_sessions_list.return_value = (mock_sessions, 2)
+        paginated_sessions = SessionFactory.create_paginated_sessions(
+            sessions=mock_sessions,
+            total_items=2,
+            page_size=20,
+            filters_applied={"status": ["pending", "in_progress"]}
+        )
+        mock_history_service.get_sessions_list.return_value = paginated_sessions
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -295,7 +355,13 @@ class TestHistoryControllerEndpoints:
     def test_get_sessions_list_three_status_values(self, app, client, mock_history_service):
         """Test filtering with three status values."""
         # Arrange
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -325,7 +391,13 @@ class TestHistoryControllerEndpoints:
     def test_get_sessions_list_no_status_filter(self, app, client, mock_history_service):
         """Test that endpoint works without status filter (gets all sessions)."""
         # Arrange
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -351,7 +423,13 @@ class TestHistoryControllerEndpoints:
     @pytest.mark.unit
     def test_get_sessions_list_with_date_filters(self, app, client, mock_history_service):
         """Test sessions list with date range filters."""
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Convert dates to unix timestamps in microseconds
         start_date_us = int(datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000000)
@@ -385,7 +463,13 @@ class TestHistoryControllerEndpoints:
     @pytest.mark.unit
     def test_get_sessions_list_with_search_parameter(self, app, client, mock_history_service):
         """Test sessions list with search parameter."""
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -410,7 +494,13 @@ class TestHistoryControllerEndpoints:
     @pytest.mark.unit
     def test_get_sessions_list_search_with_other_filters(self, app, client, mock_history_service):
         """Test search parameter combined with other filters."""
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -482,7 +572,13 @@ class TestHistoryControllerEndpoints:
     @pytest.mark.unit
     def test_get_sessions_list_search_minimum_length(self, app, client, mock_history_service):
         """Test search parameter with exactly 3 characters (should pass validation)."""
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -507,7 +603,13 @@ class TestHistoryControllerEndpoints:
     @pytest.mark.unit
     def test_get_sessions_list_search_whitespace_handling(self, app, client, mock_history_service):
         """Test search parameter with whitespace (should be trimmed)."""
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -555,7 +657,13 @@ class TestHistoryControllerEndpoints:
     def test_get_sessions_list_service_disabled(self, app, client, mock_history_service):
         """Test sessions list when history service is disabled."""
         mock_history_service.enabled = False
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -590,46 +698,75 @@ class TestHistoryControllerEndpoints:
     @pytest.mark.unit
     def test_get_session_detail_success(self, app, client, mock_history_service):
         """Test successful session detail retrieval."""
-        # Mock timeline data with correct structure (matches repository output) using Unix timestamps
-        mock_timeline = {
-            "session": {
-                "session_id": "test-session-123",
-                "alert_id": "alert-456",
-                "alert_type": "NamespaceTerminating",
-                "agent_type": "KubernetesAgent",
-                "status": "completed",
-                "started_at_us": 1705314000000000,  # 2024-01-15T10:00:00Z in microseconds
-                "completed_at_us": 1705314300000000,  # 2024-01-15T10:05:00Z in microseconds
-                "error_message": None,
-                "chain_id": "chain-123"  # Add chain_id so endpoint processes chain execution
-            },
-            "chronological_timeline": [
-                {
-                    "event_id": "int-1",
-                    "type": "llm",
-                    "timestamp_us": 1705314000000000,
-                    "step_description": "Initial analysis",
-                    "stage_execution_id": "exec-3",
-                    "details": {
-                        "prompt_text": "Analyze the issue",
-                        "response_text": "Found the problem",
-                        "model_used": "gpt-4"
-                    }
-                },
-                {
-                    "event_id": "comm-1",
-                    "type": "mcp",
-                    "timestamp_us": 1705314001000000,
-                    "step_description": "Check namespace status",
-                    "stage_execution_id": "exec-3",
-                    "details": {
-                        "server_name": "kubernetes-server",
-                        "tool_name": "kubectl_get_namespace",
-                        "success": True
-                    }
-                }
-            ]
-        }
+        # Create proper DetailedSession object
+        from tarsy.models.history_models import DetailedSession, DetailedStage, LLMInteraction, MCPInteraction, LLMEventDetails, MCPEventDetails
+        from tarsy.models.constants import AlertSessionStatus, StageStatus
+        from tarsy.models.unified_interactions import LLMMessage
+        
+        # Create LLM interaction
+        llm_interaction = LLMInteraction(
+            id="int-1",
+            event_id="int-1", 
+            timestamp_us=1705314000000000,
+            step_description="Initial analysis",
+            stage_execution_id="exec-3",
+            details=LLMEventDetails(
+                messages=[LLMMessage(role="user", content="Analyze the issue")],
+                model_name="gpt-4",
+                success=True
+            )
+        )
+        
+        # Create MCP interaction
+        mcp_interaction = MCPInteraction(
+            id="comm-1",
+            event_id="comm-1",
+            timestamp_us=1705314001000000,
+            step_description="Check namespace status",
+            stage_execution_id="exec-3", 
+            details=MCPEventDetails(
+                tool_name="kubectl_get_namespace",
+                server_name="kubernetes-server",
+                communication_type="tool_call",
+                success=True
+            )
+        )
+        
+        # Create detailed stage
+        stage = DetailedStage(
+            execution_id="exec-3",
+            session_id="test-session-123",
+            stage_id="initial-analysis",
+            stage_index=0,
+            stage_name="Initial Analysis",
+            agent="KubernetesAgent",
+            status=StageStatus.COMPLETED,
+            started_at_us=1705314000000000,
+            completed_at_us=1705314001000000,
+            llm_interactions=[llm_interaction],
+            mcp_communications=[mcp_interaction],
+            llm_interaction_count=1,
+            mcp_communication_count=1,
+            total_interactions=2
+        )
+        
+        # Create detailed session
+        mock_timeline = DetailedSession(
+            session_id="test-session-123",
+            alert_id="alert-456",
+            alert_type="NamespaceTerminating",
+            agent_type="KubernetesAgent",
+            status=AlertSessionStatus.COMPLETED,
+            started_at_us=1705314000000000,
+            completed_at_us=1705314300000000,
+            chain_id="chain-123",
+            chain_definition={},
+            alert_data={},
+            stages=[stage],
+            total_interactions=2,
+            llm_interaction_count=1,
+            mcp_communication_count=1
+        )
         mock_history_service.get_session_timeline.return_value = mock_timeline
         
         # Mock the get_session_with_stages async method
@@ -662,13 +799,30 @@ class TestHistoryControllerEndpoints:
             "exec-3": {"llm_interactions": 1, "mcp_communications": 1}
         }
         
-        # Mock calculate_session_summary method
+        # Mock calculate_session_summary method (legacy)
         mock_history_service.calculate_session_summary.return_value = {
             "total_interactions": 2,
             "llm_interactions": 1, 
             "mcp_communications": 1,
             "total_duration_ms": 2000
         }
+        
+        # Mock get_session_summary method (async - used by the controller)
+        from tests.utils import SessionFactory
+        from tarsy.models.history_models import ChainStatistics
+        mock_session_stats = SessionFactory.create_session_stats(
+            total_interactions=2,
+            llm_interactions=1,
+            mcp_communications=1,
+            total_duration_ms=2000,
+            chain_statistics=ChainStatistics(
+                total_stages=1,
+                completed_stages=1,
+                failed_stages=0,
+                stages_by_agent={'KubernetesAgent': 1}
+            )
+        )
+        mock_history_service.get_session_summary = AsyncMock(return_value=mock_session_stats)
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -896,7 +1050,7 @@ class TestHistoryControllerValidation:
         """Create mock history service."""
         service = Mock(spec=HistoryService)
         service.enabled = True
-        service.get_sessions_list.return_value = ([], 0)
+        # Will be set up with proper model below
         return service
     
     @pytest.mark.unit
@@ -922,7 +1076,13 @@ class TestHistoryControllerValidation:
     @pytest.mark.unit
     def test_sessions_list_enum_validation(self, app, client, mock_history_service):
         """Test enum parameter validation."""
-        mock_history_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_history_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -1006,7 +1166,7 @@ class TestHistoryControllerResponseFormat:
         service = Mock(spec=HistoryService)
         service.enabled = True
         service.is_enabled = True
-        service.get_sessions_list.return_value = ([], 0)
+        # Will be set up with proper model below
         service.get_session_timeline.return_value = None
         service.test_database_connection.return_value = True
         
@@ -1035,24 +1195,24 @@ class TestHistoryControllerResponseFormat:
         mock_service = Mock(spec=HistoryService)
         mock_service.enabled = True
         
-        # Create properly mocked session with all required attributes
-        mock_session = Mock()
-        mock_session.session_id = "test-session"
-        mock_session.alert_id = "test-alert"
-        mock_session.alert_type = "TestAlert"
-        mock_session.agent_type = "TestAgent"
-        mock_session.status = "completed"
-        current_time_us = now_us()
-        mock_session.started_at_us = current_time_us - 300000000  # Started 5 minutes ago
-        mock_session.completed_at_us = current_time_us
-        mock_session.error_message = None
-        mock_session.llm_interactions = []  # Add missing attributes
-        mock_session.mcp_communications = []
-        # Add the new dynamic attributes expected by the controller
-        mock_session.llm_interaction_count = 0
-        mock_session.mcp_communication_count = 0
+        # Create proper SessionOverview objects using factory
+        from tests.utils import SessionFactory
         
-        mock_service.get_sessions_list.return_value = ([mock_session], 1)
+        mock_session = SessionFactory.create_session_overview(
+            session_id="test-session",
+            alert_id="test-alert",
+            alert_type="TestAlert",
+            agent_type="TestAgent",
+            llm_interaction_count=0,
+            mcp_communication_count=0,
+            total_interactions=0
+        )
+        
+        paginated_sessions = SessionFactory.create_paginated_sessions(
+            sessions=[mock_session],
+            page_size=20
+        )
+        mock_service.get_sessions_list.return_value = paginated_sessions
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_service
@@ -1104,63 +1264,60 @@ class TestHistoryControllerResponseFormat:
     def test_session_detail_response_format(self, app, client, mock_history_service):
         """Test that session detail response matches expected format."""
         
-        # Mock timeline with correct structure (session instead of session_info) using Unix timestamps
-        mock_timeline = {
-            "session": {
-                "session_id": "test-session",
-                "alert_id": "test-alert",
-                "alert_type": "TestAlert",
-                "agent_type": "TestAgent",
-                "status": "completed",
-                "started_at_us": 1705314000000000,  # 2024-01-15T10:00:00Z in microseconds
-                "completed_at_us": 1705314300000000,  # 2024-01-15T10:05:00Z in microseconds
-                "error_message": None,
-                "chain_id": "chain-123"  # Add chain_id so endpoint processes chain execution
-            },
-            "chronological_timeline": [
-                {
-                    "event_id": "int-1",
-                    "type": "llm",
-                    "timestamp_us": 1705314000000000,
-                    "step_description": "Test step",
-                    "stage_execution_id": "exec-1",
-                    "details": {
-                        "prompt_text": "Test prompt",
-                        "response_text": "Test response",
-                        "model_used": "gpt-4"
-                    }
-                }
-            ],
-            "chain_execution": {
-                "chain_id": "chain-123",
-                "stages": [
-                    {
-                        "execution_id": "exec-1",
-                        "stage_id": "data-collection",
-                        "stage_name": "Data Collection",
-                        "status": "completed",
-                        "interaction_summary": {
-                            "llm_count": 1,
-                            "mcp_count": 1,
-                            "total_count": 2
-                        },
-                        "timeline": [
-                            {
-                                "interaction_id": "int-1",
-                                "type": "llm_interaction",
-                                "timestamp_us": 1705314000000000,
-                                "step_description": "Test step",
-                                "details": {
-                                    "prompt_text": "Test prompt",
-                                    "response_text": "Test response",
-                                    "model_used": "gpt-4"
-                                }
-                            }
-                        ]
-                    }
-                ]
-            }
-        }
+        # Create proper DetailedSession object
+        from tarsy.models.history_models import DetailedSession, DetailedStage, LLMInteraction, LLMEventDetails
+        from tarsy.models.constants import AlertSessionStatus, StageStatus
+        from tarsy.models.unified_interactions import LLMMessage
+        
+        # Create LLM interaction
+        llm_interaction = LLMInteraction(
+            id="int-1",
+            event_id="int-1", 
+            timestamp_us=1705314000000000,
+            step_description="Test step",
+            stage_execution_id="exec-1",
+            details=LLMEventDetails(
+                messages=[LLMMessage(role="user", content="Test prompt")],
+                model_name="gpt-4",
+                success=True
+            )
+        )
+        
+        # Create detailed stage
+        stage = DetailedStage(
+            execution_id="exec-1",
+            session_id="test-session",
+            stage_id="data-collection",
+            stage_index=0,
+            stage_name="Data Collection",
+            agent="TestAgent",
+            status=StageStatus.COMPLETED,
+            started_at_us=1705314000000000,
+            completed_at_us=1705314001000000,
+            llm_interactions=[llm_interaction],
+            mcp_communications=[],
+            llm_interaction_count=1,
+            mcp_communication_count=0,
+            total_interactions=1
+        )
+        
+        # Create detailed session
+        mock_timeline = DetailedSession(
+            session_id="test-session",
+            alert_id="test-alert",
+            alert_type="TestAlert",
+            agent_type="TestAgent",
+            status=AlertSessionStatus.COMPLETED,
+            started_at_us=1705314000000000,
+            completed_at_us=1705314300000000,
+            chain_id="chain-123",
+            chain_definition={},
+            alert_data={},
+            stages=[stage],
+            total_interactions=1,
+            llm_interaction_count=1,
+            mcp_communication_count=0
+        )
         mock_history_service.get_session_timeline.return_value = mock_timeline
         
         # Mock the get_session_with_stages call for chain execution data
@@ -1197,13 +1354,31 @@ class TestHistoryControllerResponseFormat:
             "exec-1": {"llm_interactions": 1, "mcp_communications": 1}
         }
         
-        # Mock calculate_session_summary method
+        # Mock calculate_session_summary method (legacy)
         mock_history_service.calculate_session_summary.return_value = {
             "total_interactions": 2,
             "llm_interactions": 1, 
             "mcp_communications": 1,
             "total_duration_ms": 2000
         }
+        
+        # Mock get_session_summary method (async - used by the controller)
+        from tarsy.models.history_models import SessionStats, ChainStatistics
+        mock_session_stats = SessionStats(
+            total_interactions=2,
+            llm_interactions=1,
+            mcp_communications=1,
+            system_events=0,
+            errors_count=0,
+            total_duration_ms=2000,
+            chain_statistics=ChainStatistics(
+                total_stages=1,
+                completed_stages=1,
+                failed_stages=0,
+                stages_by_agent={'TestAgent': 1}
+            )
+        )
+        mock_history_service.get_session_summary = AsyncMock(return_value=mock_session_stats)
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -1318,7 +1493,13 @@ class TestHistoryControllerIntegration:
         """Test complex filtering scenario with multiple parameters."""
         mock_service = Mock(spec=HistoryService)
         mock_service.enabled = True
-        mock_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_service
@@ -1380,7 +1561,13 @@ class TestHistoryControllerIntegration:
         """Test that controller handles concurrent requests properly."""
         mock_service = Mock(spec=HistoryService)
         mock_service.enabled = True
-        mock_service.get_sessions_list.return_value = ([], 0)
+        from tarsy.models.history_models import PaginatedSessions, PaginationInfo
+        empty_paginated = PaginatedSessions(
+            sessions=[],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=0, total_items=0),
+            filters_applied={}
+        )
+        mock_service.get_sessions_list.return_value = empty_paginated
         
         # Override FastAPI dependency
         app.dependency_overrides[get_history_service] = lambda: mock_service
@@ -1543,6 +1730,21 @@ class TestDashboardEndpoints:
     @pytest.mark.unit
     def test_get_filter_options_success(self, app, client, mock_history_service):
         """Test successful filter options retrieval."""
+        # Phase 4: Create a simple Mock that returns the expected dict directly to avoid recursion
+        mock_filter_result = Mock()
+        mock_filter_result.model_dump.return_value = {
+            "agent_types": ["kubernetes", "base", "analysis"],
+            "alert_types": ["HighCPU", "NamespaceTerminating", "PodCrashLooping"],
+            "status_options": ["pending", "in_progress", "completed", "failed"],
+            "time_ranges": [
+                {"label": "Last Hour", "value": "1h"},
+                {"label": "Last 4 Hours", "value": "4h"},
+                {"label": "Today", "value": "today"},
+                {"label": "This Week", "value": "week"}
+            ]
+        }
+        mock_history_service.get_filter_options.return_value = mock_filter_result
+        
         # Override dependency
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
         
@@ -1590,22 +1792,25 @@ class TestDashboardEndpoints:
         """Test successful session summary retrieval."""
         session_id = "test-session-123"
         
-        # Mock service response
-        mock_summary = {
-            'total_interactions': 13,
-            'llm_interactions': 8,
-            'mcp_communications': 5,
-            'system_events': 0,
-            'errors_count': 0,
-            'total_duration_ms': 15000,
-            'chain_statistics': {
-                'total_stages': 3,
-                'completed_stages': 3,
-                'failed_stages': 0,
-                'stages_by_agent': {'KubernetesAgent': 2, 'AnalysisAgent': 1}
-            }
-        }
-        mock_history_service.get_session_summary.return_value = mock_summary
+        # Phase 4: Create SessionStats model using factory
+        from tests.utils import SessionFactory
+        from tarsy.models.history_models import ChainStatistics
+        
+        session_stats = SessionFactory.create_session_stats(
+            total_interactions=13,
+            llm_interactions=8,
+            mcp_communications=5,
+            total_duration_ms=15000,
+            chain_statistics=ChainStatistics(
+                total_stages=3,
+                completed_stages=3,
+                failed_stages=0,
+                stages_by_agent={'KubernetesAgent': 2, 'AnalysisAgent': 1}
+            )
+        )
+        
+        # Mock the new internal method
+        mock_history_service.get_session_summary = AsyncMock(return_value=session_stats)
         
         # Dependency override
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -1643,8 +1848,8 @@ class TestDashboardEndpoints:
         """Test session summary when session doesn't exist."""
         session_id = "non-existent-session"
         
-        # Mock service to return None (session not found)
-        mock_history_service.get_session_summary.return_value = None
+        # Phase 4: Mock the service method to return None (session not found)
+        mock_history_service.get_session_summary = AsyncMock(return_value=None)
         
         # Dependency override
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -1691,16 +1896,22 @@ class TestDashboardEndpoints:
         """Test session summary with minimal data (no chain)."""
         session_id = "minimal-session-123"
         
-        # Mock service response with minimal data (no chain statistics)
-        mock_summary = {
-            'total_interactions': 2,
-            'llm_interactions': 1,
-            'mcp_communications': 1,
-            'system_events': 0,
-            'errors_count': 0,
-            'total_duration_ms': 1500
-        }
-        mock_history_service.get_session_summary.return_value = mock_summary
+        # Mock service response with minimal data using factory
+        from tests.utils import SessionFactory
+        from tarsy.models.history_models import ChainStatistics
+        mock_summary = SessionFactory.create_session_stats(
+            total_interactions=2,
+            llm_interactions=1,
+            mcp_communications=1,
+            total_duration_ms=1500,
+            chain_statistics=ChainStatistics(
+                total_stages=1,
+                completed_stages=1,
+                failed_stages=0,
+                stages_by_agent={'TestAgent': 1}
+            )
+        )
+        mock_history_service.get_session_summary = AsyncMock(return_value=mock_summary)
         
         # Dependency override
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -1723,8 +1934,9 @@ class TestDashboardEndpoints:
         assert data['errors_count'] == 0
         assert data['total_duration_ms'] == 1500
         
-        # Verify no chain statistics (since it's not a chain session)
-        assert 'chain_statistics' not in data
+        # Verify chain statistics are present (all sessions have chain info in Phase 4)
+        assert 'chain_statistics' in data
+        assert data['chain_statistics']['total_stages'] == 1
         
         # Verify service was called correctly
         mock_history_service.get_session_summary.assert_called_once_with(session_id)
@@ -1734,22 +1946,24 @@ class TestDashboardEndpoints:
         """Test session summary with error statistics."""
         session_id = "error-session-123"
         
-        # Mock service response with errors
-        mock_summary = {
-            'total_interactions': 10,
-            'llm_interactions': 6,
-            'mcp_communications': 3,
-            'system_events': 1,
-            'errors_count': 2,  # Some errors occurred
-            'total_duration_ms': 25000,
-            'chain_statistics': {
-                'total_stages': 3,
-                'completed_stages': 2,
-                'failed_stages': 1,  # One stage failed
-                'stages_by_agent': {'KubernetesAgent': 3}
-            }
-        }
-        mock_history_service.get_session_summary.return_value = mock_summary
+        # Mock service response with errors using factory
+        from tests.utils import SessionFactory
+        from tarsy.models.history_models import ChainStatistics
+        mock_summary = SessionFactory.create_session_stats(
+            total_interactions=10,
+            llm_interactions=6,
+            mcp_communications=3,
+            system_events=1,
+            errors_count=2,  # Some errors occurred
+            total_duration_ms=25000,
+            chain_statistics=ChainStatistics(
+                total_stages=3,
+                completed_stages=2,
+                failed_stages=1,  # One stage failed
+                stages_by_agent={'KubernetesAgent': 3}
+            )
+        )
+        mock_history_service.get_session_summary = AsyncMock(return_value=mock_summary)
         
         # Dependency override
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
@@ -1777,16 +1991,22 @@ class TestDashboardEndpoints:
         """Test session summary endpoint response format validation."""
         session_id = "format-test-session"
         
-        # Mock service response 
-        mock_summary = {
-            'total_interactions': 5,
-            'llm_interactions': 3,
-            'mcp_communications': 2,
-            'system_events': 0,
-            'errors_count': 0,
-            'total_duration_ms': 8000
-        }
-        mock_history_service.get_session_summary.return_value = mock_summary
+        # Mock service response using factory
+        from tests.utils import SessionFactory
+        from tarsy.models.history_models import ChainStatistics
+        mock_summary = SessionFactory.create_session_stats(
+            total_interactions=5,
+            llm_interactions=3,
+            mcp_communications=2,
+            total_duration_ms=8000,
+            chain_statistics=ChainStatistics(
+                total_stages=2,
+                completed_stages=2,
+                failed_stages=0,
+                stages_by_agent={'TestAgent': 2}
+            )
+        )
+        mock_history_service.get_session_summary = AsyncMock(return_value=mock_summary)
         
         # Dependency override
         app.dependency_overrides[get_history_service] = lambda: mock_history_service
