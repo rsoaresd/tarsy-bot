@@ -82,9 +82,9 @@ class TestAgentConfigModel:
 
     @pytest.mark.parametrize("strategy_value,expected_strategy", [
         ("react", IterationStrategy.REACT),
-        ("regular", IterationStrategy.REGULAR),
+        ("react-stage", IterationStrategy.REACT_STAGE),
         (IterationStrategy.REACT, IterationStrategy.REACT),
-        (IterationStrategy.REGULAR, IterationStrategy.REGULAR),
+        (IterationStrategy.REACT_STAGE, IterationStrategy.REACT_STAGE),
     ])
     def test_valid_iteration_strategies(self, strategy_value, expected_strategy):
         """Test valid iteration strategy values."""
@@ -100,7 +100,7 @@ class TestAgentConfigModel:
     @pytest.mark.parametrize("invalid_strategy", [
         "invalid_strategy",
         "REACT",  # Wrong case
-        "REGULAR",  # Wrong case
+        "REACT_STAGE",  # Wrong case
         "React",  # Wrong case
     ])
     def test_invalid_iteration_strategies(self, invalid_strategy):

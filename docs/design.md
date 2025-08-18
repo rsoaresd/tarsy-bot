@@ -22,7 +22,7 @@
 This design document is a living document that evolves through [Enhancement Proposals (EPs)](enhancements/README.md). All significant architectural changes are documented through the EP process, ensuring traceable evolution and AI-friendly implementation.
 
 ### Recent Changes
-- **EP-0008-1 (IMPLEMENTED)**: Sequential Agent Chains - Added multi-stage alert processing workflows where alerts can flow through multiple specialized agents that build upon each other's work. Key features include unified AlertProcessingData model throughout the pipeline, ChainRegistry for managing chain definitions, new iteration strategies (REACT_TOOLS, REACT_TOOLS_PARTIAL, REACT_FINAL_ANALYSIS) for different chain stage purposes, enhanced database schema with StageExecution tracking, and chain execution logic integrated into AlertService
+- **EP-0008-1 (IMPLEMENTED)**: Sequential Agent Chains - Added multi-stage alert processing workflows where alerts can flow through multiple specialized agents that build upon each other's work. Key features include unified AlertProcessingData model throughout the pipeline, ChainRegistry for managing chain definitions, new iteration strategies (REACT_STAGE, REACT_FINAL_ANALYSIS) for different chain stage purposes, enhanced database schema with StageExecution tracking, and chain execution logic integrated into AlertService
 - **TYPED HOOK SYSTEM (IMPLEMENTED)**: Type-Safe Interaction Capture - Complete refactoring to typed hook system with unified LLMInteraction and MCPInteraction models, eliminating data contamination and providing clean type-safe interaction capture. Comprehensive test coverage restoration with 49 new tests for hook system, LLM client, and MCP client functionality
 - **INTERACTION MODEL UNIFICATION (IMPLEMENTED)**: Unified Interaction Models - Consolidated interaction data structures into type-safe LLMInteraction and MCPInteraction models with consistent fields, JSON serialization, and proper database persistence. Dashboard integration updated for LLM interaction preview with smart text parsing
 - **ITERATION STRATEGIES (IMPLEMENTED)**: Agent Iteration Flow Strategies - Added ReAct vs Regular iteration strategy support allowing agents to use either the standard ReAct pattern (Think→Action→Observation cycles) for systematic analysis or regular iteration pattern for faster processing without reasoning overhead
@@ -57,7 +57,7 @@ Tarsy is a **distributed, event-driven system** designed to automate incident re
 4. **Configuration-Driven Extensibility**: Support for both hardcoded agents and YAML-configured agents with chain definitions without code changes
 5. **Flexible Alert Data Structure**: Agent-agnostic system supporting arbitrary JSON payloads from diverse monitoring sources
 6. **LLM-First Processing**: Agents receive complete JSON payloads for intelligent interpretation without rigid field extraction
-7. **Multiple Iteration Strategies**: Configurable strategies including ReAct (systematic reasoning), Regular (fast tool iteration), REACT_TOOLS (data collection), REACT_TOOLS_PARTIAL (partial analysis), and REACT_FINAL_ANALYSIS (comprehensive analysis)
+7. **Multiple Iteration Strategies**: Configurable strategies including ReAct (systematic reasoning), REACT_STAGE (stage-specific analysis), and REACT_FINAL_ANALYSIS (comprehensive analysis)
 8. **Progressive Data Enrichment**: Stage outputs accumulate throughout the chain, allowing later stages to access all previous stage data
 9. **Dynamic Tool Selection**: Agents intelligently choose appropriate MCP tools from their assigned server subsets based on stage requirements
 10. **Extensible Chain Architecture**: Inheritance-based agent design with composition-based iteration strategies and flexible chain definitions
@@ -215,8 +215,9 @@ graph TD
     
     subgraph "Strategy-Based Processing"
         F --> |Creates based on strategy| IC
-        IC --> |ReAct Strategy| ReactLoop[ReAct Loop]
-        IC --> |Regular Strategy| RegularLoop[Regular Loop]
+        IC --> |REACT Strategy| ReactLoop[ReAct Loop]
+        IC --> |REACT_STAGE Strategy| ReactStageLoop[ReAct Stage Loop]
+        IC --> |REACT_FINAL_ANALYSIS Strategy| ReactFinalLoop[ReAct Final Analysis]
         
         subgraph ReactLoop [ReAct Processing]
             RQ[Build ReAct Prompt] --> RT[Think Phase]
@@ -227,20 +228,27 @@ graph TD
             RC -->|Yes| RF[Final Answer]
         end
         
-        subgraph RegularLoop [Regular Processing]
-            RS[Tool Selection] --> RD[Data Collection]
-            RD --> RP[Partial Analysis]
-            RP --> RV{Continue?}
-            RV -->|Yes| RS
-            RV -->|No| RL[Final Analysis]
+        subgraph ReactStageLoop [ReAct Stage Processing]
+            RSQ[Build Stage ReAct Prompt] --> RST[Think Phase]
+            RST --> RSA[Action Phase]
+            RSA --> RSO[Observation Phase]
+            RSO --> RSC{Complete?}
+            RSC -->|No| RST
+            RSC -->|Yes| RSF[Stage Analysis]
+        end
+        
+        subgraph ReactFinalLoop [ReAct Final Analysis]
+            RFQ[Build Final Analysis Prompt] --> RFF[Final Analysis]
         end
     end
     
     ReactLoop --> PB
-    RegularLoop --> PB
+    ReactStageLoop --> PB
+    ReactFinalLoop --> PB
     PB --> M
     RF --> C
-    RL --> C
+    RSF --> C
+    RFF --> C
     C --> I
     
     subgraph "Type-Safe History Capture"
@@ -497,7 +505,7 @@ class BaseAgent(ABC):
 
 **Core Features:**
 - **Inheritance + Composition Design**: Common logic shared across all specialized agents with pluggable iteration strategies
-- **Configurable Iteration Strategies**: Agents can use ReAct, Regular, REACT_TOOLS, REACT_TOOLS_PARTIAL, or REACT_FINAL_ANALYSIS processing patterns
+- **Configurable Iteration Strategies**: Agents can use ReAct, REACT_STAGE, or REACT_FINAL_ANALYSIS processing patterns
 - **Chain Processing Support**: Processes unified AlertProcessingData with access to previous stage outputs and data accumulation
 - **Stage Execution Tracking**: Links interactions to specific chain stage executions for detailed audit trails
 - **Strategy-Based Processing**: Delegates alert processing to appropriate IterationController based on stage-specific configuration
@@ -508,9 +516,7 @@ class BaseAgent(ABC):
 
 **Iteration Strategy Support:**
 - **IterationStrategy.REACT**: Uses SimpleReActController for structured Think→Action→Observation cycles
-- **IterationStrategy.REGULAR**: Uses RegularIterationController for straightforward tool iteration  
-- **IterationStrategy.REACT_TOOLS**: Uses ReactToolsController for data collection focused ReAct cycles without analysis
-- **IterationStrategy.REACT_TOOLS_PARTIAL**: Uses ReactToolsPartialController for data collection + stage-specific analysis
+- **IterationStrategy.REACT_STAGE**: Uses ReactStageController for stage-specific analysis within multi-stage chains
 - **IterationStrategy.REACT_FINAL_ANALYSIS**: Uses ReactFinalAnalysisController for comprehensive analysis without tool access
 - **Default Strategy**: REACT for systematic analysis (configurable per agent and stage)
 
@@ -541,14 +547,20 @@ abstract class IterationController:
     @abstractmethod
     async def execute_analysis_loop(self, context: IterationContext) -> str
 
-class RegularIterationController(IterationController):
-    async def execute_analysis_loop(self, context: IterationContext) -> str
-        # Straightforward tool selection and execution for faster processing
-
 class SimpleReActController(IterationController):
     def __init__(self, llm_client: LLMClient, prompt_builder: PromptBuilder)
     async def execute_analysis_loop(self, context: IterationContext) -> str
         # ReAct Think→Action→Observation cycles with structured reasoning
+
+class ReactStageController(IterationController):
+    def __init__(self, llm_client: LLMClient, prompt_builder: PromptBuilder)
+    async def execute_analysis_loop(self, context: IterationContext) -> str
+        # ReAct pattern for stage-specific analysis within multi-stage chains
+
+class ReactFinalAnalysisController(IterationController):
+    def __init__(self, llm_client: LLMClient, prompt_builder: PromptBuilder)
+    async def execute_analysis_loop(self, context: IterationContext) -> str
+        # Comprehensive analysis using all accumulated data, no tool calls
 
 @dataclass
 class IterationContext:
@@ -574,46 +586,37 @@ class IterationContext:
 - Observation formatting for structured feedback
 - Complete/incomplete detection for proper loop termination
 
-**Regular Strategy Features:**
-- Traditional tool selection and iterative analysis
-- Faster processing without reasoning overhead
-- Backward compatibility with existing agent logic
-- Simple continuation logic based on data sufficiency
+
 
 ### 6. PromptBuilder
 
-Centralized prompt construction service used by all agents for consistent LLM interactions with dual iteration strategy support:
+Centralized prompt construction service used by all agents for consistent LLM interactions with support for multiple iteration strategies:
 
 ```
 Interface Pattern:
 class PromptBuilder:
-    # Regular iteration strategy methods
-    def build_analysis_prompt(self, context: PromptContext) -> str
-    def build_mcp_tool_selection_prompt(self, context: PromptContext) -> str
-    def build_iterative_mcp_tool_selection_prompt(self, context: PromptContext) -> str
-    def build_partial_analysis_prompt(self, context: PromptContext) -> str
-    
     # ReAct iteration strategy methods
     def build_standard_react_prompt(self, context: PromptContext, react_history: List[str] = None) -> str
+    def build_stage_analysis_react_prompt(self, context: PromptContext, react_history: List[str] = None) -> str
+    def build_final_analysis_prompt(self, context: PromptContext) -> str
     def parse_react_response(self, response: str) -> Dict[str, Any]
     def convert_action_to_tool_call(self, action: str, action_input: str) -> Dict[str, Any]
     def format_observation(self, mcp_data: Dict[str, Any]) -> str
     
-    # Common system messages
+    # System message methods
     def get_general_instructions(self) -> str
-    def get_mcp_tool_selection_system_message(self) -> str
-    def get_partial_analysis_system_message(self) -> str
+    def get_enhanced_react_system_message(self, task_focus: str = "investigation and providing recommendations") -> str
 ```
 
 **Core Features:**
-- **Dual Strategy Support**: Supports both Regular and ReAct iteration patterns with strategy-specific prompts
+- **Multi-Strategy Support**: Supports REACT, REACT_STAGE, and REACT_FINAL_ANALYSIS iteration patterns with strategy-specific prompts
 - **Template Standardization**: Consistent prompt formats across all agents and strategies
 - **ReAct Pattern Implementation**: Full ReAct prompt building with Think→Action→Observation format
 - **ReAct Response Parsing**: Structured parsing of ReAct responses with thought, action, and completion detection
 - **Context Management**: Structured context data handling via PromptContext dataclass
-- **Iteration History Formatting**: Comprehensive formatting for both regular iteration history and ReAct conversation history
+- **Iteration History Formatting**: Comprehensive formatting for ReAct conversation history across all strategies
 - **System Message Generation**: Specialized system messages for different LLM interaction types and strategies
-- **Data Formatting**: Intelligent formatting of MCP data and alert information for both patterns
+- **Data Formatting**: Intelligent formatting of MCP data and alert information for ReAct patterns
 - **Shared Instance**: Stateless design with global shared instance for efficiency
 
 **PromptContext Data Structure:**
@@ -1143,7 +1146,7 @@ sequenceDiagram
             
             KA->>IC: execute_analysis_loop(IterationContext with stage data)
             
-            alt REACT_TOOLS Strategy (Data Collection)
+            alt REACT_STAGE Strategy (Stage-specific Analysis)
                 loop ReAct Data Collection Cycles
                     Note over IC,LLM: HookContext captures stage-linked interaction
                     IC->>LLM: Data collection ReAct prompt
@@ -1807,13 +1810,13 @@ backend/tarsy/
 │   ├── base_agent.py      # Abstract base class with common processing logic
 │   ├── kubernetes_agent.py# Kubernetes-specialized agent implementation
 │   ├── configurable_agent.py # YAML configuration-driven agent
-│   ├── constants.py       # Iteration strategy enums and constants
 │   ├── prompt_builder.py  # LLM prompt composition system with ReAct support
 │   └── iteration_controllers/
 │       ├── __init__.py                        # Controller pattern exports
 │       ├── base_iteration_controller.py       # Abstract controller and context
-│       ├── regular_iteration_controller.py    # Regular tool iteration strategy
-│       └── react_iteration_controller.py     # ReAct reasoning strategy
+│       ├── react_iteration_controller.py     # ReAct reasoning strategy
+│       ├── react_stage_controller.py         # ReAct stage-specific analysis strategy
+│       └── react_final_analysis_controller.py # ReAct final analysis strategy
 ├── controllers/            # API layer
 │   └── history_controller.py # REST endpoints for historical data
 ├── database/              # Data persistence layer
@@ -1824,6 +1827,7 @@ backend/tarsy/
 │   └── typed_dashboard_hooks.py # Type-safe real-time dashboard update hooks
 ├── models/                # Data models and schemas
 │   ├── alert.py           # Alert data structures
+│   ├── constants.py       # Iteration strategy enums and constants
 │   ├── history.py         # Audit trail data models (SQLModel)
 │   ├── unified_interactions.py # Type-safe LLM and MCP interaction models
 │   ├── api_models.py      # REST API request/response models
