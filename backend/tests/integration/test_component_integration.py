@@ -228,7 +228,7 @@ class TestKubernetesAgentIntegration:
         instructions = agent.custom_instructions()
         assert isinstance(instructions, str)  # May be empty but should be string
 
-    async def test_kubernetes_agent_tool_selection_prompt(
+    def test_kubernetes_agent_prompt_context_creation(
         self, 
         mock_llm_manager, 
         mock_mcp_client, 
@@ -236,7 +236,7 @@ class TestKubernetesAgentIntegration:
         sample_alert,
         sample_runbook_content
     ):
-        """Test KubernetesAgent tool selection prompt customization."""
+        """Test KubernetesAgent prompt context creation with Kubernetes-specific data."""
         # Arrange
         agent = KubernetesAgent(
             llm_client=mock_llm_manager.get_client(),
@@ -258,14 +258,18 @@ class TestKubernetesAgentIntegration:
         }
         
         # Act
-        prompt = agent.build_mcp_tool_selection_prompt(
-            alert_data, sample_runbook_content, available_tools
+        context = agent.create_prompt_context(
+            alert_data=alert_data, 
+            runbook_content=sample_runbook_content, 
+            available_tools=available_tools
         )
         
         # Assert
-        assert isinstance(prompt, str)
-        assert len(prompt) > 100
-        assert "kubernetes" in prompt.lower() or "namespace" in prompt.lower()
+        assert context.agent_name == "KubernetesAgent"
+        assert context.alert_data == alert_data
+        assert context.runbook_content == sample_runbook_content
+        assert context.available_tools == available_tools
+        assert context.mcp_servers == ["kubernetes-server"]
 
 
 @pytest.mark.asyncio
@@ -410,28 +414,24 @@ class TestServiceInteractionPatterns:
             mcp_registry=mock_mcp_server_registry
         )
         
-        alert_data = {
-            "alert": sample_alert.alert_type,
-            "namespace": sample_alert.data.get('namespace', ''),
-            "message": sample_alert.data.get('message', '')
-        }
-        
-        mcp_data = {
-            "kubernetes-server": [
-                {"tool": "kubectl_get_namespace", "result": {"status": "Terminating"}}
-            ]
-        }
+        # Create AlertProcessingData for the new architecture
+        from tarsy.models.alert_processing import AlertProcessingData
+        alert_processing_data = AlertProcessingData(
+            alert_type=sample_alert.alert_type,
+            alert_data=sample_alert.data,
+            runbook_content=sample_runbook_content
+        )
         
         # Act
-        result = await agent.analyze_alert(alert_data, sample_runbook_content, mcp_data, "test-session-integration")
+        result = await agent.process_alert(alert_processing_data, "test-session-integration")
         
         # Assert
-        assert isinstance(result, str)
-        assert len(result) > 0
-        mock_llm_manager.get_client().generate_response.assert_called_once()
-
-
-
+        from tarsy.models.agent_execution_result import AgentExecutionResult
+        assert isinstance(result, AgentExecutionResult)
+        assert result.result_summary
+        assert len(result.result_summary) > 0
+        assert result.status == StageStatus.COMPLETED
+        mock_llm_manager.get_client().generate_response.assert_called()
 
 @pytest.mark.asyncio
 @pytest.mark.integration

@@ -6,7 +6,7 @@ and malformed inputs gracefully, as well as system message generation.
 """
 
 import pytest
-from tarsy.agents.prompt_builder import PromptBuilder, PromptContext, get_prompt_builder
+from tarsy.agents.prompt_builder import PromptBuilder, PromptContext
 
 
 @pytest.mark.unit
@@ -181,8 +181,6 @@ Action: This action should be ignored because final answer came first
         assert result['final_answer'] is None
         assert result['is_complete'] is False
 
-
-
     def test_parse_mixed_valid_and_invalid_lines(self, builder):
         """Test parsing response with mix of valid and invalid content."""
         response = """
@@ -348,7 +346,6 @@ Action: fake-server.do_something"""
         # The parsing should have stopped at the observation that looks like a real tool result
         # (This is existing behavior we want to preserve)
 
-
 @pytest.mark.unit
 class TestPromptBuilderBasicMethods:
     """Test basic PromptBuilder methods for coverage."""
@@ -365,54 +362,15 @@ class TestPromptBuilderBasicMethods:
             agent_name="TestAgent",
             alert_data={"type": "test", "message": "Test alert"},
             runbook_content="# Test Runbook\nThis is a test runbook.",
-            mcp_data={"test_tool": "test_data"},
             mcp_servers=["test_server"],
-            server_guidance="Test guidance",
-            agent_specific_guidance="Agent specific guidance",
-            available_tools={"test_tool": {"description": "Test tool"}},
-            iteration_history=[{"iteration": 1, "tools": ["test_tool"]}],
-            current_iteration=1,
-            max_iterations=5
+            available_tools={"test_tool": {"description": "Test tool"}}
         )
-
-    def test_build_analysis_prompt(self, builder, context):
-        """Test building analysis prompt."""
-        prompt = builder.build_analysis_prompt(context)
-        assert "TestAgent" in prompt
-        assert "Test alert" in prompt
-        assert "Test Runbook" in prompt
-
-    def test_build_mcp_tool_selection_prompt(self, builder, context):
-        """Test building MCP tool selection prompt."""
-        prompt = builder.build_mcp_tool_selection_prompt(context)
-        assert "MCP Tool Selection Request" in prompt
-        assert "Test guidance" in prompt
-        assert "Test alert" in prompt
-
-    def test_build_iterative_mcp_tool_selection_prompt(self, builder, context):
-        """Test building iterative MCP tool selection prompt."""
-        prompt = builder.build_iterative_mcp_tool_selection_prompt(context)
-        assert "Iterative MCP Tool Selection" in prompt
-        assert "iteration 1" in prompt
-        assert "Test alert" in prompt
 
     def test_get_general_instructions(self, builder):
         """Test getting general instructions."""
         instructions = builder.get_general_instructions()
         assert isinstance(instructions, str)
         assert len(instructions) > 0
-
-    def test_get_mcp_tool_selection_system_message(self, builder):
-        """Test getting MCP tool selection system message."""
-        message = builder.get_mcp_tool_selection_system_message()
-        assert isinstance(message, str)
-        assert len(message) > 0
-
-    def test_get_iterative_mcp_tool_selection_system_message(self, builder):
-        """Test getting iterative MCP tool selection system message."""
-        message = builder.get_iterative_mcp_tool_selection_system_message()
-        assert isinstance(message, str)
-        assert len(message) > 0
     
     def test_get_enhanced_react_system_message(self, builder):
         """Test getting enhanced ReAct system message with composed instructions."""
@@ -505,49 +463,6 @@ Custom agent instructions here."""
         
         assert "No data" in observation
 
-    def test_format_data(self, builder):
-        """Test formatting data method."""
-        # Test dict
-        data = {"key": "value"}
-        result = builder._format_data(data)
-        assert "key" in result
-        assert "value" in result
-        
-        # Test string
-        data = "simple string"
-        result = builder._format_data(data)
-        assert result == "simple string"
-        
-        # Test other types
-        data = 42
-        result = builder._format_data(data)
-        assert "42" in result
-
-    def test_format_available_tools(self, builder):
-        """Test formatting available tools."""
-        tools = {
-            "tool1": {"description": "First tool"},
-            "tool2": {"description": "Second tool"}
-        }
-        result = builder._format_available_tools(tools)
-        assert "tool1" in result
-        assert "First tool" in result
-        assert "tool2" in result
-        assert "Second tool" in result
-
-    def test_format_iteration_history(self, builder):
-        """Test formatting iteration history."""
-        history = [
-            {"tools_called": [{"server": "server1", "tool": "tool1", "reason": "test"}]},
-            {"tools_called": [{"server": "server2", "tool": "tool2", "reason": "test"}]}
-        ]
-        result = builder._format_iteration_history(history)
-        assert "Iteration 1" in result
-        assert "Iteration 2" in result
-        assert "server1.tool1" in result
-        assert "server2.tool2" in result
-
-
 @pytest.mark.unit
 class TestPromptBuilderUtilityMethods:
     """Test suite for PromptBuilder utility and formatting methods."""
@@ -556,55 +471,6 @@ class TestPromptBuilderUtilityMethods:
     def builder(self):
         """Create a PromptBuilder instance for testing."""
         return PromptBuilder()
-
-    def test_format_data_various_types(self, builder):
-        """Test _format_data with various input types."""
-        # Test dict
-        data = {"key": "value", "number": 42, "nested": {"inner": "data"}}
-        result = builder._format_data(data)
-        assert "key" in result and "value" in result and "42" in result
-        
-        # Test list
-        data = ["item1", "item2", {"key": "value"}]
-        result = builder._format_data(data)
-        assert "item1" in result and "item2" in result
-        
-        # Test string
-        data = "simple string"
-        result = builder._format_data(data)
-        assert result == "simple string"
-        
-        # Test number
-        data = 42
-        result = builder._format_data(data)
-        assert result == "42"
-        
-        # Test None
-        data = None
-        result = builder._format_data(data)
-        assert result == "None"
-    
-    def test_format_available_tools(self, builder):
-        """Test _format_available_tools with various scenarios."""
-        # Test empty tools
-        tools = {}
-        result = builder._format_available_tools(tools)
-        assert result == "No tools available."
-        
-        # Test None tools
-        tools = None
-        result = builder._format_available_tools(tools)
-        assert result == "No tools available."
-        
-        # Test with actual tools
-        tools = {
-            "tools": [
-                {"name": "test_tool", "description": "A test tool"},
-                {"name": "another_tool", "description": "Another tool"}
-            ]
-        }
-        result = builder._format_available_tools(tools)
-        assert "test_tool" in result and "another_tool" in result
     
     def test_extract_section_content(self, builder):
         """Test _extract_section_content with various inputs."""
@@ -713,7 +579,6 @@ class TestPromptBuilderUtilityMethods:
         result = builder.get_react_error_continuation(error_message)
         assert isinstance(result, list) and len(result) > 0
 
-
 @pytest.mark.unit
 class TestPromptBuilderPrivateMethods:
     """Test suite for PromptBuilder private methods to improve coverage."""
@@ -739,47 +604,15 @@ class TestPromptBuilderPrivateMethods:
                 "empty_value": None
             },
             runbook_content="# Troubleshooting Guide\n\n## Step 1\nCheck pod status\n\n## Step 2\nReview logs",
-            mcp_data={
-                "kubernetes-server": [
-                    {"tool": "get_pods", "result": {"pods": ["pod1", "pod2"]}, "parameters": {"namespace": "production"}},
-                    {"tool": "get_logs", "error": "Permission denied", "parameters": {"pod": "api-server"}}
-                ],
-                "legacy-server": {"get_status_result": "Running", "get_logs_result": "Log content here"}
-            },
             mcp_servers=["kubernetes-server", "monitoring-server"],
-            server_guidance="Use kubectl commands for Kubernetes diagnostics",
-            agent_specific_guidance="Focus on pod restart patterns and resource limits",
             available_tools={
                 "tools": [
                     {"name": "get_pods", "description": "Get pod information"},
                     {"name": "get_logs", "description": "Get pod logs"}
                 ]
             },
-            iteration_history=[
-                {
-                    "iteration": 1,
-                    "tools_called": [
-                        {"server": "kubernetes", "tool": "get_pods", "reason": "Check pod status"}
-                    ],
-                    "mcp_data": {
-                        "kubernetes-server": [
-                            {"tool": "get_pods", "result": {"status": "Running"}, "parameters": {"namespace": "prod"}}
-                        ]
-                    }
-                }
-            ],
-            current_iteration=2,
-            max_iterations=5,
             stage_name="diagnosis",
-            is_final_stage=False,
-            stage_attributed_data={
-                "diagnosis": {
-                    "kubernetes-server": [{"tool": "diagnose", "result": "Found issue"}]
-                },
-                "remediation": {
-                    "kubernetes-server": [{"tool": "fix", "result": "Applied fix"}]
-                }
-            }
+            is_final_stage=False
         )
 
     def test_build_context_section(self, builder, context):
@@ -859,149 +692,6 @@ class TestPromptBuilderPrivateMethods:
         assert "## Runbook Content" in result
         assert "No runbook available" in result
 
-    def test_build_mcp_data_section_with_data(self, builder, context):
-        """Test _build_mcp_data_section with MCP data."""
-        result = builder._build_mcp_data_section(context.mcp_data)
-        
-        assert "## System Data (MCP Servers)" in result
-        assert "### Kubernetes-Server MCP Server Data" in result
-        assert "get_pods" in result
-        assert "Permission denied" in result
-        assert "### Legacy-Server MCP Server Data" in result
-
-    def test_build_mcp_data_section_empty(self, builder):
-        """Test _build_mcp_data_section with empty data."""
-        result = builder._build_mcp_data_section({})
-        
-        assert "## System Data (MCP Servers)" in result
-        assert "No system data available" in result
-
-    def test_build_mcp_data_section_none(self, builder):
-        """Test _build_mcp_data_section with None data."""
-        result = builder._build_mcp_data_section(None)
-        
-        assert "## System Data (MCP Servers)" in result
-        assert "No system data available" in result
-
-    def test_build_agent_specific_analysis_guidance(self, builder, context):
-        """Test _build_agent_specific_analysis_guidance method."""
-        result = builder._build_agent_specific_analysis_guidance(context)
-        
-        assert "Domain-Specific Analysis Guidance" in result
-        assert "Focus on pod restart patterns" in result
-        assert "Use kubectl commands" in result
-
-    def test_build_agent_specific_analysis_guidance_no_guidance(self, builder):
-        """Test _build_agent_specific_analysis_guidance with no guidance."""
-        context = PromptContext(
-            agent_name="TestAgent",
-            alert_data={},
-            runbook_content="",
-            mcp_data={},
-            mcp_servers=[],
-            server_guidance="",
-            agent_specific_guidance=""
-        )
-        result = builder._build_agent_specific_analysis_guidance(context)
-        
-        # When no guidance is available, empty string is returned
-        assert result == ""
-
-    def test_build_analysis_instructions(self, builder):
-        """Test _build_analysis_instructions method."""
-        result = builder._build_analysis_instructions()
-        
-        assert isinstance(result, str)
-        assert len(result) > 0
-        assert "analysis" in result.lower() or "instructions" in result.lower()
-
-    def test_format_iteration_history_complex(self, builder, context):
-        """Test _format_iteration_history with complex data."""
-        result = builder._format_iteration_history(context.iteration_history)
-        
-        assert "### Iteration 1" in result
-        assert "kubernetes.get_pods" in result
-        assert "Check pod status" in result
-        assert "kubernetes-server" in result
-        assert '"status": "Running"' in result
-
-    def test_format_iteration_history_with_long_data(self, builder):
-        """Test _format_iteration_history with data that needs truncation."""
-        long_result = {"data": "x" * 10000}  # Create very long data to trigger truncation
-        iteration_history = [{
-            "iteration": 1,
-            "tools_called": [{"server": "test", "tool": "get_data", "reason": "test"}],
-            "mcp_data": {
-                "test-server": [{"tool": "get_data", "result": long_result}]
-            }
-        }]
-        
-        result = builder._format_iteration_history(iteration_history)
-        assert "[truncated for brevity]" in result
-
-    def test_format_iteration_history_with_errors(self, builder):
-        """Test _format_iteration_history with error cases."""
-        iteration_history = [{
-            "iteration": 1,
-            "tools_called": [{"server": "test", "tool": "fail", "reason": "test error"}],
-            "mcp_data": {
-                "test-server": [{"tool": "fail", "error": "Connection timeout"}]
-            }
-        }]
-        
-        result = builder._format_iteration_history(iteration_history)
-        assert "Connection timeout" in result
-        assert "fail_result_error" in result
-
-    def test_format_iteration_history_legacy_format(self, builder):
-        """Test _format_iteration_history with legacy dict format."""
-        iteration_history = [{
-            "iteration": 1,
-            "tools_called": [{"server": "legacy", "tool": "get_status", "reason": "legacy test"}],
-            "mcp_data": {
-                "legacy-server": {"get_status_result": "OK", "get_logs_result": "No issues"}
-            }
-        }]
-        
-        result = builder._format_iteration_history(iteration_history)
-        assert "get_status_result" in result
-        assert "get_logs_result" in result
-        assert "OK" in result
-
-    def test_format_stage_attributed_data(self, builder, context):
-        """Test _format_stage_attributed_data method."""
-        result = builder._format_stage_attributed_data(context.stage_attributed_data)
-        
-        assert "diagnosis" in result
-        assert "remediation" in result
-        assert "Found issue" in result
-        assert "Applied fix" in result
-
-    def test_format_stage_attributed_data_empty(self, builder):
-        """Test _format_stage_attributed_data with empty data."""
-        result = builder._format_stage_attributed_data({})
-        
-        assert isinstance(result, str)
-        assert "No investigation data from previous stages" in result
-
-    # Note: _format_react_question_for_* methods were removed and inlined into 
-    # build_stage_analysis_react_prompt method (build_data_collection_react_prompt was removed)
-
-    def test_get_action_names(self, builder, context):
-        """Test _get_action_names method."""
-        result = builder._get_action_names(context.available_tools)
-        
-        assert isinstance(result, list)
-        assert len(result) > 0
-
-    def test_get_action_names_empty_tools(self, builder):
-        """Test _get_action_names with empty tools."""
-        result = builder._get_action_names({})
-        
-        assert isinstance(result, list)
-        # When tools are empty, it returns a list with "No tools available"
-        assert result == ["No tools available"]
-
     def test_format_available_actions(self, builder, context):
         """Test _format_available_actions method."""
         result = builder._format_available_actions(context.available_tools)
@@ -1017,9 +707,6 @@ class TestPromptBuilderPrivateMethods:
         
         assert isinstance(result, str)
         assert "No tools available" in result
-
-
-
 
 @pytest.mark.unit
 class TestPromptBuilderChainFunctionality:
@@ -1037,14 +724,9 @@ class TestPromptBuilderChainFunctionality:
             agent_name="TestAgent",
             alert_data={"issue": "service down"},
             runbook_content="# Chain Runbook",
-            mcp_data={},
             mcp_servers=["test-server"],
             stage_name="analysis",
-            is_final_stage=True,
-            stage_attributed_data={
-                "analysis": {"test-server": [{"tool": "analyze", "result": "issue found"}]},
-                "remediation": {"test-server": [{"tool": "fix", "result": "applied"}]}
-            }
+            is_final_stage=True
         )
 
     def test_context_section_with_final_stage(self, builder, chain_context):
@@ -1057,21 +739,12 @@ class TestPromptBuilderChainFunctionality:
 
     def test_build_chain_prompt_components(self, builder, chain_context):
         """Test that chain prompts include stage-attributed data."""
-        analysis_prompt = builder.build_analysis_prompt(chain_context)
+        # Use final analysis prompt instead of removed build_analysis_prompt
+        analysis_prompt = builder.build_final_analysis_prompt(chain_context)
         
         # The analysis prompt includes alert and runbook data
         assert "service down" in analysis_prompt
         assert "Chain Runbook" in analysis_prompt
-        
-    def test_stage_attributed_data_formatting(self, builder, chain_context):
-        """Test stage attributed data is properly formatted."""
-        result = builder._format_stage_attributed_data(chain_context.stage_attributed_data)
-        
-        assert "analysis" in result
-        assert "remediation" in result
-        assert "issue found" in result
-        assert "applied" in result
-
 
 @pytest.mark.unit
 class TestPromptBuilderEdgeCases:
@@ -1088,7 +761,6 @@ class TestPromptBuilderEdgeCases:
             agent_name="TestAgent",
             alert_data=None,
             runbook_content=None,
-            mcp_data=None,
             mcp_servers=[]  # Empty list instead of None to avoid join error
         )
         
@@ -1096,48 +768,7 @@ class TestPromptBuilderEdgeCases:
         context_result = builder._build_context_section(context)
         alert_result = builder._build_alert_section(None)
         runbook_result = builder._build_runbook_section(None)
-        mcp_result = builder._build_mcp_data_section(None)
         
         assert isinstance(context_result, str)
         assert isinstance(alert_result, str)
         assert isinstance(runbook_result, str)
-        assert isinstance(mcp_result, str)
-
-    def test_complex_nested_mcp_data(self, builder):
-        """Test MCP data section with deeply nested structures."""
-        complex_mcp_data = {
-            "complex-server": {
-                "nested_result": {
-                    "level1": {
-                        "level2": {
-                            "level3": ["item1", "item2", {"deep": "value"}]
-                        }
-                    }
-                },
-                "array_result": [{"item": 1}, {"item": 2}],
-                "string_result": "simple string"
-            }
-        }
-        
-        result = builder._build_mcp_data_section(complex_mcp_data)
-        
-        assert "level1" in result
-        assert "level2" in result
-        assert "level3" in result
-        assert "simple string" in result
-
-    def test_very_long_iteration_history(self, builder):
-        """Test iteration history with many iterations."""
-        long_history = []
-        for i in range(10):
-            long_history.append({
-                "iteration": i + 1,
-                "tools_called": [{"server": f"server-{i}", "tool": f"tool-{i}", "reason": f"reason-{i}"}],
-                "mcp_data": {f"server-{i}": [{"tool": f"tool-{i}", "result": f"result-{i}"}]}
-            })
-        
-        result = builder._format_iteration_history(long_history)
-        
-        assert "Iteration 1" in result
-        assert "Iteration 10" in result
-        assert "server-5" in result
