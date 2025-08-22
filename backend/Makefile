@@ -42,43 +42,52 @@ install-dev: ## Install development dependencies (includes test)
 
 # Testing
 .PHONY: test
-test: install ## Run all tests (unit + integration + e2e) with proper isolation
+test: check-test-deps ## Run all tests (unit + integration + e2e) with proper isolation
 	@echo "$(GREEN)Running all tests with proper isolation...$(NC)"
 	@echo "$(YELLOW)Running unit and integration tests...$(NC)"
-	@$(PYTEST) $(TEST_DIR)/unit/ $(TEST_DIR)/integration/ -v --tb=short
+	@bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/unit/ $(TEST_DIR)/integration/ -v --tb=short'
 	@echo "$(YELLOW)Running e2e tests in isolated session...$(NC)"  
-	@$(PYTEST) $(TEST_DIR)/e2e/ -v --tb=short -m e2e
+	@bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/e2e/ -v --tb=short -m e2e'
 	@echo "$(GREEN)All tests completed with proper isolation!$(NC)"
 
 .PHONY: test-unit
-test-unit: install ## Run unit tests only
+test-unit: check-test-deps ## Run unit tests only
 	@echo "$(GREEN)Running unit tests...$(NC)"
-	$(PYTEST) $(TEST_DIR)/unit/ -v --tb=short
+	bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/unit/ -v --tb=short'
 
 .PHONY: test-integration
-test-integration: install ## Run integration tests only
+test-integration: check-test-deps ## Run integration tests only
 	@echo "$(GREEN)Running integration tests...$(NC)"
-	$(PYTEST) $(TEST_DIR)/integration/ -v --tb=short
+	bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/integration/ -v --tb=short'
 
 .PHONY: test-e2e
-test-e2e: install ## Run end-to-end tests only
+test-e2e: check-test-deps ## Run end-to-end tests only
 	@echo "$(GREEN)Running end-to-end tests...$(NC)"
-	$(PYTEST) $(TEST_DIR)/e2e/ -v --tb=short -m e2e
+	bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/e2e/ -v --tb=short -m e2e'
 
 .PHONY: test-verbose
-test-verbose: ## Run all tests with verbose output
-	@echo "$(GREEN)Running all tests (verbose)...$(NC)"
-	$(PYTEST) $(TEST_DIR)/ -v
+test-verbose: check-test-deps ## Run all tests with verbose output (isolated sessions for stability)
+	@echo "$(GREEN)Running all tests with verbose output and proper isolation...$(NC)"
+	@echo "$(YELLOW)Running unit and integration tests (verbose)...$(NC)"
+	@bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/unit/ $(TEST_DIR)/integration/ -v --tb=short'
+	@echo "$(YELLOW)Running e2e tests in isolated session (verbose)...$(NC)"  
+	@bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/e2e/ -v --tb=short -m e2e'
+	@echo "$(GREEN)All verbose tests completed!$(NC)"
 
 .PHONY: test-coverage
-test-coverage: ## Run tests with coverage report
-	@echo "$(GREEN)Running tests with coverage...$(NC)"
-	$(PYTEST) $(TEST_DIR)/ --cov=tarsy --cov-report=html --cov-report=term-missing
+test-coverage: check-test-deps ## Run unit and integration tests with coverage report (no e2e-tests for stability)
+	@echo "$(GREEN)Running unit and integration tests with coverage...$(NC)"
+	@bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/unit/ $(TEST_DIR)/integration/ --cov=tarsy --cov-report=html --cov-report=xml --cov-report=term-missing --tb=short'
+	@echo "$(GREEN)All tests with coverage completed!$(NC)"
 
 .PHONY: test-quick
-test-quick: ## Run tests in parallel for faster execution
-	@echo "$(GREEN)Running tests in parallel...$(NC)"
-	$(PYTEST) $(TEST_DIR)/ -n auto
+test-quick: check-test-deps ## Run tests in parallel for faster execution (isolated sessions for stability)
+	@echo "$(GREEN)Running tests in parallel with proper isolation...$(NC)"
+	@echo "$(YELLOW)Running unit and integration tests in parallel...$(NC)"
+	@bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/unit/ $(TEST_DIR)/integration/ -n auto -v --tb=short'
+	@echo "$(YELLOW)Running e2e tests in isolated session...$(NC)"  
+	@bash -c 'source .venv/bin/activate && TESTING=true python -m pytest $(TEST_DIR)/e2e/ -v --tb=short -m e2e'
+	@echo "$(GREEN)All parallel tests completed!$(NC)"
 
 # Code Quality
 .PHONY: lint
@@ -120,6 +129,13 @@ check-venv: ## Check if virtual environment exists and create if needed
 	@if [ ! -f .venv/bin/uvicorn ]; then \
 		echo "$(YELLOW)Virtual environment not found or incomplete. Running setup...$(NC)"; \
 		$(MAKE) install; \
+	fi
+
+.PHONY: check-test-deps
+check-test-deps: check-venv ## Ensure test dependencies are installed
+	@if ! .venv/bin/python -c "import pytest, xdist, respx" 2>/dev/null; then \
+		echo "$(YELLOW)Test dependencies not found. Installing...$(NC)"; \
+		$(UV) sync --extra test; \
 	fi
 
 .PHONY: dev

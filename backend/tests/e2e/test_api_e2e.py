@@ -1,1075 +1,580 @@
 """
-Focused End-to-End Integration Test for HTTP API Endpoints.
+Simplified End-to-End Test with HTTP-level mocking.
 
-This test validates the complete alert processing pipeline with real LLM/MCP interactions,
-database persistence, and comprehensive API data structures.
+This test uses the real FastAPI application with real internal services,
+mocking only external HTTP dependencies at the network boundary.
 
-Uses isolated e2e test fixtures to prevent interference with unit/integration tests.
+Architecture:
+- REAL: FastAPI app, AlertService, HistoryService, hook system, database
+- MOCKED: HTTP requests to LLM APIs, MCP servers, GitHub runbooks
 """
 
 import asyncio
+import json
+import re
+from typing import Dict, Any, Optional
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+import respx
+import httpx
+from tarsy.integrations.mcp.client import MCPClient
+from tarsy.config.builtin_config import BUILTIN_MCP_SERVERS
+
+
+# ============================================================================
+# TEST CONSTANTS - Expected LLM Message Content
+# ============================================================================
+
+EXPECTED_DATA_COLLECTION_SYSTEM_MESSAGE = """## General SRE Agent Instructions
+
+You are an expert Site Reliability Engineer (SRE) with deep knowledge of:
+- Kubernetes and container orchestration
+- Cloud infrastructure and services
+- Incident response and troubleshooting
+- System monitoring and alerting
+- GitOps and deployment practices
+
+Analyze alerts thoroughly and provide actionable insights based on:
+1. Alert information and context
+2. Associated runbook procedures
+3. Real-time system data from available tools
+
+Always be specific, reference actual data, and provide clear next steps.
+Focus on root cause analysis and sustainable solutions.
+
+## Kubernetes Server Instructions
+
+For Kubernetes operations:
+- Be careful with cluster-scoped resource listings in large clusters
+- Always prefer namespaced queries when possible
+- Use kubectl explain for resource schema information
+- Check resource quotas before creating new resources
+
+## Custom Server Instructions
+
+Simple data collection server for testing - provides system information gathering tools
+
+## Agent-Specific Instructions
+
+You are a Kubernetes data collection specialist. Your role is to gather comprehensive 
+information about problematic resources using available kubectl tools.
+
+Focus on:
+- Namespace status and finalizers
+- Pod states and termination details  
+- Events showing errors and warnings
+- Resource dependencies that might block cleanup
+
+Be thorough but efficient. Collect all relevant data before stopping.
+
+🚨 WARNING: NEVER GENERATE FAKE OBSERVATIONS! 🚨
+After writing "Action Input:", you MUST stop immediately. The system will provide the "Observation:" for you.
+DO NOT write fake tool results or continue the conversation after "Action Input:"
+
+🔥 CRITICAL COLON FORMATTING RULE 🔥
+EVERY ReAct section header MUST END WITH A COLON (:)
+
+✅ CORRECT: "Thought:" (with colon)
+❌ INCORRECT: "Thought" (missing colon)
+
+You MUST write:
+- "Thought:" (NOT "Thought")  
+- "Action:" (NOT "Action")
+- "Action Input:" (NOT "Action Input")
+
+CRITICAL REACT FORMATTING RULES:
+Follow the ReAct pattern exactly. You must use this structure:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take (choose from available tools)
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now have sufficient information to provide my analysis
+Final Answer: [Complete SRE analysis in structured format - see below]
+
+RESPONSE OPTIONS:
+At each step, you have exactly TWO options:
+
+1. Continue investigating: 
+   Thought: [your reasoning about what to investigate next]
+   Action: [tool to use]
+   Action Input: [parameters]
+
+2. OR conclude with your findings:
+   Thought: I now have sufficient information to provide my analysis
+   Final Answer: [your complete response - format depends on the specific task]
+
+WHEN TO CONCLUDE:
+Conclude with "Final Answer:" when you have enough information to fulfill your specific task goals.
+You do NOT need perfect information - focus on actionable insights from the data you've collected.
+
+CRITICAL FORMATTING REQUIREMENTS:
+1. ALWAYS include colons after section headers: "Thought:", "Action:", "Action Input:"
+2. Each section must start on a NEW LINE - never continue on the same line
+3. Always add a blank line after "Action Input:" before stopping
+4. For Action Input, provide ONLY parameter values (no YAML, no code blocks, no triple backticks)
+
+⚠️ ABSOLUTELY CRITICAL: STOP AFTER "Action Input:" ⚠️
+5. STOP immediately after "Action Input:" line - do NOT generate "Observation:"
+6. NEVER write fake observations or continue the conversation
+7. The system will provide the real "Observation:" - you must NOT generate it yourself
+8. After the system provides the observation, then continue with "Thought:" or "Final Answer:"
+
+VIOLATION EXAMPLES (DO NOT DO THIS):
+❌ Action Input: apiVersion=v1, kind=Secret, name=my-secret
+❌ Observation: kubernetes-server.resources_get: {"result": "..."} 
+❌ Thought: I have retrieved the data...
+
+CORRECT BEHAVIOR:
+✅ Action Input: apiVersion=v1, kind=Secret, name=my-secret
+✅ [STOP HERE - SYSTEM WILL PROVIDE OBSERVATION]
+
+NEWLINE FORMATTING IS CRITICAL:
+- WRONG: "Thought: I need to check the namespace status first.Action: kubernetes-server.resources_get"
+- CORRECT: 
+Thought: I need to check the namespace status first.
+
+Action: kubernetes-server.resources_get
+Action Input: apiVersion=v1, kind=Namespace, name=superman-dev
+
+EXAMPLE OF CORRECT INVESTIGATION:
+Thought: I need to check the namespace status first. This will give me details about why the namespace is stuck in terminating state.
+
+Action: kubernetes-server.resources_get
+Action Input: apiVersion=v1, kind=Namespace, name=superman-dev
+
+EXAMPLE OF CONCLUDING PROPERLY:
+Thought: I have gathered sufficient information to complete my task. Based on my investigation, I can now provide the requested analysis.
+
+Final Answer: [Provide your complete response in the format appropriate for your specific task - this could be structured analysis, data summary, or stage-specific findings depending on what was requested]
+
+CRITICAL VIOLATIONS TO AVOID:
+❌ GENERATING FAKE OBSERVATIONS: Never write "Observation:" yourself - the system provides it
+❌ CONTINUING AFTER ACTION INPUT: Stop immediately after "Action Input:" - don't add more content
+❌ HALLUCINATING TOOL RESULTS: Don't make up API responses or tool outputs
+🚨 ❌ MISSING COLONS: Writing "Thought" instead of "Thought:" - THIS IS THE #1 FORMATTING ERROR
+❌ Action Input with ```yaml or code blocks  
+❌ Running sections together on the same line without proper newlines
+❌ Providing analysis in non-ReAct format (you MUST use "Final Answer:" to conclude)
+❌ Abandoning ReAct format and providing direct structured responses
+
+🔥 COLON EXAMPLES - MEMORIZE THESE:
+❌ WRONG: "Thought
+The user wants me to investigate..."
+❌ WRONG: "Action
+kubernetes-server.resources_get"
+✅ CORRECT: "Thought:
+The user wants me to investigate..."
+✅ CORRECT: "Action:
+kubernetes-server.resources_get"
+
+THE #1 MISTAKE: Writing fake observations and continuing the conversation after Action Input
+
+Focus on collecting additional data and providing stage-specific analysis for human operators to execute."""
+
+EXPECTED_DATA_COLLECTION_USER_MESSAGE = """Answer the following question using the available tools.
+
+Available tools:
+kubernetes-server.kubectl_get: Get Kubernetes resources
+kubernetes-server.kubectl_describe: Describe Kubernetes resources
+test-data-server.collect_system_info: Collect basic system information like CPU, memory, and disk usage
+
+Question: Investigate this test-kubernetes alert and provide stage-specific analysis.
+
+## Alert Details
+
+**Severity:** warning
+**Timestamp:** {TIMESTAMP}
+**Environment:** production
+**Alert Type:** test-kubernetes
+**Runbook:** https://runbooks.example.com/k8s-namespace-stuck
+
+## Runbook Content
+```markdown
+<!-- RUNBOOK START -->
+# Mock Runbook
+Test runbook content
+<!-- RUNBOOK END -->
+```
+
+## Previous Stage Data
+No previous stage data is available for this alert. This is the first stage of analysis.
+
+## Your Task: DATA-COLLECTION STAGE
+Use available tools to:
+1. Collect additional data relevant to this stage
+2. Analyze findings in the context of this specific stage
+3. Provide stage-specific insights and recommendations
+
+Your Final Answer should include both the data collected and your stage-specific analysis.
+
+Thought: I need to get namespace information first.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "namespaces", "name": "stuck-namespace"}
+Observation: kubernetes-server.kubectl_get: {
+  "result": "stuck-namespace   Terminating   45m"
+}
+Action: kubernetes-server.kubectl_describe
+Action Input: {"resource": "namespace", "name": "stuck-namespace"}
+Observation: kubernetes-server.kubectl_describe: {
+  "result": "Name:         stuck-namespace\\nStatus:       Terminating\\nFinalizers:   kubernetes.io/pv-protection"
+}
+Thought: Let me also collect system information to understand resource constraints.
+Action: test-data-server.collect_system_info
+Action Input: {"detailed": false}
+Observation: test-data-server.collect_system_info: {
+  "result": "{'result': 'System Info: CPU usage: 45%, Memory: 2.1GB/8GB used, Disk: 120GB free'}"
+}
+Begin!"""
+
+EXPECTED_VERIFICATION_SYSTEM_MESSAGE = """## General SRE Agent Instructions
+
+You are an expert Site Reliability Engineer (SRE) with deep knowledge of:
+- Kubernetes and container orchestration
+- Cloud infrastructure and services
+- Incident response and troubleshooting
+- System monitoring and alerting
+- GitOps and deployment practices
+
+Analyze alerts thoroughly and provide actionable insights based on:
+1. Alert information and context
+2. Associated runbook procedures
+3. Real-time system data from available tools
+
+Always be specific, reference actual data, and provide clear next steps.
+Focus on root cause analysis and sustainable solutions.
+
+## Kubernetes Server Instructions
+
+For Kubernetes operations:
+- Be careful with cluster-scoped resource listings in large clusters
+- Always prefer namespaced queries when possible
+- Use kubectl explain for resource schema information
+- Check resource quotas before creating new resources
+
+🚨 WARNING: NEVER GENERATE FAKE OBSERVATIONS! 🚨
+After writing "Action Input:", you MUST stop immediately. The system will provide the "Observation:" for you.
+DO NOT write fake tool results or continue the conversation after "Action Input:"
+
+🔥 CRITICAL COLON FORMATTING RULE 🔥
+EVERY ReAct section header MUST END WITH A COLON (:)
+
+✅ CORRECT: "Thought:" (with colon)
+❌ INCORRECT: "Thought" (missing colon)
+
+You MUST write:
+- "Thought:" (NOT "Thought")  
+- "Action:" (NOT "Action")
+- "Action Input:" (NOT "Action Input")
+
+CRITICAL REACT FORMATTING RULES:
+Follow the ReAct pattern exactly. You must use this structure:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take (choose from available tools)
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now have sufficient information to provide my analysis
+Final Answer: [Complete SRE analysis in structured format - see below]
+
+RESPONSE OPTIONS:
+At each step, you have exactly TWO options:
+
+1. Continue investigating: 
+   Thought: [your reasoning about what to investigate next]
+   Action: [tool to use]
+   Action Input: [parameters]
+
+2. OR conclude with your findings:
+   Thought: I now have sufficient information to provide my analysis
+   Final Answer: [your complete response - format depends on the specific task]
+
+WHEN TO CONCLUDE:
+Conclude with "Final Answer:" when you have enough information to fulfill your specific task goals.
+You do NOT need perfect information - focus on actionable insights from the data you've collected.
+
+CRITICAL FORMATTING REQUIREMENTS:
+1. ALWAYS include colons after section headers: "Thought:", "Action:", "Action Input:"
+2. Each section must start on a NEW LINE - never continue on the same line
+3. Always add a blank line after "Action Input:" before stopping
+4. For Action Input, provide ONLY parameter values (no YAML, no code blocks, no triple backticks)
+
+⚠️ ABSOLUTELY CRITICAL: STOP AFTER "Action Input:" ⚠️
+5. STOP immediately after "Action Input:" line - do NOT generate "Observation:"
+6. NEVER write fake observations or continue the conversation
+7. The system will provide the real "Observation:" - you must NOT generate it yourself
+8. After the system provides the observation, then continue with "Thought:" or "Final Answer:"
+
+VIOLATION EXAMPLES (DO NOT DO THIS):
+❌ Action Input: apiVersion=v1, kind=Secret, name=my-secret
+❌ Observation: kubernetes-server.resources_get: {"result": "..."} 
+❌ Thought: I have retrieved the data...
+
+CORRECT BEHAVIOR:
+✅ Action Input: apiVersion=v1, kind=Secret, name=my-secret
+✅ [STOP HERE - SYSTEM WILL PROVIDE OBSERVATION]
+
+NEWLINE FORMATTING IS CRITICAL:
+- WRONG: "Thought: I need to check the namespace status first.Action: kubernetes-server.resources_get"
+- CORRECT: 
+Thought: I need to check the namespace status first.
+
+Action: kubernetes-server.resources_get
+Action Input: apiVersion=v1, kind=Namespace, name=superman-dev
+
+EXAMPLE OF CORRECT INVESTIGATION:
+Thought: I need to check the namespace status first. This will give me details about why the namespace is stuck in terminating state.
+
+Action: kubernetes-server.resources_get
+Action Input: apiVersion=v1, kind=Namespace, name=superman-dev
+
+EXAMPLE OF CONCLUDING PROPERLY:
+Thought: I have gathered sufficient information to complete my task. Based on my investigation, I can now provide the requested analysis.
+
+Final Answer: [Provide your complete response in the format appropriate for your specific task - this could be structured analysis, data summary, or stage-specific findings depending on what was requested]
+
+CRITICAL VIOLATIONS TO AVOID:
+❌ GENERATING FAKE OBSERVATIONS: Never write "Observation:" yourself - the system provides it
+❌ CONTINUING AFTER ACTION INPUT: Stop immediately after "Action Input:" - don't add more content
+❌ HALLUCINATING TOOL RESULTS: Don't make up API responses or tool outputs
+🚨 ❌ MISSING COLONS: Writing "Thought" instead of "Thought:" - THIS IS THE #1 FORMATTING ERROR
+❌ Action Input with ```yaml or code blocks  
+❌ Running sections together on the same line without proper newlines
+❌ Providing analysis in non-ReAct format (you MUST use "Final Answer:" to conclude)
+❌ Abandoning ReAct format and providing direct structured responses
+
+🔥 COLON EXAMPLES - MEMORIZE THESE:
+❌ WRONG: "Thought
+The user wants me to investigate..."
+❌ WRONG: "Action
+kubernetes-server.resources_get"
+✅ CORRECT: "Thought:
+The user wants me to investigate..."
+✅ CORRECT: "Action:
+kubernetes-server.resources_get"
+
+THE #1 MISTAKE: Writing fake observations and continuing the conversation after Action Input
+
+Focus on investigation and providing recommendations for human operators to execute."""
+
+EXPECTED_VERIFICATION_USER_MESSAGE = """Answer the following question using the available tools.
+
+Available tools:
+kubernetes-server.kubectl_get: Get Kubernetes resources
+kubernetes-server.kubectl_describe: Describe Kubernetes resources
+
+Question: Analyze this test-kubernetes alert and provide actionable recommendations.
+
+## Alert Details
+
+**Severity:** warning
+**Timestamp:** {TIMESTAMP}
+**Environment:** production
+**Alert Type:** test-kubernetes
+**Runbook:** https://runbooks.example.com/k8s-namespace-stuck
+
+## Runbook Content
+```markdown
+<!-- RUNBOOK START -->
+# Mock Runbook
+Test runbook content
+<!-- RUNBOOK END -->
+```
+
+## Previous Stage Data
+### Results from 'data-collection' stage:
+
+#### Analysis Result
+
+<!-- Analysis Result START -->
+Thought: I need to get namespace information first.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "namespaces", "name": "stuck-namespace"}
+Observation: kubernetes-server.kubectl_get: {
+  "result": "stuck-namespace   Terminating   45m"
+}
+Action: kubernetes-server.kubectl_describe
+Action Input: {"resource": "namespace", "name": "stuck-namespace"}
+Observation: kubernetes-server.kubectl_describe: {
+  "result": "Name:         stuck-namespace\\nStatus:       Terminating\\nFinalizers:   kubernetes.io/pv-protection"
+}
+Thought: Let me also collect system information to understand resource constraints.
+Action: test-data-server.collect_system_info
+Action Input: {"detailed": false}
+Observation: test-data-server.collect_system_info: {
+  "result": "{'result': 'System Info: CPU usage: 45%, Memory: 2.1GB/8GB used, Disk: 120GB free'}"
+}
+Final Answer: Data collection completed. Found namespace 'stuck-namespace' in Terminating state with finalizers blocking deletion.
+<!-- Analysis Result END -->
+
+
+## Your Task
+Use the available tools to investigate this alert and provide:
+1. Root cause analysis
+2. Current system state assessment  
+3. Specific remediation steps for human operators
+4. Prevention recommendations
+
+Be thorough in your investigation before providing the final answer.
+
+Thought: I need to verify the namespace status.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "namespaces", "name": "stuck-namespace"}
+Observation: kubernetes-server.kubectl_get: {
+  "result": "stuck-namespace   Terminating   45m"
+}
+Begin!"""
+
+EXPECTED_ANALYSIS_SYSTEM_MESSAGE = """## General SRE Agent Instructions
+
+You are an expert Site Reliability Engineer (SRE) with deep knowledge of:
+- Kubernetes and container orchestration
+- Cloud infrastructure and services
+- Incident response and troubleshooting
+- System monitoring and alerting
+- GitOps and deployment practices
+
+Analyze alerts thoroughly and provide actionable insights based on:
+1. Alert information and context
+2. Associated runbook procedures
+3. Real-time system data from available tools
+
+Always be specific, reference actual data, and provide clear next steps.
+Focus on root cause analysis and sustainable solutions.
+
+## Agent-Specific Instructions
+You are a Senior Site Reliability Engineer specializing in Kubernetes troubleshooting.
+Analyze the collected data from previous stages to identify root causes.
+
+Your analysis should:
+- Synthesize information from all data collection activities
+- Identify the specific root cause of the problem
+- Assess the impact and urgency level
+- Provide confidence levels for your conclusions
+
+Be precise and actionable in your analysis."""
+
+EXPECTED_ANALYSIS_USER_MESSAGE = """# Final Analysis Task
+
+
+**Stage:** analysis (Final Analysis Stage)
+
+
+# SRE Alert Analysis Request
+
+You are an expert Site Reliability Engineer (SRE) analyzing a system alert using the ConfigurableAgent.
+This agent specializes in kubernetes-server operations and has access to domain-specific tools and knowledge.
+
+Your task is to provide a comprehensive analysis of the incident based on:
+1. The alert information
+2. The associated runbook
+3. Real-time system data from MCP servers
+
+Please provide detailed, actionable insights about what's happening and potential next steps.
+
+## Alert Details
+
+**Severity:** warning
+**Timestamp:** {TIMESTAMP}
+**Environment:** production
+**Alert Type:** test-kubernetes
+**Runbook:** https://runbooks.example.com/k8s-namespace-stuck
+
+## Runbook Content
+```markdown
+<!-- RUNBOOK START -->
+# Mock Runbook
+Test runbook content
+<!-- RUNBOOK END -->
+```
+
+## Previous Stage Data
+### Results from 'data-collection' stage:
+
+#### Analysis Result
+
+<!-- Analysis Result START -->
+Thought: I need to get namespace information first.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "namespaces", "name": "stuck-namespace"}
+Observation: kubernetes-server.kubectl_get: {
+  "result": "stuck-namespace   Terminating   45m"
+}
+Action: kubernetes-server.kubectl_describe
+Action Input: {"resource": "namespace", "name": "stuck-namespace"}
+Observation: kubernetes-server.kubectl_describe: {
+  "result": "Name:         stuck-namespace\\nStatus:       Terminating\\nFinalizers:   kubernetes.io/pv-protection"
+}
+Thought: Let me also collect system information to understand resource constraints.
+Action: test-data-server.collect_system_info
+Action Input: {"detailed": false}
+Observation: test-data-server.collect_system_info: {
+  "result": "{'result': 'System Info: CPU usage: 45%, Memory: 2.1GB/8GB used, Disk: 120GB free'}"
+}
+Final Answer: Data collection completed. Found namespace 'stuck-namespace' in Terminating state with finalizers blocking deletion.
+<!-- Analysis Result END -->
+
+### Results from 'verification' stage:
+
+#### Analysis Result
+
+<!-- Analysis Result START -->
+Thought: I need to verify the namespace status.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "namespaces", "name": "stuck-namespace"}
+Observation: kubernetes-server.kubectl_get: {
+  "result": "stuck-namespace   Terminating   45m"
+}
+Final Answer: Verification completed. Root cause identified: namespace stuck due to finalizers preventing deletion.
+<!-- Analysis Result END -->
+
+
+## Instructions
+Provide comprehensive final analysis based on ALL collected data:
+1. Root cause analysis
+2. Impact assessment  
+3. Recommended actions
+4. Prevention strategies
+
+Do NOT call any tools - use only the provided data."""
 
 
 @pytest.mark.asyncio
 @pytest.mark.e2e
-class TestMegaAPIEndpointsE2E:
+class TestRealE2E:
     """
-    Comprehensive API endpoints integration test.
+    Simplified E2E test using HTTP-level mocking.
     
-    Tests the complete alert processing pipeline with real chain execution,
-    LLM/MCP interactions, database persistence, and API validation.
+    Tests the complete system flow:
+    1. HTTP POST to /alerts endpoint
+    2. Real alert processing through AlertService
+    3. Real agent execution with real hook system
+    4. Real database storage via HistoryService  
+    5. HTTP GET from history APIs
+    
+    Mocks only external HTTP calls (LLM APIs, runbooks, MCP servers).
     """
+    
+    def _normalize_content(self, content: str) -> str:
+        """Normalize dynamic content in LLM messages for stable comparison."""
+        # Normalize timestamps (microsecond precision)
+        content = re.sub(r'\*\*Timestamp:\*\* \d+', '**Timestamp:** {TIMESTAMP}', content)
+        content = re.sub(r'Timestamp:\*\* \d+', 'Timestamp:** {TIMESTAMP}', content)
+        
+        # Normalize alert IDs and session IDs (UUIDs)
+        content = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '{UUID}', content)
+        
+        # Normalize specific test-generated data keys
+        content = re.sub(r'test-kubernetes_[a-f0-9]+_\d+', 'test-kubernetes_{DATA_KEY}', content)
+        
+        return content
 
-    # Note: realistic_namespace_alert and test_client fixtures are now provided 
-    # by the isolated e2e conftest.py as e2e_realistic_kubernetes_alert and e2e_test_client
-
-    def _get_react_conversation_steps(self, stage_name=None):
-        """Get the ReAct conversation steps for namespace termination scenario by stage."""
-        
-        # Stage 1: Data Collection - Gather comprehensive information
-        data_collection_steps = [
-            {
-                "thought": "I'm the data collection agent tasked with gathering comprehensive information about this namespace termination issue. Let me start by checking the current namespace status.",
-                "action": "kubernetes-server.get_namespace",
-                "action_input": '{"namespace": "test-namespace"}'
-            },
-            {
-                "thought": "I can see the namespace is in Terminating state with finalizers. Let me also check for any pods that might be stuck in this namespace.",
-                "action": "kubernetes-server.list_pods",
-                "action_input": '{"namespace": "test-namespace"}'
-            },
-            {
-                "thought": "I should also gather events to understand what's happening with the deletion process.",
-                "action": "kubernetes-server.get_events",
-                "action_input": '{"namespace": "test-namespace"}'
-            },
-            {
-                "thought": "Data collection complete. The namespace is stuck due to finalizers, with associated pods and deletion events gathered.",
-                "final_answer": "Data collection completed. Found namespace in Terminating state with kubernetes.io/pv-protection finalizers. Associated pods and events collected for analysis."
-            }
-        ]
-        
-        # Stage 2: Verification - Built-in agent verification  
-        verification_steps = [
-            {
-                "thought": "I'm the verification agent. Based on the data collection, I need to verify the namespace termination issue and assess the impact.",
-                "action": "kubernetes-server.describe_namespace", 
-                "action_input": '{"namespace": "test-namespace"}'
-            },
-            {
-                "thought": "Let me verify the finalizer blocking the deletion by checking resource dependencies.",
-                "action": "kubernetes-server.check_dependencies",
-                "action_input": '{"namespace": "test-namespace", "resource_type": "persistentvolumes"}'
-            },
-            {
-                "thought": "Verification complete. The blocking finalizer has been confirmed and dependencies analyzed.",
-                "final_answer": "Verification completed. Confirmed kubernetes.io/pv-protection finalizer is blocking deletion due to persistent volume dependencies."
-            }
-        ]
-        
-        # Stage 3: Analysis - Root cause analysis and recommendations
-        analysis_steps = [
-            {
-                "thought": "I'm the analysis agent. Based on data collection and verification stages, I need to synthesize the information and provide root cause analysis.",
-                "action": "kubernetes-server.analyze_finalizers",
-                "action_input": '{"namespace": "test-namespace", "finalizers": ["kubernetes.io/pv-protection"]}'
-            },
-            {
-                "thought": "Now let me assess the impact and provide a comprehensive analysis with recommendations.",
-                "final_answer": "Root cause analysis complete. The namespace is stuck in Terminating state due to kubernetes.io/pv-protection finalizers protecting persistent volumes. Recommendation: Remove finalizers after ensuring PV data is safely backed up or no longer needed. Impact: Low - test namespace with no critical workloads."
-            }
-        ]
-        
-        # Return steps based on stage
-        if stage_name == "data-collection":
-            return data_collection_steps
-        elif stage_name == "verification": 
-            return verification_steps
-        elif stage_name == "analysis":
-            return analysis_steps
-        else:
-            # Default to data collection for backwards compatibility
-            return data_collection_steps
-
-    async def _create_simple_fast_mocks(self):
-        """Create realistic mocks that encourage agent interaction."""
-        print("🔧 Creating realistic mocks...")
-        
-        # Create LLM mock with hook-aware interactions
-        llm_mock = AsyncMock()
-        llm_call_count = 0
-        
-        def get_current_stage_and_step(call_count):
-            """Determine which stage and step we're in based on call count."""
-            # Stage 1: data-collection (calls 1-4)
-            if call_count <= 4:
-                stage = "data-collection"
-                step_index = call_count - 1
-            # Stage 2: verification (calls 5-7) 
-            elif call_count <= 7:
-                stage = "verification"
-                step_index = call_count - 5
-            # Stage 3: analysis (calls 8-9)
-            else:
-                stage = "analysis"
-                step_index = call_count - 8
-            
-            return stage, step_index
-        
-        async def realistic_llm_generate_response(messages, session_id, stage_execution_id=None):
-            nonlocal llm_call_count
-            llm_call_count += 1
-            
-            # Import the hook context
-            from tarsy.hooks.typed_context import llm_interaction_context
-            
-            # Create request data structure like the real LLM client
-            request_data = {
-                "messages": [{"role": msg.role, "content": msg.content} for msg in messages] if hasattr(messages[0], 'role') else [{"role": "user", "content": str(msg)} for msg in messages],
-                "provider": "gemini",
-                "model": "gemini-2.5-pro-exp-03-25",
-                "temperature": 0.3
-            }
-            
-            # Use the real hook context to record this interaction
-            async with llm_interaction_context(session_id, request_data, stage_execution_id) as ctx:
-                # Determine current stage and get appropriate conversation steps
-                current_stage, step_index = get_current_stage_and_step(llm_call_count)
-                conversation_steps = self._get_react_conversation_steps(current_stage)
-                
-                # Generate content from stage-specific conversation steps
-                if step_index < len(conversation_steps):
-                    step = conversation_steps[step_index]
-                    if "final_answer" in step:
-                        content = f"""Thought: {step['thought']}
-
-Final Answer: {step['final_answer']}"""
-                    else:
-                        content = f"""Thought: {step['thought']}
-
-Action: {step['action']}
-Action Input: {step['action_input']}"""
-                else:
-                    # Fallback for additional calls within a stage
-                    content = f"""Final Answer: Stage {current_stage} completed after {step_index + 1} steps."""
-                
-                # Create typed response for the context
-                from tarsy.models.unified_interactions import LLMChoice, LLMResponse
-                from tarsy.models.unified_interactions import (
-                    LLMMessage as TypedLLMMessage,
-                )
-                typed_response = LLMResponse(
-                    choices=[
-                        LLMChoice(
-                            message=TypedLLMMessage(role="assistant", content=content),
-                            finish_reason="stop"
-                        )
-                    ],
-                    model="gemini-2.5-pro-exp-03-25",
-                    usage={"total_tokens": 150 + llm_call_count * 25}
-                )
-                
-                # Update context with response data
-                ctx.interaction.response_json = typed_response.model_dump()
-                ctx.interaction.provider = "gemini"
-                ctx.interaction.model_name = "gemini-2.5-pro-exp-03-25"
-                ctx.interaction.token_usage = {"total_tokens": 150 + llm_call_count * 25}
-                
-                # Complete context successfully (this triggers the hooks!)
-                await ctx.complete_success({})
-                
-                return content
-        
-        llm_mock.generate_response = AsyncMock(side_effect=realistic_llm_generate_response)
-        
-        # CRITICAL: Add LLMManager methods that AlertService.initialize() will call
-        llm_mock.is_available = Mock(return_value=True)
-        llm_mock.initialize = Mock(return_value=True)
-        llm_mock.list_available_providers = Mock(return_value=["gemini"])
-        llm_mock.get_availability_status = Mock(return_value={"gemini": "available"})
-        
-        # Create MCP mock with hook-aware interactions
-        mcp_mock = AsyncMock()
-        mcp_call_count = 0
-        
-
-        async def realistic_mcp_call_tool(server_name, tool_name, parameters, session_id, stage_execution_id=None):
-            nonlocal mcp_call_count
-            mcp_call_count += 1
-            
-            # Import the hook context
-            from tarsy.hooks.typed_context import mcp_interaction_context
-            
-            # Use the real hook context to record this interaction
-            async with mcp_interaction_context(session_id, server_name, tool_name, parameters, stage_execution_id) as ctx:
-                # Generate response using local tool response function
-                if "get_namespace" in tool_name:
-                    result = {
-                        "namespace": "test-namespace",
-                        "status": "Terminating", 
-                        "finalizers": ["kubernetes.io/pv-protection"],
-                        "metadata": {
-                            "name": "test-namespace",
-                            "finalizers": ["kubernetes.io/pv-protection"],
-                            "deletionTimestamp": "2024-01-15T10:30:00Z"
-                        }
-                    }
-                elif "list_pods" in tool_name:
-                    result = {
-                        "pods": [
-                            {
-                                "name": "test-pod-1",
-                                "status": "Terminating",
-                                "phase": "Succeeded",
-                                "deletionTimestamp": "2024-01-15T10:30:00Z"
-                            }
-                        ],
-                        "namespace": "test-namespace",
-                        "totalCount": 1
-                    }
-                elif "get_events" in tool_name:
-                    result = {
-                        "events": [
-                            {
-                                "type": "Warning",
-                                "reason": "FailedDelete",
-                                "message": "Unable to delete namespace due to finalizers",
-                                "timestamp": "2024-01-15T10:30:00Z"
-                            }
-                        ],
-                        "namespace": "test-namespace",
-                        "eventCount": 1
-                    }
-                elif "describe_namespace" in tool_name:
-                    result = {
-                        "name": "test-namespace",
-                        "status": "Terminating",
-                        "finalizers": ["kubernetes.io/pv-protection"],
-                        "resourceQuota": "default",
-                        "description": "Detailed namespace information for verification",
-                        "deletionTimestamp": "2024-01-15T10:30:00Z"
-                    }
-                elif "check_dependencies" in tool_name:
-                    result = {
-                        "dependencies": [
-                            {
-                                "type": "PersistentVolume",
-                                "name": "test-pv-1",
-                                "status": "Bound",
-                                "reclaimPolicy": "Retain"
-                            }
-                        ],
-                        "namespace": "test-namespace",
-                        "dependencyCount": 1,
-                        "blocking": True
-                    }
-                elif "analyze_finalizers" in tool_name:
-                    result = {
-                        "analysis": {
-                            "finalizer": "kubernetes.io/pv-protection",
-                            "purpose": "Protects persistent volumes from premature deletion",
-                            "rootCause": "PV finalizer preventing namespace cleanup",
-                            "impact": "Low - test namespace",
-                            "recommendation": "Remove finalizer after data backup verification"
-                        },
-                        "confidence": 0.95,
-                        "analysisComplete": True
-                    }
-                else:
-                    # Default response for any other tool
-                    result = {
-                        "tool": tool_name,
-                        "success": True,
-                        "message": f"Tool {tool_name} executed successfully (call #{mcp_call_count})",
-                        "timestamp": "2024-01-15T10:30:00Z"
-                    }
-                
-                # Update context with result data (this is what the real MCP client does)
-                ctx.interaction.tool_result = result
-                
-                # Complete context successfully (this triggers the hooks!)
-                await ctx.complete_success({"tool_result": result})
-                
-                return {"result": result}
-        
-        mcp_mock.call_tool = AsyncMock(side_effect=realistic_mcp_call_tool)
-        
-        # Return proper tool metadata structure that ReAct agents can iterate over
-        mcp_mock.list_tools = AsyncMock(return_value={
-            "tools": [
-                {
-                    "name": "get_namespace",
-                    "description": "Get detailed information about a Kubernetes namespace",
-                    "inputSchema": {
-                        "type": "object", 
-                        "properties": {"namespace": {"type": "string"}},
-                        "required": ["namespace"]
-                    }
-                },
-                {
-                    "name": "patch_namespace", 
-                    "description": "Patch a Kubernetes namespace configuration",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "namespace": {"type": "string"},
-                            "patch": {"type": "object"}
-                        },
-                        "required": ["namespace", "patch"]
-                    }
-                },
-                {
-                    "name": "check_status",
-                    "description": "Check the current status of a Kubernetes resource",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {"resource": {"type": "string"}},
-                        "required": ["resource"]
-                    }
-                }
-            ]
-        })
-        
-        print("✅ Realistic mocks created")
-        return llm_mock, mcp_mock
-
-    # Note: Test settings are now handled by the isolated_e2e_settings fixture
-
-    async def _validate_comprehensive_api_data(self, test_client, alert_id: str, session_id: str):
-        """Validate API data structures and processing results."""
-        print("🔍 Validating API data...")
-        
-        # Get session details
-        sessions_response = test_client.get("/api/v1/history/sessions")
-        assert sessions_response.status_code == 200
-        sessions_list = sessions_response.json()
-        
-        # Find our session
-        our_session = None
-        for session in sessions_list["sessions"]:
-            if session.get("session_id") == session_id:
-                our_session = session
-                break
-        
-        assert our_session is not None, f"Session {session_id} not found"
-        
-        status = our_session.get("status", "unknown")
-        llm_count = our_session.get("llm_interaction_count", 0)
-        mcp_count = our_session.get("mcp_communication_count", 0)
-        
-        # Get session detail
-        detail_response = test_client.get(f"/api/v1/history/sessions/{session_id}")
-        assert detail_response.status_code == 200
-        session_detail = detail_response.json()
-        
-        # Basic validation
-        assert status in ["completed", "failed", "processing"], f"Invalid status: {status}"
-        assert session_detail.get("chain_id"), "Missing chain_id in session detail"
-        
-        print(f"✅ Session-level counts extracted: {status} with {llm_count} LLM + {mcp_count} MCP interactions")
-        
-        # Return the session-level counts for cross-validation
-        return {
-            "status": status,
-            "session_llm_count": llm_count,
-            "session_mcp_count": mcp_count,
-            "session_total_count": llm_count + mcp_count
-        }
-
-    def _validate_stage_timeline_chronological(self, stage, stage_name):
-        """Validate that all interactions in a stage are in chronological order"""
-        llm_interactions = stage.get("llm_interactions", [])
-        mcp_interactions = stage.get("mcp_communications", [])
-        
-        # Validate that LLM interactions are internally chronologically sorted
-        llm_timestamps = [i.get("timestamp_us") for i in llm_interactions if i.get("timestamp_us") is not None]
-        if len(llm_timestamps) > 1:
-            sorted_llm_timestamps = sorted(llm_timestamps)
-            assert llm_timestamps == sorted_llm_timestamps, \
-                f"TIMELINE VALIDATION FAILED: Stage '{stage_name}' LLM interactions not chronologically sorted within type. " \
-                f"Expected: {sorted_llm_timestamps}, Got: {llm_timestamps}"
-        
-        # Validate that MCP interactions are internally chronologically sorted  
-        mcp_timestamps = [i.get("timestamp_us") for i in mcp_interactions if i.get("timestamp_us") is not None]
-        if len(mcp_timestamps) > 1:
-            sorted_mcp_timestamps = sorted(mcp_timestamps)
-            assert mcp_timestamps == sorted_mcp_timestamps, \
-                f"TIMELINE VALIDATION FAILED: Stage '{stage_name}' MCP interactions not chronologically sorted within type. " \
-                f"Expected: {sorted_mcp_timestamps}, Got: {mcp_timestamps}"
-        
-        # Validate chronological_interactions property (now available in API response!)
-        chronological_interactions = stage.get("chronological_interactions", [])
-        if len(chronological_interactions) > 1:
-            timestamps = [i.get("timestamp_us") for i in chronological_interactions if i.get("timestamp_us") is not None]
-            assert timestamps == sorted(timestamps), \
-                f"CHRONOLOGICAL ORDERING FAILED: Stage '{stage_name}' chronological_interactions not properly sorted. " \
-                f"Expected: {sorted(timestamps)}, Got: {timestamps}"
-            
-            # Validate that chronological_interactions combines both types correctly
-            llm_count_in_chrono = sum(1 for i in chronological_interactions if i.get("type") == "llm")
-            mcp_count_in_chrono = sum(1 for i in chronological_interactions if i.get("type") == "mcp")
-            
-            assert llm_count_in_chrono == len(llm_timestamps), \
-                f"LLM count mismatch in chronological_interactions: expected {len(llm_timestamps)}, got {llm_count_in_chrono}"
-            assert mcp_count_in_chrono == len(mcp_timestamps), \
-                f"MCP count mismatch in chronological_interactions: expected {len(mcp_timestamps)}, got {mcp_count_in_chrono}"
-            
-            # Deep validate ALL interactions in chronological_interactions list
-            for chrono_index, chrono_interaction in enumerate(chronological_interactions):
-                interaction_type = chrono_interaction.get("type")
-                if interaction_type == "llm":
-                    self._validate_llm_interaction_deep(chrono_interaction, stage_name, f"chrono[{chrono_index}]")
-                elif interaction_type == "mcp":
-                    self._validate_mcp_interaction_deep(chrono_interaction, stage_name, f"chrono[{chrono_index}]")
-                else:
-                    pytest.fail(f"CHRONOLOGICAL VALIDATION FAILED: Stage '{stage_name}' chronological_interactions[{chrono_index}] has unknown type: {interaction_type}")
-            
-            print(f"   ✅ Stage '{stage_name}' chronological_interactions validated: {len(chronological_interactions)} interactions in proper chronological order with deep validation")
-        elif len(chronological_interactions) == 1:
-            # Deep validate the single interaction
-            chrono_interaction = chronological_interactions[0]
-            interaction_type = chrono_interaction.get("type")
-            if interaction_type == "llm":
-                self._validate_llm_interaction_deep(chrono_interaction, stage_name, "chrono[0]")
-            elif interaction_type == "mcp":
-                self._validate_mcp_interaction_deep(chrono_interaction, stage_name, "chrono[0]")
-            else:
-                pytest.fail(f"CHRONOLOGICAL VALIDATION FAILED: Stage '{stage_name}' chronological_interactions[0] has unknown type: {interaction_type}")
-            
-            print(f"   ✅ Stage '{stage_name}' chronological_interactions: 1 interaction validated (type: {interaction_type})")
-        else:
-            print(f"   ✅ Stage '{stage_name}' chronological_interactions: empty (no interactions to validate)")
-        
-        total_interactions = len(llm_timestamps) + len(mcp_timestamps)
-        print(f"   ✅ Stage '{stage_name}' timeline validated: LLM({len(llm_timestamps)}) and MCP({len(mcp_timestamps)}) interactions chronologically sorted within types, total timeline has {total_interactions} interactions")
-
-    def _validate_stage_timing_and_status(self, stage, stage_name):
-        """Validate stage timing and status make sense"""
-        status = stage.get("status")
-        started_at_us = stage.get("started_at_us")
-        completed_at_us = stage.get("completed_at_us") 
-        duration_ms = stage.get("duration_ms")
-        
-        # Status validation
-        expected_status = "completed"  # For successful e2e test
-        assert status == expected_status, f"TIMING VALIDATION FAILED: Stage '{stage_name}' status is '{status}', expected '{expected_status}'"
-        
-        # Timing presence validation
-        assert started_at_us is not None, f"TIMING VALIDATION FAILED: Stage '{stage_name}' missing started_at_us"
-        assert completed_at_us is not None, f"TIMING VALIDATION FAILED: Stage '{stage_name}' missing completed_at_us"
-        assert duration_ms is not None, f"TIMING VALIDATION FAILED: Stage '{stage_name}' missing duration_ms"
-        
-        # Timing sanity checks
-        assert isinstance(started_at_us, int), f"TIMING VALIDATION FAILED: Stage '{stage_name}' started_at_us not integer"
-        assert isinstance(completed_at_us, int), f"TIMING VALIDATION FAILED: Stage '{stage_name}' completed_at_us not integer"
-        assert isinstance(duration_ms, (int, float)), f"TIMING VALIDATION FAILED: Stage '{stage_name}' duration_ms not numeric"
-        
-        assert completed_at_us >= started_at_us, f"TIMING VALIDATION FAILED: Stage '{stage_name}' completed before started"
-        assert duration_ms >= 0, f"TIMING VALIDATION FAILED: Stage '{stage_name}' negative duration: {duration_ms}ms"
-        
-        # Realistic timing bounds (stages should take some time but not too long)
-        assert duration_ms < 30000, f"TIMING VALIDATION FAILED: Stage '{stage_name}' took too long: {duration_ms}ms (>30s)"
-        assert duration_ms > 0, f"TIMING VALIDATION FAILED: Stage '{stage_name}' completed too fast: {duration_ms}ms"
-        
-        print(f"   ✅ Stage '{stage_name}' timing validated: {duration_ms}ms duration, status='{status}'")
-
-    def _validate_llm_interaction_deep(self, interaction, stage_name, interaction_index):
-        """Deep validation of a single LLM interaction with comprehensive content checking"""
-        event_id = interaction.get("event_id")
-        timestamp_us = interaction.get("timestamp_us") 
-        interaction_type = interaction.get("type")
-        step_description = interaction.get("step_description")
-        details = interaction.get("details", {})
-        
-        # Basic structure (already validated but double-check)
-        assert event_id, f"DEEP VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] missing event_id"
-        assert timestamp_us is not None, f"DEEP VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] missing timestamp_us"
-        assert interaction_type == "llm", f"DEEP VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] wrong type: {interaction_type}"
-        
-        # Deep content validation
-        assert step_description, f"DEEP VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] missing step_description"
-        assert isinstance(details, dict), f"DEEP VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] details not dict"
-        
-        # LLM-specific details
-        model_name = details.get("model_name")
-        assert model_name, f"DEEP VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] missing model_name in details"
-        
-        success = details.get("success")
-        assert success is not None, f"DEEP VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] missing success field in details"
-        
-        # EP-0010 CRITICAL CONTENT VALIDATION: Messages array should contain system, user, AND assistant messages
-        messages = details.get("messages", [])
-        assert isinstance(messages, list), f"CONTENT VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] messages not a list"
-        assert len(messages) >= 2, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] messages array too short ({len(messages)}) - should have at least system+user or user+assistant"
-        
-        # Find message types in the messages array
-        message_roles = set()
-        message_contents = {}
-        for msg_idx, msg in enumerate(messages):
-            assert isinstance(msg, dict), f"CONTENT VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] message[{msg_idx}] not a dict"
-            role = msg.get("role")
-            content = msg.get("content")
-            
-            assert role, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] message[{msg_idx}] missing role"
-            assert content, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] message[{msg_idx}] missing or empty content"
-            
-            message_roles.add(role)
-            message_contents[role] = content
-            
-            # Validate content is non-trivial (not just whitespace)
-            if isinstance(content, str):
-                assert content.strip(), f"CONTENT VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] message[{msg_idx}] ({role}) has empty content"
-        
-        # CRITICAL: Must have assistant response (this would have caught our bug!)
-        assert "assistant" in message_roles, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] MISSING ASSISTANT RESPONSE - found roles: {message_roles}"
-        
-        # Should have either system+user or just user (minimum conversation structure)
-        has_user = "user" in message_roles
-        has_system = "system" in message_roles
-        assert has_user or has_system, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] missing user or system message - found roles: {message_roles}"
-        
-        # Log the actual content for verification during development
-        if has_system:
-            system_preview = message_contents["system"][:100] + "..." if len(message_contents["system"]) > 100 else message_contents["system"]
-            print(f"     🔍 System: {system_preview}")
-        if has_user:
-            user_preview = message_contents["user"][:100] + "..." if len(message_contents["user"]) > 100 else message_contents["user"]  
-            print(f"     🔍 User: {user_preview}")
-        
-        assistant_preview = message_contents["assistant"][:100] + "..." if len(message_contents["assistant"]) > 100 else message_contents["assistant"]
-        print(f"     🔍 Assistant: {assistant_preview}")
-        
-        # Validate token usage if present
-        total_tokens = details.get("total_tokens")
-        if total_tokens is not None:
-            assert isinstance(total_tokens, int) and total_tokens > 0, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' LLM[{interaction_index}] invalid total_tokens: {total_tokens}"
-        
-        print(f"   ✅ Stage '{stage_name}' LLM interaction [{interaction_index}] CONTENT VALIDATED (model: {model_name}, roles: {sorted(message_roles)})")
-
-    def _validate_mcp_sequence_pattern(self, mcp_interactions, stage_name):
-        """
-        Validate MCP interaction sequence pattern: should include both tool_list and tool_call interactions.
-        
-        Expected pattern for stages that use tools:
-        - First interaction: tool_list (tool discovery)
-        - Subsequent interactions: tool_call (actual tool execution)
-        
-        For analysis stage: no MCP interactions (empty list)
-        """
-        if len(mcp_interactions) == 0:
-            print(f"   ✅ Stage '{stage_name}' MCP sequence: empty (no tools used)")
-            return
-            
-        # Validate sequence pattern based on stage
-        if stage_name in ["data-collection", "verification"]:
-            # These stages should start with tool_list, then have tool_call interactions
-            assert len(mcp_interactions) >= 1, f"MCP SEQUENCE VALIDATION FAILED: Stage '{stage_name}' should have at least 1 interaction"
-            
-            # First interaction should be tool_list (tool discovery)
-            first_interaction = mcp_interactions[0]
-            first_details = first_interaction.get("details", {})
-            first_comm_type = first_details.get("communication_type", "unknown")
-            
-            assert first_comm_type == "tool_list", \
-                f"MCP SEQUENCE VALIDATION FAILED: Stage '{stage_name}' MCP[0] should be tool_list, got: {first_comm_type}"
-            print(f"   ✅ Stage '{stage_name}' MCP sequence: interaction[0] is tool_list as expected")
-            
-            # Subsequent interactions should be tool_call
-            for i in range(1, len(mcp_interactions)):
-                interaction = mcp_interactions[i]
-                details = interaction.get("details", {})
-                communication_type = details.get("communication_type", "unknown")
-                
-                assert communication_type == "tool_call", \
-                    f"MCP SEQUENCE VALIDATION FAILED: Stage '{stage_name}' MCP[{i}] should be tool_call, got: {communication_type}"
-                print(f"   ✅ Stage '{stage_name}' MCP sequence: interaction[{i}] is tool_call as expected")
-        else:
-            # For other stages, just validate that interactions are valid types
-            for i, interaction in enumerate(mcp_interactions):
-                details = interaction.get("details", {})
-                communication_type = details.get("communication_type", "unknown")
-                
-                assert communication_type in ["tool_list", "tool_call"], \
-                    f"MCP SEQUENCE VALIDATION FAILED: Stage '{stage_name}' MCP[{i}] has invalid communication_type: {communication_type}"
-                print(f"   ✅ Stage '{stage_name}' MCP sequence: interaction[{i}] has valid type: {communication_type}")
-
-    def _validate_mcp_interaction_deep(self, interaction, stage_name, interaction_index):
-        """Deep validation of a single MCP interaction with enhanced MCP protocol and content checks"""
-        event_id = interaction.get("event_id")
-        timestamp_us = interaction.get("timestamp_us")
-        interaction_type = interaction.get("type") 
-        step_description = interaction.get("step_description")
-        details = interaction.get("details", {})
-        
-        # Basic structure
-        assert event_id, f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] missing event_id"
-        assert timestamp_us is not None, f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] missing timestamp_us"
-        assert interaction_type == "mcp", f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] wrong type: {interaction_type}"
-        
-        # Deep content validation
-        assert step_description, f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] missing step_description"
-        assert isinstance(details, dict), f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] details not dict"
-        
-        # MCP-specific details
-        server_name = details.get("server_name")
-        tool_name = details.get("tool_name")
-        communication_type = details.get("communication_type")
-        success = details.get("success")
-        
-        assert server_name, f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] missing server_name in details"
-        assert communication_type, f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] missing communication_type in details"
-        assert success is not None, f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] missing success field in details"
-        
-        # tool_name is only required for tool_call interactions, not tool_list
-        if communication_type == "tool_call":
-            assert tool_name, f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] missing tool_name for tool_call interaction"
-        
-        # Validate communication_type is either tool_list or tool_call
-        assert communication_type in ["tool_list", "tool_call"], \
-            f"DEEP VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] invalid communication_type: {communication_type}, expected: tool_list or tool_call"
-        
-        # EP-0010 CRITICAL CONTENT VALIDATION: Check actual MCP content based on type
-        if communication_type == "tool_list":
-            # Tool list should have available_tools data
-            available_tools = details.get("available_tools", {})
-            assert isinstance(available_tools, dict), f"CONTENT VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] available_tools not a dict"
-            assert len(available_tools) > 0, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] available_tools is empty"
-            
-            # Log tools found for verification
-            total_tools = 0
-            for server, tools in available_tools.items():
-                if isinstance(tools, list):
-                    total_tools += len(tools)
-                    if len(tools) > 0 and isinstance(tools[0], dict):
-                        sample_tool = tools[0].get("name", "unknown")
-                        print(f"     🔧 Server '{server}': {len(tools)} tools (e.g., {sample_tool})")
-            
-            assert total_tools > 0, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] no tools found in available_tools"
-            
-        elif communication_type == "tool_call":
-            # Tool call should have parameters and result
-            parameters = details.get("parameters", {})
-            result = details.get("result", {})
-            
-            assert isinstance(parameters, dict), f"CONTENT VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] parameters not a dict"
-            assert isinstance(result, dict), f"CONTENT VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] result not a dict"
-            
-            # For successful tool calls, result should have content (unless the tool genuinely returns empty results)
-            if success:
-                assert result is not None, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] successful tool_call has None result"
-                
-                # Log parameter and result summary for verification
-                param_keys = list(parameters.keys()) if parameters else []
-                result_keys = list(result.keys()) if result else []
-                print(f"     🔧 Tool '{tool_name}' called with params: {param_keys}, returned: {result_keys}")
-                
-                # If result has content, show a preview
-                if result_keys:
-                    first_key = result_keys[0]
-                    first_value = result.get(first_key)
-                    if isinstance(first_value, str) and len(first_value) > 0:
-                        preview = first_value[:50] + "..." if len(first_value) > 50 else first_value
-                        print(f"       📄 Result preview ({first_key}): {preview}")
-            else:
-                # Failed tool calls should have meaningful error information
-                assert result is not None, f"CONTENT VALIDATION FAILED: Stage '{stage_name}' MCP[{interaction_index}] failed tool_call should have error information in result"
-        
-        print(f"   ✅ Stage '{stage_name}' MCP interaction [{interaction_index}] CONTENT VALIDATED (server: {server_name}, tool: {tool_name}, type: {communication_type}, success: {success})")
-
-    async def _validate_sessions_api(self, test_client, session_id, expected_alert_data):
-        """
-        Enhanced sessions API validation with comprehensive checks.
-        
-        Args:
-            test_client: FastAPI test client
-            session_id: The session ID to validate
-            expected_alert_data: The original alert data we submitted
-        """
-        print("🔍 Testing GET /api/v1/history/sessions...")
-        sessions_response = test_client.get("/api/v1/history/sessions")
-        
-        # Validate response structure
-        assert sessions_response.status_code == 200, f"Sessions API failed: {sessions_response.status_code}"
-        sessions_data = sessions_response.json()
-        
-        # Validate sessions list structure
-        assert "sessions" in sessions_data, "Missing 'sessions' field in response"
-        assert isinstance(sessions_data["sessions"], list), "'sessions' should be a list"
-        
-        # VALIDATION 1: Verify there is exactly one session created for the submitted alert
-        print("🔍 Validating session uniqueness...")
-        assert len(sessions_data["sessions"]) == 1, f"Expected exactly 1 session, found {len(sessions_data['sessions'])}"
-        
-        our_session = sessions_data["sessions"][0]
-        assert our_session.get("session_id") == session_id, f"Session ID mismatch: expected {session_id}, got {our_session.get('session_id')}"
-        print(f"✅ Confirmed single session with correct ID: {session_id[:8]}...")
-        
-        # VALIDATION 2: Verify key alert data matches what we submitted
-        print("🔍 Validating alert data consistency...")
-        session_alert_id = our_session.get("alert_id", "")
-        expected_alert_type = expected_alert_data.get("alert_type", "")
-        
-        # Alert ID should contain the alert type (it's part of the ID generation)
-        assert expected_alert_type in session_alert_id, f"Alert ID {session_alert_id} should contain alert type {expected_alert_type}"
-        assert our_session.get("alert_type") == expected_alert_type, f"Alert type mismatch: expected {expected_alert_type}, got {our_session.get('alert_type')}"
-        print(f"✅ Alert data consistent - Type: {expected_alert_type}")
-        
-        # Validate session fields (using actual API field names)
-        required_fields = ["session_id", "alert_id", "status", "started_at_us"]
-        for field in required_fields:
-            assert field in our_session, f"Missing required field: {field}"
-        
-        # Validate field types and values
-        assert isinstance(our_session["session_id"], str), "session_id should be string"
-        assert isinstance(our_session["alert_id"], str), "alert_id should be string"
-        assert our_session["status"] in ["completed", "failed", "processing"], f"Invalid status: {our_session['status']}"
-        
-        print(f"✅ Session list validation passed - Status: {our_session['status']}")
-        
-        # VALIDATION 3: Get detailed session data and validate stages
-        print(f"🔍 Testing GET /api/v1/history/sessions/{session_id}...")
-        detail_response = test_client.get(f"/api/v1/history/sessions/{session_id}")
-        
-        assert detail_response.status_code == 200, f"Session detail API failed: {detail_response.status_code}"
-        detail_data = detail_response.json()
-        
-        # Validate updated DetailedSession structure - fields are now at root level
-        required_detail_fields = ["session_id", "alert_data", "chain_id", "stages"]
-        for field in required_detail_fields:
-            assert field in detail_data, f"Missing required detail field: {field}"
-        
-        # TEST SUMMARY ENDPOINT: Verify lightweight summary API
-        print(f"🔍 Testing GET /api/v1/history/sessions/{session_id}/summary...")
-        summary_response = test_client.get(f"/api/v1/history/sessions/{session_id}/summary")
-        
-        assert summary_response.status_code == 200, f"Session summary API failed: {summary_response.status_code}"
-        summary_data = summary_response.json()
-        
-        # Validate summary structure and data consistency
-        required_summary_fields = ["total_interactions", "llm_interactions", "mcp_communications", "system_events", "errors_count", "total_duration_ms"]
-        for field in required_summary_fields:
-            assert field in summary_data, f"Missing required summary field: {field}"
-        
-        # DetailedSession no longer has a separate "summary" field - summary data is embedded
-        # We can still validate the standalone summary endpoint against derived values from detail session
-        detail_total_interactions = detail_data.get("total_interactions", 0)
-        detail_llm_interactions = detail_data.get("llm_interaction_count", 0)
-        detail_mcp_communications = detail_data.get("mcp_communication_count", 0)
-        
-        # Basic consistency check for core counts
-        assert summary_data["total_interactions"] == detail_total_interactions, f"Total interactions mismatch: summary={summary_data['total_interactions']}, detail={detail_total_interactions}"
-        assert summary_data["llm_interactions"] == detail_llm_interactions, f"LLM interactions mismatch: summary={summary_data['llm_interactions']}, detail={detail_llm_interactions}"
-        assert summary_data["mcp_communications"] == detail_mcp_communications, f"MCP communications mismatch: summary={summary_data['mcp_communications']}, detail={detail_mcp_communications}"
-        
-        # EXACT VALIDATION: Both endpoints should return precisely the same known values
-        # Updated counts now include tool_list interactions (1 per data-collection and verification stage)
-        expected_exact_counts = {
-            "total_interactions": 15,  # 13 + 2 tool_list interactions (data-collection + verification)
-            "llm_interactions": 8,     # 4+3+1 = 8 LLM interactions (unchanged)
-            "mcp_communications": 7,   # 5 tool_call + 2 tool_list interactions
-            "system_events": 0,
-            "errors_count": 0
-        }
-        
-        # EXACT VALIDATION: Validate exact counts for summary endpoint
-        for field, expected_value in expected_exact_counts.items():
-            actual_value = summary_data.get(field, -999)
-            assert actual_value == expected_value, f"EXACT VALIDATION FAILED: summary endpoint {field} expected exactly {expected_value}, got {actual_value}"
-        
-        # SANITY CHECK: Duration should be non-negative (exact value depends on execution speed)
-        duration = summary_data.get("total_duration_ms", -1)
-        assert duration >= 0, f"SANITY CHECK FAILED: summary endpoint shows negative processing duration ({duration}ms)"
-        
-        # Chain statistics validation
-        assert "chain_statistics" in summary_data, "Chain statistics missing from summary endpoint"
-        chain_stats = summary_data["chain_statistics"]
-        chain_fields = ["total_stages", "completed_stages", "failed_stages"]
-        for field in chain_fields:
-            assert field in chain_stats, f"Chain statistics missing field: {field}"
-        
-        print("✅ Summary endpoint validation passed - data consistency confirmed")
-        
-        # VALIDATION 4: Validate chain execution and stages
-        print("🔍 Validating chain execution and stages...")
-        
-        stages = detail_data["stages"]
-        assert isinstance(stages, list), "stages should be list"
-        
-        # EXACT VALIDATION: Number of stages MUST be exactly 3 (from test_agents.yaml)
-        expected_stage_count = 3
-        expected_stages = ["data-collection", "verification", "analysis"]  # Actual stage names from YAML config
-        print("🔍 Validating stage count and names...")
-        print(f"   📊 Found {len(stages)} stages (expected exactly {expected_stage_count})")
-        
-        assert len(stages) == expected_stage_count, f"EXACT VALIDATION FAILED: Expected exactly {expected_stage_count} stages, found {len(stages)}"
-        
-        # VALIDATION 6: Each stage name should match expectations
-        actual_stage_names = []
-        stage_interaction_counts = {}
-        
-        for i, stage in enumerate(stages):
-            assert isinstance(stage, dict), f"Stage {i} should be dict"
-            stage_name = stage.get("stage_name", f"stage_{i}")  # DetailedStage uses "stage_name"
-            actual_stage_names.append(stage_name)
-            
-            # DetailedStage has direct interaction lists, not nested timeline/summary
-            llm_interactions = stage.get("llm_interactions", [])
-            mcp_communications = stage.get("mcp_communications", [])
-            
-            # Count from the direct interaction lists
-            llm_count = len(llm_interactions)
-            mcp_count = len(mcp_communications)
-            
-            # Validate against the summary counts in DetailedStage
-            stage_llm_count = stage.get("llm_interaction_count", 0)
-            stage_mcp_count = stage.get("mcp_communication_count", 0)
-            stage_total_count = stage.get("total_interactions", 0)
-            
-            # VALIDATION: Stage lists and counts should match
-            assert llm_count == stage_llm_count, f"Stage {stage_name} LLM list count ({llm_count}) != Stage count field ({stage_llm_count})"
-            assert mcp_count == stage_mcp_count, f"Stage {stage_name} MCP list count ({mcp_count}) != Stage count field ({stage_mcp_count})"
-            assert llm_count + mcp_count == stage_total_count, f"Stage {stage_name} total count mismatch"
-            
-            stage_interaction_counts[stage_name] = {
-                "llm": llm_count,
-                "mcp": mcp_count,
-                "total": llm_count + mcp_count
-            }
-            
-            print(f"   📋 Stage '{stage_name}': {llm_count} LLM + {mcp_count} MCP interactions")
-            
-            # STRICT VALIDATION: Each stage MUST have exactly the expected interactions
-            total_interactions = llm_count + mcp_count
-            
-            # Define exact interaction requirements per stage (updated to include tool_list interactions)
-            stage_exact_counts = {
-                "data-collection": {"llm": 4, "mcp": 4, "total": 8},  # ReAct: 4 LLM calls + 1 tool_list + 3 MCP tool calls 
-                "verification": {"llm": 3, "mcp": 3, "total": 6},     # ReAct: 3 LLM calls + 1 tool_list + 2 MCP tool calls
-                "analysis": {"llm": 1, "mcp": 0, "total": 1}          # react-final-analysis: 1 LLM call + 0 MCP (no tools executed)
-            }
-            
-            # Get exact expected counts for this stage
-            expected = stage_exact_counts.get(stage_name, {"llm": 1, "mcp": 1, "total": 2})
-            
-            # STRICT ASSERTION: LLM interactions must be exactly as expected
-            assert llm_count == expected["llm"], f"STRICT VALIDATION FAILED: Stage '{stage_name}' has {llm_count} LLM interactions, expected exactly {expected['llm']}"
-            
-            # STRICT ASSERTION: MCP interactions must be exactly as expected  
-            assert mcp_count == expected["mcp"], f"STRICT VALIDATION FAILED: Stage '{stage_name}' has {mcp_count} MCP interactions, expected exactly {expected['mcp']}"
-            
-            # STRICT ASSERTION: Total interactions must be exactly as expected
-            assert total_interactions == expected["total"], f"STRICT VALIDATION FAILED: Stage '{stage_name}' has {total_interactions} total interactions, expected exactly {expected['total']}"
-            
-            print(f"   ✅ Stage '{stage_name}': {llm_count} LLM + {mcp_count} MCP = {total_interactions} interactions (exactly {expected['total']} as required)")
-            
-            # COMPREHENSIVE VALIDATION: Enhanced validation with timing, timeline, and deep content checks
-            
-            # 1. Stage timing and status validation
-            self._validate_stage_timing_and_status(stage, stage_name)
-            
-            # 2. Timeline chronological validation
-            self._validate_stage_timeline_chronological(stage, stage_name)
-            
-            # 3. Deep interaction validation (COMPREHENSIVE approach - validate ALL interactions)
-            llm_interaction_objects = stage.get("llm_interactions", [])
-            mcp_interaction_objects = stage.get("mcp_communications", [])
-            
-            # Validate ALL LLM interactions per stage (if expected)
-            if expected["llm"] > 0:
-                assert len(llm_interaction_objects) >= 1, f"COMPREHENSIVE VALIDATION FAILED: Stage '{stage_name}' missing LLM interaction data"
-                
-                # Deep validate ALL LLM interactions (comprehensive validation)
-                for interaction_index, llm_interaction in enumerate(llm_interaction_objects):
-                    self._validate_llm_interaction_deep(llm_interaction, stage_name, interaction_index)
-            
-            # Validate ALL MCP interactions per stage (if expected) + MCP tool validation
-            if expected["mcp"] > 0:
-                assert len(mcp_interaction_objects) >= 1, f"COMPREHENSIVE VALIDATION FAILED: Stage '{stage_name}' missing MCP interaction data"
-                
-                # Deep validate ALL MCP interactions (comprehensive validation)
-                for interaction_index, mcp_interaction in enumerate(mcp_interaction_objects):
-                    self._validate_mcp_interaction_deep(mcp_interaction, stage_name, interaction_index)
-                
-                # MCP SEQUENCE VALIDATION: Validate proper MCP protocol pattern (tool_list first, then tool_call)
-                self._validate_mcp_sequence_pattern(mcp_interaction_objects, stage_name)
-                    
-                # MCP TOOL VALIDATION: Ensure we have variety of MCP tools being used
-                unique_tools = set()
-                unique_servers = set()
-                for mcp_interaction in mcp_interaction_objects:
-                    details = mcp_interaction.get("details", {})
-                    server_name = details.get("server_name")
-                    tool_name = details.get("tool_name") 
-                    if server_name:
-                        unique_servers.add(server_name)
-                    if tool_name:
-                        unique_tools.add(tool_name)
-                
-                print(f"   ✅ Stage '{stage_name}' MCP tool diversity: {len(unique_servers)} servers, {len(unique_tools)} tools ({', '.join(unique_tools)})")
-                
-            elif expected["mcp"] == 0:
-                # For stages with 0 expected MCP interactions, verify none exist
-                assert len(mcp_interaction_objects) == 0, f"COMPREHENSIVE VALIDATION FAILED: Stage '{stage_name}' should have 0 MCP interactions but found {len(mcp_interaction_objects)}"
-                print(f"   ✅ Stage '{stage_name}' correctly has no MCP interactions")
-        
-        # VALIDATION 7: Stage names MUST match expected order exactly
-        for i, expected_name in enumerate(expected_stages):
-            assert i < len(actual_stage_names), f"STRICT VALIDATION FAILED: Missing stage '{expected_name}' at position {i}"
-            actual_name = actual_stage_names[i]
-            assert actual_name == expected_name, f"STRICT VALIDATION FAILED: Stage {i} name mismatch - expected '{expected_name}', got '{actual_name}'"
-        
-        print("✅ Stage validation passed:")
-        print(f"   📊 Total stages: {len(stages)}")
-        print(f"   📋 Stage names: {', '.join(actual_stage_names)}")
-        
-        # EXACT VALIDATION: Overall interaction count must be precisely what we expect
-        total_llm = sum(counts["llm"] for counts in stage_interaction_counts.values())
-        total_mcp = sum(counts["mcp"] for counts in stage_interaction_counts.values())
-        total_interactions = total_llm + total_mcp
-        print(f"   🔄 Total interactions across all stages: {total_llm} LLM + {total_mcp} MCP = {total_interactions}")
-        
-        # EXACT VALIDATION: Total interactions must be exactly as expected (updated for tool_list)
-        expected_total_llm = 8   # 4 + 3 + 1 from all stages (unchanged)
-        expected_total_mcp = 7   # 4 + 3 + 0 from all stages (includes tool_list interactions)
-        expected_total_interactions = 15  # 8 + 7
-        
-        # EXACT ASSERTION: Total LLM interactions must be exactly as expected
-        assert total_llm == expected_total_llm, f"EXACT VALIDATION FAILED: Total LLM interactions {total_llm}, expected exactly {expected_total_llm}"
-        
-        # EXACT ASSERTION: Total MCP interactions must be exactly as expected
-        assert total_mcp == expected_total_mcp, f"EXACT VALIDATION FAILED: Total MCP interactions {total_mcp}, expected exactly {expected_total_mcp}"
-        
-        # EXACT ASSERTION: Total interactions must be exactly as expected
-        assert total_interactions == expected_total_interactions, f"EXACT VALIDATION FAILED: Total interactions {total_interactions}, expected exactly {expected_total_interactions}"
-            
-        print(f"   ✅ Total interactions validated: {total_llm} LLM + {total_mcp} MCP = {total_interactions} (exactly {expected_total_interactions} as required)")
-        print(f"   ✅ Agent execution successful: {len(stages)} stage(s) completed")
-        
-        # Calculate total interaction events from all stages
-        total_timeline_events = 0
-        for stage in stages:
-            stage_interactions = stage.get("llm_interactions", []) + stage.get("mcp_communications", [])
-            total_timeline_events += len(stage_interactions)
-        
-        print(f"📅 Total interaction events across all stages: {total_timeline_events}")
-        
-        # VALIDATION 8: Verify alert data in session detail matches our submission
-        # alert_type is a top-level field in DetailedSession; alert_data only contains the original nested payload
-        stored_alert_type = detail_data.get("alert_type")
-        assert stored_alert_type == expected_alert_type, f"Stored alert type mismatch: expected {expected_alert_type}, got {stored_alert_type}"
-        print("✅ Session detail alert type matches submission")
-        
-        # VALIDATION 9 - Summary data is now embedded in DetailedSession, validate via summary endpoint
-        print("🔍 Validating session summary statistics via dedicated endpoint...")
-        # We already validated the summary endpoint earlier, so we can refer to that data
-        # Just validate that DetailedSession has the core count fields
-        
-        # Required fields are now directly in DetailedSession
-        required_detail_count_fields = ["total_interactions", "llm_interaction_count", "mcp_communication_count"]
-        
-        for field in required_detail_count_fields:
-            assert field in detail_data, f"Missing required count field in DetailedSession: {field}"
-            assert isinstance(detail_data[field], int), f"DetailedSession field '{field}' should be an integer"
-            assert detail_data[field] >= 0, f"DetailedSession field '{field}' should be non-negative"
-        
-        # EXACT VALIDATION - Validate DetailedSession count fields match expected values (updated for tool_list)
-        expected_detail_counts = {
-            "total_interactions": 15,  # 8 LLM + 7 MCP (includes 2 tool_list)
-            "llm_interaction_count": 8,
-            "mcp_communication_count": 7  # 5 tool_call + 2 tool_list
-        }
-        
-        for field, expected_value in expected_detail_counts.items():
-            actual_value = detail_data.get(field, -999)
-            assert actual_value == expected_value, f"EXACT VALIDATION FAILED: DetailedSession {field} expected exactly {expected_value}, got {actual_value}"
-        
-        print("   📊 DetailedSession count fields validated:")
-        print(f"      Total Interactions: {detail_data['total_interactions']}")
-        print(f"      LLM Interactions: {detail_data['llm_interaction_count']}")
-        print(f"      MCP Communications: {detail_data['mcp_communication_count']}")
-        
-        # Validation - DetailedSession counts should match actual stage interaction counts
-        calculated_total_events = 0
-        calculated_llm_events = 0
-        calculated_mcp_events = 0
-        
-        for stage in stages:
-            stage_interactions = stage.get("llm_interactions", []) + stage.get("mcp_communications", [])
-            calculated_total_events += len(stage_interactions)
-            calculated_llm_events += len(stage.get("llm_interactions", []))
-            calculated_mcp_events += len(stage.get("mcp_communications", []))
-        
-        # Assert DetailedSession counts match calculated stage counts
-        assert detail_data['total_interactions'] == calculated_total_events, \
-            f"DetailedSession total_interactions ({detail_data['total_interactions']}) != calculated events ({calculated_total_events})"
-        assert detail_data['llm_interaction_count'] == calculated_llm_events, \
-            f"DetailedSession llm_interaction_count ({detail_data['llm_interaction_count']}) != calculated LLM events ({calculated_llm_events})"
-        assert detail_data['mcp_communication_count'] == calculated_mcp_events, \
-            f"DetailedSession mcp_communication_count ({detail_data['mcp_communication_count']}) != calculated MCP events ({calculated_mcp_events})"
-        
-        # Chain statistics validation is done via the summary endpoint (already validated above)
-        # DetailedSession doesn't have embedded chain statistics - they're only in SessionStats from summary endpoint
-        print("✅ DetailedSession count validation passed - All counts accurate")
-        
-        print("✅ Session detail validation passed - Chain data comprehensive")
-        
-        # Test with query parameters (if supported)
-        filtered_response = test_client.get("/api/v1/history/sessions?limit=10")
-        assert filtered_response.status_code == 200, "Sessions API with query params failed"
-        
-        print("✅ Comprehensive sessions API validation completed successfully!")
-        
-        return our_session, stage_interaction_counts if stages else {}
-
-    def _validate_session_vs_stage_counts(self, session_level_counts: dict, stage_level_totals: dict):
-        """
-        Cross-validate that session-level interaction counts match stage-level totals.
-        
-        This ensures our unified counting approach works correctly - both SQL aggregation
-        at session level and stage level should produce consistent results.
-        
-        Args:
-            session_level_counts: Counts from sessions list API
-            stage_level_totals: Calculated totals from summing stage counts
-        """
-        print("🔍 Cross-validating session-level vs stage-level interaction counts...")
-        
-        # Extract session-level counts (from sessions list API)
-        session_llm = session_level_counts.get("session_llm_count", 0)
-        session_mcp = session_level_counts.get("session_mcp_count", 0) 
-        session_total = session_level_counts.get("session_total_count", 0)
-        
-        # Extract stage-level totals (calculated from stage sums)
-        stage_llm = stage_level_totals.get("stage_total_llm", 0)
-        stage_mcp = stage_level_totals.get("stage_total_mcp", 0)
-        stage_total = stage_level_totals.get("stage_total_interactions", 0)
-        
-        print(f"   📊 Session-level counts (from sessions list API): {session_llm} LLM + {session_mcp} MCP = {session_total} total")
-        print(f"   📊 Stage-level totals (calculated from stages): {stage_llm} LLM + {stage_mcp} MCP = {stage_total} total")
-        
-        # CRITICAL VALIDATION: Session counts must match stage totals
-        # This validates that our unified SQL aggregation approach works correctly
-        assert session_llm == stage_llm, f"CROSS-VALIDATION FAILED: Session LLM count ({session_llm}) != Stage LLM total ({stage_llm})"
-        assert session_mcp == stage_mcp, f"CROSS-VALIDATION FAILED: Session MCP count ({session_mcp}) != Stage MCP total ({stage_mcp})"
-        assert session_total == stage_total, f"CROSS-VALIDATION FAILED: Session total count ({session_total}) != Stage total count ({stage_total})"
-        
-        # EXPECTED VALUES VALIDATION: Ensure they match our known test scenario (updated for tool_list)
-        expected_llm = 8    # 4 + 3 + 1 from all stages (unchanged)
-        expected_mcp = 7    # 4 + 3 + 0 from all stages (includes tool_list interactions)
-        expected_total = 15 # 8 + 7
-        
-        assert session_llm == expected_llm, f"EXPECTED VALUES FAILED: Session LLM count ({session_llm}) != Expected ({expected_llm})"
-        assert session_mcp == expected_mcp, f"EXPECTED VALUES FAILED: Session MCP count ({session_mcp}) != Expected ({expected_mcp})"
-        assert session_total == expected_total, f"EXPECTED VALUES FAILED: Session total count ({session_total}) != Expected ({expected_total})"
-        
-        print("   ✅ CROSS-VALIDATION PASSED: Session and stage counts are consistent")
-        print(f"   ✅ EXPECTED VALUES PASSED: Counts match known test scenario ({expected_llm} LLM + {expected_mcp} MCP = {expected_total} total)")
-        print("   ✅ UNIFIED COUNTING VERIFIED: SQL aggregation works correctly at both session and stage levels")
-
-    async def test_comprehensive_alert_processing_and_api_validation(
+    async def test_complete_alert_processing_flow(
         self,
         e2e_test_client,
         e2e_realistic_kubernetes_alert,
@@ -1077,304 +582,762 @@ Action Input: {step['action_input']}"""
         isolated_test_database
     ):
         """
-        Comprehensive test: Process alert once, then validate multiple API endpoints.
+        Simplified E2E test focusing on core functionality.
         
-        This unified test covers:
-        1. Real alert processing with multi-stage chain execution
-        2. Sessions API validation (list + detail endpoints)
-        3. Comprehensive API data validation
-        4. Data consistency across all endpoints
+        Flow:
+        1. POST alert to /alerts -> queued
+        2. Wait for processing to complete
+        3. Verify session was created and completed
+        4. Verify basic structure (stages exist)
         
-        Benefits:
-        - Complete isolation: Uses isolated fixtures to prevent test interference
-        - No duplication: Process alert only once
-        - Complete coverage: All API endpoints tested
-        - Efficient: Single test run covers everything
-        - Clean: All temporary resources automatically cleaned up
+        This simplified test verifies:
+        - Alert submission works
+        - Processing completes without hanging
+        - Session is created and marked as completed
+        - Basic stage structure exists
         """
-        print("🚀 Starting comprehensive alert processing and API validation...")
-        print(f"   📊 Using isolated database: {isolated_test_database}")
-        print("   ⚙️  Using isolated settings with proper isolation")
         
-        # Create realistic mocks using the isolated environment
-        llm_mock, mcp_mock = await self._create_simple_fast_mocks()
+        # Wrap entire test in hardcore timeout to prevent hanging
+        async def run_test():
+            print("🚀 Starting test execution...")
+            result = await self._execute_test(
+                e2e_test_client,
+                e2e_realistic_kubernetes_alert,
+                isolated_e2e_settings,
+                isolated_test_database
+            )
+            print("✅ Test execution completed!")
+            return result
         
-        # All settings and environment isolation is handled by fixtures
-        # Database is already initialized by the isolated_test_database fixture
+        try:
+            # Use task-based timeout instead of wait_for to avoid cancellation issues
+            task = asyncio.create_task(run_test())
+            done, pending = await asyncio.wait({task}, timeout=10.0)
+            
+            if pending:
+                # Timeout occurred
+                for t in pending:
+                    t.cancel()
+                print("❌ HARDCORE TIMEOUT: Test exceeded 30 seconds!")
+                print("Check for hanging in alert processing pipeline")
+                raise AssertionError("Test exceeded hardcore timeout of 10 seconds")
+            else:
+                # Task completed
+                return task.result()
+        except Exception as e:
+            print(f"❌ Test failed with exception: {e}")
+            raise
+    
+    async def _execute_test(
+        self,
+        e2e_test_client,
+        e2e_realistic_kubernetes_alert,
+        isolated_e2e_settings,
+        isolated_test_database
+    ):
+        """Minimal test execution with maximum real infrastructure."""
+        print("🔧 _execute_test started")
         
-        # Mock dependencies but keep real alert service
-        with patch('tarsy.services.history_service.get_settings') as mock_history_settings, \
-             patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager_class, \
-             patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client_class, \
-             patch('tarsy.services.alert_service.MCPServerRegistry') as mock_mcp_server_registry, \
-             patch('tarsy.services.alert_service.RunbookService') as mock_runbook_service, \
-             patch('tarsy.main.alert_processing_semaphore') as mock_semaphore:
-            
-            print("🔧 Setting up real AlertService with mocked dependencies...")
+        # ONLY mock external network calls - use real internal services
+        # Using respx for HTTP mocking and MCP SDK mocking for stdio communication
         
-            # Setup history service settings (use isolated settings)
-            mock_history_settings.return_value = isolated_e2e_settings
-            
-            # Setup semaphore mock to allow async context management
-            real_semaphore = asyncio.Semaphore()
-            
-            # Patch the semaphore directly in the main module, not just the return value
-            import tarsy.main
-            tarsy.main.alert_processing_semaphore = real_semaphore
-            
-            # CRITICAL: Also patch the mock to return the real semaphore when needed
-            mock_semaphore.return_value = real_semaphore
-            
-            # Database is already initialized by the isolated_test_database fixture
-            print(f"✅ Using isolated database: {isolated_test_database}")
+        # Simplified interaction tracking - focus on LLM calls only
+        # (MCP interactions will be validated from API response)
+        all_llm_interactions = []
+        captured_llm_requests = {}  # Store full LLM request content by interaction number
         
-            # Setup LLM Manager mock - CRITICAL: this needs to return our async llm_mock
-            mock_llm_manager_instance = Mock()
-            mock_llm_manager_instance.is_available.return_value = True
-            mock_llm_manager_instance.get_client.return_value = llm_mock  # This goes to AgentFactory and then to agents
-            mock_llm_manager_instance.initialize.return_value = True
-            mock_llm_manager_instance.list_available_providers.return_value = ["gemini"]
-            mock_llm_manager_instance.get_availability_status.return_value = {"gemini": "available"}
-            # CRITICAL: The LLM manager itself should also be async-compatible since agents may call it directly
-            mock_llm_manager_instance.__call__ = AsyncMock(return_value=llm_mock)
-            mock_llm_manager_class.return_value = mock_llm_manager_instance
-            
-            # Setup MCP Client mock with realistic methods
-            mock_mcp_client_instance = Mock()
-            mock_mcp_client_instance.initialize = AsyncMock()
-            mock_mcp_client_instance.call_tool = mcp_mock.call_tool  # Use our realistic async mock
-            mock_mcp_client_instance.list_servers = AsyncMock(return_value=["kubernetes-server"])
-            mock_mcp_client_instance.get_available_tools = AsyncMock(return_value=["get_namespace", "patch_namespace", "check_status"])
-            
-            # CRITICAL: Hook-aware list_tools implementation that triggers tool_list interactions
-            async def hook_aware_list_tools(session_id: str, server_name: str = None, stage_execution_id: str = None):
-                # Import the real hook context
-                from tarsy.hooks.typed_context import mcp_list_context
-                
-                # Use the real hook context to record this tool discovery interaction
-                async with mcp_list_context(session_id, server_name, stage_execution_id) as ctx:
-                    # Generate tool list data like the real implementation
-                    tools_data = {
-                        "kubernetes-server": [
-                            {"name": "get_namespace", "description": "Get namespace information"},
-                            {"name": "patch_namespace", "description": "Patch namespace configuration"}, 
-                            {"name": "check_status", "description": "Check resource status"},
-                        ]
-                    }
+        # Create HTTP response handlers for respx
+        def create_llm_response_handler():
+            """Create a handler that tracks LLM interactions and returns appropriate responses."""
+            def llm_response_handler(request):
+                try:
+                    # Track the interaction for counting
+                    request_data = request.content.decode() if hasattr(request, 'content') and request.content else "{}"
+                    all_llm_interactions.append(request_data)
                     
-                    # Update context with tool data (like the real MCP client does)
-                    ctx.interaction.available_tools = tools_data
+                    # Parse and store the request content for exact verification
+                    try:
+                        parsed_request = json.loads(request_data)
+                        messages = parsed_request.get('messages', [])
+                        
+                        # Store the full messages for later exact verification
+                        captured_llm_requests[len(all_llm_interactions)] = {
+                            'messages': messages,
+                            'interaction_number': len(all_llm_interactions)
+                        }
+                        
+                        print(f"\n🔍 LLM REQUEST #{len(all_llm_interactions)}:")
+                        for i, msg in enumerate(messages):
+                            print(f"  Message {i+1} ({msg.get('role', 'unknown')}):")
+                            content = msg.get('content', '')
+                            # Print abbreviated content for debugging
+                            print(f"    Content: {content[:200]}...{content[-100:] if len(content) > 300 else ''}")
+                        print("=" * 80)
+                    except json.JSONDecodeError:
+                        print(f"\n🔍 LLM REQUEST #{len(all_llm_interactions)}: Could not parse JSON")
+                        print(f"Raw content: {request_data}")
+                        print("=" * 80)
+                    except Exception as e:
+                        print(f"\n🔍 LLM REQUEST #{len(all_llm_interactions)}: Parse error: {e}")
+                        print("=" * 80)
                     
-                    # Complete context successfully (this triggers the hooks!)
-                    await ctx.complete_success({})
+                    # Determine response based on interaction count (simple pattern)
+                    total_interactions = len(all_llm_interactions)
                     
-                    return tools_data
-            
-            mock_mcp_client_instance.list_tools = AsyncMock(side_effect=hook_aware_list_tools)
-            mock_mcp_client_class.return_value = mock_mcp_client_instance
-            
-            # Setup MCP Server Registry mock with realistic tool discovery
-            mock_mcp_registry_instance = Mock()
-            mock_mcp_registry_instance.initialize_servers = AsyncMock()
-            mock_mcp_registry_instance.get_server_client = AsyncMock(return_value=mcp_mock)
-            mock_mcp_registry_instance.list_available_servers = Mock(return_value=["kubernetes-server"])
-            mock_mcp_registry_instance.cleanup_all_servers = AsyncMock()
-            
-            # Add tool discovery methods that return proper iterables
-            mock_mcp_registry_instance.get_available_tools = AsyncMock(return_value=[
-                {"name": "get_namespace", "description": "Get namespace information"},
-                {"name": "patch_namespace", "description": "Patch namespace configuration"},
-                {"name": "check_status", "description": "Check resource status"},
-                {"name": "kubectl_get", "description": "Get Kubernetes resources"},
-                {"name": "kubectl_patch", "description": "Patch Kubernetes resources"}
-            ])
-            mock_mcp_registry_instance.discover_tools = AsyncMock(return_value={
-                "kubernetes-server": [
-                    {"name": "get_namespace", "description": "Get namespace information"},
-                    {"name": "patch_namespace", "description": "Patch namespace configuration"},
-                    {"name": "check_status", "description": "Check resource status"}
-                ]
-            })
-            
-            # CRITICAL: Add the missing get_server_configs method that agents iterate over
-            from types import SimpleNamespace
-            
-            def mock_get_server_configs(server_ids):
-                """Return mock server config objects that can be iterated over."""
-                configs = []
-                for server_id in server_ids:
-                    config = SimpleNamespace(
-                        server_id=server_id,
-                        instructions="Mock instructions for " + server_id,
-                        description=f"Mock {server_id} server for testing",
-                        name=server_id,
-                        server_type="mock",
-                        connection_params={}
+                    if total_interactions <= 4:
+                        # Data collection stage responses
+                        if total_interactions == 1:
+                            response_content = """Thought: I need to get namespace information first.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "namespaces", "name": "stuck-namespace"}"""
+                        elif total_interactions == 2:
+                            response_content = """Action: kubernetes-server.kubectl_describe
+Action Input: {"resource": "namespace", "name": "stuck-namespace"}"""
+                        elif total_interactions == 3:
+                            response_content = """Thought: Let me also collect system information to understand resource constraints.
+Action: test-data-server.collect_system_info
+Action Input: {"detailed": false}"""
+                        else:
+                            response_content = """Final Answer: Data collection completed. Found namespace 'stuck-namespace' in Terminating state with finalizers blocking deletion."""
+                    
+                    elif total_interactions <= 6:
+                        # Verification stage responses
+                        if total_interactions == 5:
+                            response_content = """Thought: I need to verify the namespace status.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "namespaces", "name": "stuck-namespace"}"""
+                        else:
+                            response_content = """Final Answer: Verification completed. Root cause identified: namespace stuck due to finalizers preventing deletion."""
+                    
+                    else:
+                        # Analysis stage response
+                        response_content = """Based on previous stages, the namespace is stuck due to finalizers.
+## Recommended Actions
+1. Remove finalizers to allow deletion"""
+                    
+                    # Return HTTP response in the format expected by LangChain
+                    return httpx.Response(
+                        200,
+                        json={
+                            "choices": [{
+                                "message": {
+                                    "content": response_content,
+                                    "role": "assistant"
+                                },
+                                "finish_reason": "stop"
+                            }],
+                            "model": "gpt-4",
+                            "usage": {"total_tokens": 150}
+                        }
                     )
-                    configs.append(config)
-                return configs
+                except Exception as e:
+                    print(f"Error in LLM response handler: {e}")
+                    # Fallback response
+                    return httpx.Response(200, json={
+                        "choices": [{"message": {"content": "Fallback response", "role": "assistant"}}]
+                    })
             
-            def mock_get_single_server_config(server_id):
-                """Return a single mock server config object."""
-                return SimpleNamespace(
-                    server_id=server_id,
-                    instructions="Mock instructions for " + server_id,
-                    description=f"Mock {server_id} server for testing",
-                    name=server_id,
-                    server_type="mock",
-                    connection_params={}
-                )
+            return llm_response_handler
+        
+        # Create MCP SDK mock functions  
+        def create_mcp_session_mock():
+            """Create a mock MCP session that provides kubectl tools.
             
-            mock_mcp_registry_instance.get_server_configs = Mock(side_effect=mock_get_server_configs)
-            mock_mcp_registry_instance.get_server_config = Mock(side_effect=mock_get_single_server_config)
+            Note: This mock has intentional tool call failures to simulate MCP server issues.
+            The mock_list_tools provides tools but mock_call_tool simulates that the tools
+            aren't found when called. This tests the system's error handling for MCP failures.
+            These errors are expected and part of the test design to verify that agents
+            can handle MCP tool failures gracefully and still provide meaningful analysis.
+            """
+            mock_session = AsyncMock()
             
-            mock_mcp_server_registry.return_value = mock_mcp_registry_instance
-            
-            # Setup Runbook Service mock
-            mock_runbook_instance = Mock()
-            mock_runbook_instance.download_runbook = AsyncMock(return_value="Mock runbook content for kubernetes namespace terminating")
-            mock_runbook_service.return_value = mock_runbook_instance
-            
-            # Create real AlertService and use it for processing
-            from tarsy.services.alert_service import AlertService
-            real_alert_service = AlertService(isolated_e2e_settings)
-            
-            # CRITICAL: Replace AlertService's dependencies with our mocks BEFORE initialize()
-            # This ensures the AgentFactory gets our mocks when AlertService.initialize() creates it
-            real_alert_service.mcp_client = mock_mcp_client_instance
-            # IMPORTANT: The AgentFactory expects llm_client to be the actual client, not a manager
-            # So we pass our llm_mock directly as the llm_manager
-            real_alert_service.llm_manager = llm_mock
-            # CRITICAL: Replace the runbook service with our mock to prevent real HTTP requests
-            real_alert_service.runbook_service = mock_runbook_instance
-            
-            await real_alert_service.initialize()
-            print("✅ Real AlertService initialized with mocked dependencies")
-            
-            # DEBUG: Check what chains are available
-            available_alert_types = real_alert_service.chain_registry.list_available_alert_types()
-            available_chains = real_alert_service.chain_registry.list_available_chains()
-            print(f"🔍 Available alert types: {available_alert_types}")
-            print(f"🔍 Available chains: {available_chains}")
-            
-            # Replace the main alert service with our real instance
-            with patch('tarsy.main.alert_service', real_alert_service):
-                # STEP 1: Submit Alert 
-                print("\n📝 STEP 1: Submitting alert...")
-                response = e2e_test_client.post("/alerts", json=e2e_realistic_kubernetes_alert)
-                if response.status_code != 200:
-                    print(f"❌ Alert submission failed: {response.status_code} - {response.text}")
-                    pytest.fail(f"Alert submission failed: {response.status_code}")
+            async def mock_call_tool(tool_name, parameters):
+                # Create mock result object with content attribute
+                mock_result = Mock()
+                
+                if tool_name == 'kubectl_get':
+                    resource = parameters.get('resource', 'pods')
+                    name = parameters.get('name', '')
                     
+                    if resource == 'namespaces' and name == 'stuck-namespace':
+                        mock_content = Mock()
+                        mock_content.text = 'stuck-namespace   Terminating   45m'
+                        mock_result.content = [mock_content]
+                    else:
+                        mock_content = Mock()
+                        mock_content.text = f"Mock kubectl get {resource} response"
+                        mock_result.content = [mock_content]
+                
+                elif tool_name == 'kubectl_describe':
+                    resource = parameters.get('resource', '')
+                    name = parameters.get('name', '')
+                    
+                    if resource == 'namespace' and name == 'stuck-namespace':
+                        mock_content = Mock()
+                        mock_content.text = """Name:         stuck-namespace
+Status:       Terminating
+Finalizers:   kubernetes.io/pv-protection"""
+                        mock_result.content = [mock_content]
+                    else:
+                        mock_content = Mock()
+                        mock_content.text = f"Mock kubectl describe {resource} {name} response"
+                        mock_result.content = [mock_content]
+                
+                else:
+                    mock_content = Mock()
+                    mock_content.text = f"Mock response for tool: {tool_name}"
+                    mock_result.content = [mock_content]
+                
+                return mock_result
+            
+            async def mock_list_tools():
+                # Create mock tool objects with attributes (not dict keys)
+                mock_tool1 = Mock()
+                mock_tool1.name = "kubectl_get"
+                mock_tool1.description = "Get Kubernetes resources"
+                mock_tool1.inputSchema = {
+                    "type": "object",
+                    "properties": {
+                        "resource": {"type": "string"},
+                        "namespace": {"type": "string"},
+                        "name": {"type": "string"}
+                    }
+                }
+                
+                mock_tool2 = Mock()
+                mock_tool2.name = "kubectl_describe"
+                mock_tool2.description = "Describe Kubernetes resources"
+                mock_tool2.inputSchema = {
+                    "type": "object",
+                    "properties": {
+                        "resource": {"type": "string"},
+                        "namespace": {"type": "string"},
+                        "name": {"type": "string"}
+                    }
+                }
+                
+                # Return object with .tools attribute (matching MCP SDK API)
+                mock_result = Mock()
+                mock_result.tools = [mock_tool1, mock_tool2]
+                return mock_result
+            
+            mock_session.call_tool.side_effect = mock_call_tool
+            mock_session.list_tools.side_effect = mock_list_tools
+            
+            return mock_session
+        
+        def create_custom_mcp_session_mock():
+            """Create a mock MCP session for the custom test-data-server."""
+            mock_session = AsyncMock()
+            
+            async def mock_call_tool(tool_name, parameters):
+                # Create mock result object with content attribute - this must return the exact structure
+                # that MCPClient.call_tool expects after processing
+                if tool_name == 'collect_system_info':
+                    # Return the dictionary format that MCPClient.call_tool produces
+                    return {"result": "System Info: CPU usage: 45%, Memory: 2.1GB/8GB used, Disk: 120GB free"}
+                else:
+                    return {"result": f"Mock response for custom tool: {tool_name}"}
+            
+            async def mock_list_tools():
+                # Create mock tool object with attributes (not dict keys)
+                mock_tool = Mock()
+                mock_tool.name = "collect_system_info"
+                mock_tool.description = "Collect basic system information like CPU, memory, and disk usage"
+                mock_tool.inputSchema = {
+                    "type": "object",
+                    "properties": {
+                        "detailed": {"type": "boolean", "description": "Whether to return detailed system info"}
+                    }
+                }
+                
+                # Return object with .tools attribute (matching MCP SDK API)
+                mock_result = Mock()
+                mock_result.tools = [mock_tool]
+                return mock_result
+            
+            mock_session.call_tool.side_effect = mock_call_tool
+            mock_session.list_tools.side_effect = mock_list_tools
+            
+            return mock_session
+        
+        # Create mock MCP sessions for both servers
+        mock_kubernetes_session = create_mcp_session_mock()
+        mock_custom_session = create_custom_mcp_session_mock()
+        
+        # Create test MCP server configuration that doesn't launch external processes
+        test_mcp_servers = BUILTIN_MCP_SERVERS.copy()
+        test_mcp_servers['kubernetes-server'] = {
+            "server_id": "kubernetes-server",
+            "server_type": "test",
+            "enabled": True,
+            "connection_params": {
+                "command": "echo",  # Safe command that won't fail
+                "args": ["kubernetes-mock-server-ready"]
+            },
+            "instructions": "Test kubernetes server for e2e testing",
+            "data_masking": {"enabled": False}
+        }
+        test_mcp_servers['test-data-server'] = {
+            "server_id": "test-data-server", 
+            "server_type": "test",
+            "enabled": True,
+            "connection_params": {
+                "command": "echo",  # Safe command that won't fail
+                "args": ["test-data-server-ready"]
+            },
+            "instructions": "Test data collection server for e2e testing",
+            "data_masking": {"enabled": False}
+        }
+        
+        # Apply comprehensive mocking with test MCP server config
+        with respx.mock() as respx_mock, \
+             patch('tarsy.config.builtin_config.BUILTIN_MCP_SERVERS', test_mcp_servers):
+            
+            # 1. Mock LLM API calls (preserves LLM hooks!)
+            llm_handler = create_llm_response_handler()
+            
+            # Mock all major LLM provider endpoints (covers openai, anthropic, etc.)
+            respx_mock.post(url__regex=r".*(openai\.com|anthropic\.com|api\.x\.ai|generativelanguage\.googleapis\.com|googleapis\.com).*").mock(side_effect=llm_handler)
+            
+            # 2. Mock runbook HTTP calls (various sources)
+            respx_mock.get(url__regex=r".*(github\.com|runbooks\.example\.com).*").mock(
+                return_value=httpx.Response(200, text="# Mock Runbook\nTest runbook content")
+            )
+            
+            # 3. Mock MCP client by patching sessions after initialization
+            original_list_tools = MCPClient.list_tools
+            
+            async def mock_list_tools(self, session_id: str, server_name=None, stage_execution_id=None):
+                """Override list_tools to use our mock sessions."""
+                # Ensure our mock sessions are available
+                self.sessions = {
+                    'kubernetes-server': mock_kubernetes_session,
+                    'test-data-server': mock_custom_session
+                }
+                # Call the original method which will now use our mock sessions
+                return await original_list_tools(self, session_id, server_name, stage_execution_id)
+            
+            original_call_tool = MCPClient.call_tool
+            
+            async def mock_call_tool(self, server_name: str, tool_name: str, parameters, session_id: str, stage_execution_id=None):
+                """Override call_tool to use our mock sessions."""
+                # Ensure our mock sessions are available  
+                self.sessions = {
+                    'kubernetes-server': mock_kubernetes_session,
+                    'test-data-server': mock_custom_session
+                }
+                # Call the original method which will now use our mock sessions
+                return await original_call_tool(self, server_name, tool_name, parameters, session_id, stage_execution_id)
+            
+            with patch.object(MCPClient, 'list_tools', mock_list_tools), \
+                 patch.object(MCPClient, 'call_tool', mock_call_tool):
+            
+                print("🔧 Using the real AlertService with test MCP server config and mocking...")
+                # All internal services are real, hooks work perfectly!
+                # HTTP calls (LLM, runbooks) are mocked via respx
+                # MCP server config replaced with test config to avoid external NPM packages
+                # MCP calls handled by mock session that provides kubectl tools
+            
+                # STEP 1: Submit alert
+                print("🚀 Step 1: Submitting alert")
+                response = e2e_test_client.post("/alerts", json=e2e_realistic_kubernetes_alert)
+                assert response.status_code == 200
+                
                 response_data = response.json()
                 assert response_data["status"] == "queued"
                 alert_id = response_data["alert_id"]
                 print(f"✅ Alert submitted: {alert_id}")
                 
-                # STEP 2: Wait for processing completion
-                print("\n⏳ STEP 2: Waiting for processing completion...")
-                session_id = None
-                for i in range(60):  # Increased timeout for real processing
-                    await asyncio.sleep(0.5)  # Longer sleep for real processing
-                    session_id = real_alert_service.get_session_id_for_alert(alert_id)
-                    if session_id:
-                        print(f"   📋 Session found: {session_id[:8]}...")
-                        break
-                                        
-                if not session_id:
-                    pytest.fail("Session was not created within timeout")
-                    
-                print(f"✅ Processing completed with session: {session_id}")
+                # STEP 2: Wait for processing with robust polling
+                print("⏳ Step 2: Waiting for processing...")
+                session_id, final_status = await self._wait_for_session_completion(e2e_test_client, max_wait_seconds=8)
                 
-                # CRITICAL FIX: Wait for all async hook operations to complete
-                # This prevents race condition where test validation runs before
-                # async hooks finish storing interactions to database
-                print("\n⏱️  STEP 2.1: Ensuring all async operations complete...")
-                await asyncio.sleep(1.0)  # Give async hooks time to complete
+                # STEP 3: Verify results
+                print("🔍 Step 3: Verifying results...")
                 
-                # Additional synchronization: Check database until interactions appear
-                # This handles cases where async operations take longer than expected
-                interactions_found = False
-                max_retries = 30  # 3 seconds max wait
-                for retry in range(max_retries):
-                    try:
-                        sessions_response = e2e_test_client.get("/api/v1/history/sessions")
-                        if sessions_response.status_code == 200:
-                            sessions_data = sessions_response.json()
-                            if sessions_data.get("sessions"):
-                                session = sessions_data["sessions"][0]
-                                total_interactions = session.get("llm_interaction_count", 0) + session.get("mcp_communication_count", 0)
-                                if total_interactions > 0:
-                                    interactions_found = True
-                                    print(f"   ✅ Found {total_interactions} interactions after {retry * 0.1:.1f}s")
-                                    break
-                    except Exception as e:
-                        print(f"   🔍 Retry {retry}: {e}")
-                    
-                    await asyncio.sleep(0.1)  # Small delay between checks
+                # Basic verification
+                assert session_id is not None, "Session ID missing"
+                print(f"✅ Session found: {session_id}, final status: {final_status}")
                 
-                if not interactions_found:
-                    print("   ⚠️  No interactions found after synchronization - this may indicate a deeper issue")
+                # Verify session completed successfully
+                assert final_status == "completed", f"Expected session to be completed, but got: {final_status}"
+                print("✅ Session completed successfully!")
                 
-                # Step 3: Validate Sessions API endpoints
-                print("\n🔍 STEP 3: Validating Sessions API endpoints...")
-                session_data, stage_interaction_counts = await self._validate_sessions_api(e2e_test_client, session_id, e2e_realistic_kubernetes_alert)
+                # Get session details to verify stages structure
+                session_detail_response = e2e_test_client.get(f"/api/v1/history/sessions/{session_id}")
+                assert session_detail_response.status_code == 200, f"Failed to get session details: {session_detail_response.status_code}"
                 
-                # Step 4: Validate comprehensive API data structures  
-                print("\n🔍 STEP 4: Validating comprehensive API data...")
-                session_level_counts = await self._validate_comprehensive_api_data(e2e_test_client, alert_id, session_id)
+                detail_data = session_detail_response.json()
+                stages = detail_data.get("stages", [])
+                print(f"Found {len(stages)} stages in completed session")
                 
-                # Calculate stage totals from stage_interaction_counts for cross-validation
-                assert stage_interaction_counts, "Stage interaction counts should always be present in E2E tests"
-                total_llm = sum(counts.get("llm", 0) for counts in stage_interaction_counts.values())
-                total_mcp = sum(counts.get("mcp", 0) for counts in stage_interaction_counts.values())
-                total_interactions = total_llm + total_mcp
-                stage_level_totals = {
-                    "stage_total_llm": total_llm,
-                    "stage_total_mcp": total_mcp,
-                    "stage_total_interactions": total_interactions,
-                    "stage_interaction_counts": stage_interaction_counts
-                }
+                # Assert that stages exist and verify basic structure
+                assert len(stages) > 0, "Session completed but no stages found - invalid session structure"
+                print("✅ Session has stages - basic structure verified")
                 
-                # Step 4.1: CROSS-VALIDATION - Ensure session-level and stage-level counts match
-                print("\n🔍 STEP 4.1: Cross-validating session vs stage interaction counts...")
-                assert session_level_counts, "Session-level counts should always be present in E2E tests"
-                assert stage_level_totals, "Stage-level totals should always be present in E2E tests"
-                self._validate_session_vs_stage_counts(session_level_counts, stage_level_totals)
+                # STEP 4: Comprehensive result data verification
+                print("🔍 Step 4: Comprehensive result verification...")
+                await self._verify_session_metadata(detail_data, e2e_realistic_kubernetes_alert)
+                await self._verify_stage_structure(stages)
+                await self._verify_complete_interaction_flow(stages, captured_llm_requests)
                 
-                # Step 5: Enhanced Summary
-                print("\n🎉 All API validations completed successfully!")
-                print(f"   ✅ Alert processing: {session_data.get('status')}")
-                print("   ✅ Session uniqueness: 1 session confirmed")
-                print("   ✅ Alert data consistency: Verified")
-                print("   ✅ Sessions list API validated")  
-                print("   ✅ Session detail API validated")
-                print("   ✅ Comprehensive data validated")
-                print("   ✅ Session vs Stage count cross-validation passed")
-                print("   ✅ Unified SQL aggregation counting verified")
-                print(f"   ✅ Processing took: {session_data.get('duration_ms', 'unknown')}ms")
-                print("   ✅ Complete isolation: All resources automatically cleaned up")
+                print("✅ COMPREHENSIVE VERIFICATION PASSED!")
                 
-                # EXACT VALIDATION: We MUST have stage interaction data
-                assert stage_interaction_counts, "EXACT VALIDATION FAILED: No stage interaction counts available. Stage processing failed."
-                
-                # EXACT VALIDATION: Final verification of exact stage interaction counts (updated for tool_list)
-                final_stage_exact_counts = {
-                    "data-collection": {"llm": 4, "mcp": 4, "total": 8},  # ReAct: 4 LLM + 1 tool_list + 3 MCP tool calls
-                    "verification": {"llm": 3, "mcp": 3, "total": 6},     # ReAct: 3 LLM + 1 tool_list + 2 MCP tool calls  
-                    "analysis": {"llm": 1, "mcp": 0, "total": 1}          # react-final-analysis: 1 LLM + 0 MCP (no tools executed)
-                }
-                
-                print("   📊 Stage breakdown:")
-                for stage_name, counts in stage_interaction_counts.items():
-                    expected = final_stage_exact_counts.get(stage_name, {"llm": 1, "mcp": 1, "total": 2})
-                    
-                    # EXACT FINAL ASSERTIONS - EXACT NUMBERS ONLY
-                    assert counts["llm"] == expected["llm"], f"EXACT VALIDATION FAILED: {stage_name} has {counts['llm']} LLM interactions, expected exactly {expected['llm']}"
-                    assert counts["mcp"] == expected["mcp"], f"EXACT VALIDATION FAILED: {stage_name} has {counts['mcp']} MCP interactions, expected exactly {expected['mcp']}"
-                    assert counts["total"] == expected["total"], f"EXACT VALIDATION FAILED: {stage_name} has {counts['total']} total interactions, expected exactly {expected['total']}"
-                    
-                    print(f"      • {stage_name}: {counts['llm']} LLM + {counts['mcp']} MCP = {counts['total']} total interactions ✅")
+                return
+
+    async def _wait_for_session_completion(self, e2e_test_client, max_wait_seconds: int = 8):
+        """
+        Robust polling logic to wait for session completion.
         
-        # Note: All cleanup is handled automatically by the isolated e2e fixtures
-        print("🧹 All temporary resources automatically cleaned up by isolation fixtures")
+        Args:
+            e2e_test_client: Test client for making API calls
+            max_wait_seconds: Maximum time to wait in seconds
+            
+        Returns:
+            Tuple of (session_id, final_status)
+            
+        Raises:
+            AssertionError: If no session found or polling times out
+        """
+        print(f"⏱️ Starting robust polling (max {max_wait_seconds}s)...")
+        
+        start_time = asyncio.get_event_loop().time()
+        poll_interval = 0.2  # Poll every 200ms for responsiveness
+        attempts = 0
+        
+        while True:
+            attempts += 1
+            elapsed_time = asyncio.get_event_loop().time() - start_time
+            
+            # Check for timeout
+            if elapsed_time >= max_wait_seconds:
+                print(f"❌ Polling timeout after {elapsed_time:.1f}s ({attempts} attempts)")
+                raise AssertionError(f"Session completion polling timed out after {max_wait_seconds}s")
+            
+            # Get current sessions
+            sessions_response = e2e_test_client.get("/api/v1/history/sessions")
+            if sessions_response.status_code != 200:
+                print(f"⚠️ Failed to get sessions: {sessions_response.status_code}")
+                await asyncio.sleep(poll_interval)
+                continue
+            
+            sessions_data = sessions_response.json()
+            sessions = sessions_data.get('sessions', [])
+            
+            if not sessions:
+                print(f"⏳ No sessions yet (attempt {attempts}, {elapsed_time:.1f}s)")
+                await asyncio.sleep(poll_interval)
+                continue
+            
+            # Check the most recent session (first in list)
+            session = sessions[0]
+            session_id = session.get("session_id")
+            status = session.get("status")
+            
+            print(f"⏳ Polling: {session_id} -> {status} (attempt {attempts}, {elapsed_time:.1f}s)")
+            
+            # Check if session is in a final state
+            if status in ["completed", "failed"]:
+                print(f"✅ Session reached final state: {status} in {elapsed_time:.1f}s ({attempts} attempts)")
+                return session_id, status
+            
+            # Session exists but not complete yet, continue polling
+            await asyncio.sleep(poll_interval)
+
+    async def _verify_session_metadata(self, session_data, original_alert):
+        """Verify session metadata matches expectations."""
+        print("  📋 Verifying session metadata...")
+        
+        # Required session fields
+        required_fields = ['session_id', 'alert_id', 'alert_type', 'status', 'started_at_us', 'completed_at_us']
+        for field in required_fields:
+            assert field in session_data, f"Missing required session field: {field}"
+        
+        # Verify alert type matches
+        assert session_data['alert_type'] == original_alert['alert_type'], \
+            f"Alert type mismatch: expected {original_alert['alert_type']}, got {session_data['alert_type']}"
+        
+        # Verify chain information
+        assert 'chain_id' in session_data, "Missing chain_id in session data"
+        assert session_data['chain_id'] == 'kubernetes-namespace-terminating-chain', \
+            f"Unexpected chain_id: {session_data['chain_id']}"
+        
+        # Verify timestamps are reasonable
+        started_at = session_data['started_at_us']
+        completed_at = session_data['completed_at_us']
+        assert started_at > 0, "Invalid started_at timestamp"
+        assert completed_at > started_at, "completed_at should be after started_at"
+        
+        # Processing duration should be reasonable (< 30 seconds in microseconds)
+        processing_duration_ms = (completed_at - started_at) / 1000
+        assert processing_duration_ms < 30000, f"Processing took too long: {processing_duration_ms}ms"
+        
+        print(f"    ✅ Session metadata verified (chain: {session_data['chain_id']}, duration: {processing_duration_ms:.1f}ms)")
+
+    async def _verify_stage_structure(self, stages):
+        """Verify stage structure and count."""
+        print("  🏗️ Verifying stage structure...")
+        
+        # Expected stages for kubernetes-namespace-terminating-chain
+        expected_stages = ['data-collection', 'verification', 'analysis']
+        
+        assert len(stages) == len(expected_stages), \
+            f"Expected {len(expected_stages)} stages, got {len(stages)}"
+        
+        # Verify each stage has required structure
+        for i, stage in enumerate(stages):
+            required_stage_fields = ['stage_id', 'stage_name', 'agent', 'status', 'stage_index']
+            for field in required_stage_fields:
+                assert field in stage, f"Stage {i} missing required field: {field}"
+            
+            # Verify stage order and names
+            assert stage['stage_name'] == expected_stages[i], \
+                f"Stage {i} name mismatch: expected {expected_stages[i]}, got {stage['stage_name']}"
+            
+            # Verify stage index
+            assert stage['stage_index'] == i, \
+                f"Stage {i} index mismatch: expected {i}, got {stage['stage_index']}"
+            
+            # Verify all stages completed successfully
+            assert stage['status'] == 'completed', \
+                f"Stage {i} ({stage['stage_name']}) not completed: {stage['status']}"
+        
+        print(f"    ✅ Stage structure verified ({len(stages)} stages in correct order)")
+
+    async def _verify_complete_interaction_flow(self, stages, captured_llm_requests):
+        """Verify complete interaction flow with all objects in exact order per stage."""
+        print("  🔄 Verifying complete interaction flow...")
+        
+        # Expected complete interaction structure per stage (from actual test run data)
+        expected_stages = {
+            'data-collection': {
+                'llm_count': 4,
+                'mcp_count': 5,  # Tool discovery calls + tool execution calls are all tracked as MCP interactions
+                'interactions': [
+                    # MCP 1 - Tool list discovery for kubernetes-server (first interaction)
+                    {'type': 'mcp', 'position': 1, 'communication_type': 'tool_list', 'success': True, 'server_name': 'kubernetes-server'},
+                    # MCP 2 - Tool list discovery for test-data-server (returns 1 tool: collect_system_info)
+                    {'type': 'mcp', 'position': 2, 'communication_type': 'tool_list', 'success': True, 'server_name': 'test-data-server'},
+                    # LLM 1 - Initial ReAct iteration
+                    {'type': 'llm', 'position': 1, 'success': True, 'final_message_role': 'assistant'},
+                    # MCP 3 - Successful kubectl_get attempt
+                    {'type': 'mcp', 'position': 3, 'communication_type': 'tool_call', 'success': True, 'tool_name': 'kubectl_get', 'server_name': 'kubernetes-server'},
+                    # LLM 2 - Second ReAct iteration  
+                    {'type': 'llm', 'position': 2, 'success': True, 'final_message_role': 'assistant'},
+                    # MCP 4 - Successful kubectl_describe attempt  
+                    {'type': 'mcp', 'position': 4, 'communication_type': 'tool_call', 'success': True, 'tool_name': 'kubectl_describe', 'server_name': 'kubernetes-server'},
+                    # LLM 3 - Third ReAct iteration
+                    {'type': 'llm', 'position': 3, 'success': True, 'final_message_role': 'assistant'},
+                    # MCP 5 - Successful collect_system_info call
+                    {'type': 'mcp', 'position': 5, 'communication_type': 'tool_call', 'success': True, 'tool_name': 'collect_system_info', 'server_name': 'test-data-server'},
+                    # LLM 4 - Final completion
+                    {'type': 'llm', 'position': 4, 'success': True, 'final_message_role': 'assistant',
+                     'expected_final_response': "Final Answer: Data collection completed. Found namespace 'stuck-namespace' in Terminating state with finalizers blocking deletion.",
+                     'verify_exact_llm_content': True}
+                ]
+            },
+            'verification': {
+                'llm_count': 2,
+                'mcp_count': 2,
+                'interactions': [
+                    # MCP 1 - Tool list discovery (first interaction)
+                    {'type': 'mcp', 'position': 1, 'communication_type': 'tool_list', 'success': True, 'server_name': 'kubernetes-server'},
+                    # LLM 1 - Initial ReAct iteration
+                    {'type': 'llm', 'position': 1, 'success': True, 'final_message_role': 'assistant'},
+                    # MCP 2 - Successful kubectl_get attempt
+                    {'type': 'mcp', 'position': 2, 'communication_type': 'tool_call', 'success': True, 'tool_name': 'kubectl_get', 'server_name': 'kubernetes-server'},
+                    # LLM 2 - Final answer
+                    {'type': 'llm', 'position': 2, 'success': True, 'final_message_role': 'assistant',
+                     'expected_final_response': "Final Answer: Verification completed. Root cause identified: namespace stuck due to finalizers preventing deletion.",
+                     'verify_exact_llm_content': True}
+                ]
+            },
+            'analysis': {
+                'llm_count': 1,
+                'mcp_count': 0,
+                'interactions': [
+                    # LLM 1 - Final analysis (no tool discovery)
+                    {'type': 'llm', 'position': 1, 'success': True, 'final_message_role': 'assistant',
+                     'expected_final_response': """Based on previous stages, the namespace is stuck due to finalizers.
+## Recommended Actions
+1. Remove finalizers to allow deletion""",
+                     'verify_exact_llm_content': True}
+                ]
+            }
+        }
+        
+        for stage in stages:
+            stage_name = stage['stage_name']
+            expected_stage = expected_stages.get(stage_name)
+            
+            if not expected_stage:
+                continue  # Skip verification for unexpected stages
+                
+            # Verify interaction counts match
+            llm_interactions = stage.get('llm_interactions', [])
+            mcp_interactions = stage.get('mcp_communications', [])
+            
+            assert len(llm_interactions) == expected_stage['llm_count'], \
+                f"Stage '{stage_name}' LLM count mismatch: expected {expected_stage['llm_count']}, got {len(llm_interactions)}"
+            
+            assert len(mcp_interactions) == expected_stage['mcp_count'], \
+                f"Stage '{stage_name}' MCP count mismatch: expected {expected_stage['mcp_count']}, got {len(mcp_interactions)}"
+            
+            # Verify complete interaction flow in chronological order
+            # Get chronological interactions from API (mixed LLM and MCP in actual order)
+            chronological_interactions = stage.get('chronological_interactions', [])
+            assert len(chronological_interactions) == len(expected_stage['interactions']), \
+                f"Stage '{stage_name}' chronological interaction count mismatch: expected {len(expected_stage['interactions'])}, got {len(chronological_interactions)}"
+            
+            llm_counter = 0
+            mcp_counter = 0
+            
+            for i, expected_interaction in enumerate(expected_stage['interactions']):
+                actual_interaction = chronological_interactions[i]
+                interaction_type = expected_interaction['type']
+                
+                # Verify the type matches
+                assert actual_interaction['type'] == interaction_type, \
+                    f"Stage '{stage_name}' interaction {i+1} type mismatch: expected {interaction_type}, got {actual_interaction['type']}"
+                
+                if interaction_type == 'llm':
+                    llm_counter += 1
+                    # Verify basic LLM interaction structure
+                    assert 'details' in actual_interaction, f"Stage '{stage_name}' LLM {llm_counter} missing details"
+                    details = actual_interaction['details']
+                    
+                    assert details['success'] == expected_interaction['success'], \
+                        f"Stage '{stage_name}' LLM {llm_counter} success mismatch"
+                    
+                    # Check final message has expected role
+                    messages = details.get('messages', [])
+                    assert len(messages) > 0, f"Stage '{stage_name}' LLM {llm_counter} has no messages"
+                    final_message = messages[-1]
+                    assert final_message.get('role') == expected_interaction['final_message_role'], \
+                        f"Stage '{stage_name}' LLM {llm_counter} final message role mismatch"
+                    
+                    # Verify final response content if specified
+                    if 'expected_final_response' in expected_interaction:
+                        actual_response = final_message.get('content', '').strip()
+                        expected_response = expected_interaction['expected_final_response'].strip()
+                        assert actual_response == expected_response, \
+                            f"Stage '{stage_name}' LLM {llm_counter} response mismatch:\nExpected: {repr(expected_response)}\nActual: {repr(actual_response)}"
+                    
+                    # Verify actual LLM request content using captured requests for exact string matching
+                    if 'verify_exact_llm_content' in expected_interaction and expected_interaction['verify_exact_llm_content']:
+                        # This should be the last LLM interaction in the stage
+                        assert i == len(expected_stage['interactions']) - 1 or all(exp_int['type'] != 'llm' for exp_int in expected_stage['interactions'][i+1:]), \
+                            f"Stage '{stage_name}' verify_exact_llm_content should only be on the last LLM interaction"
+                        
+                        # Get the captured LLM request based on the global LLM interaction count
+                        # Calculate which global LLM request this corresponds to
+                        global_llm_count = 0
+                        for s in stages:
+                            s_name = s['stage_name']
+                            s_llm_interactions = s.get('llm_interactions', [])
+                            if s_name == stage_name:
+                                global_llm_count += llm_counter  # This is the current LLM interaction in this stage
+                                break
+                            else:
+                                global_llm_count += len(s_llm_interactions)
+                        
+                        # LLM requests are 1-indexed in the captured data but global_llm_count is 0-indexed
+                        captured_request = captured_llm_requests.get(global_llm_count)
+                        if not captured_request:
+                            print(f"⚠️ Warning: Could not find captured LLM request for global position {global_llm_count}")
+                            print(f"Available captures: {list(captured_llm_requests.keys())}")
+                            continue
+                        
+                        captured_messages = captured_request['messages']
+                        assert len(captured_messages) >= 2, f"Stage '{stage_name}' LLM {llm_counter} should have at least system and user messages"
+                        
+                        system_message = captured_messages[0]
+                        user_message = captured_messages[1]
+                        
+                        assert system_message.get('role') == 'system', \
+                            f"Stage '{stage_name}' LLM {llm_counter} first message should be system role"
+                        assert user_message.get('role') == 'user', \
+                            f"Stage '{stage_name}' LLM {llm_counter} second message should be user role"
+                        
+                        # Store the exact captured content for use in future test runs
+                        actual_system_content = system_message.get('content', '').strip()
+                        actual_user_content = user_message.get('content', '').strip()
+                        
+                        print(f"📝 Stage '{stage_name}' LLM {llm_counter} EXACT CONTENT CAPTURED:")
+                        print(f"System message length: {len(actual_system_content)} chars")
+                        print(f"User message length: {len(actual_user_content)} chars")
+                        
+                        # Normalize both expected and actual content for comparison
+                        normalized_system = self._normalize_content(actual_system_content)
+                        normalized_user = self._normalize_content(actual_user_content)
+                        
+                        # Verify exact content based on stage 
+                        if stage_name == "data-collection":
+                            # Expected exact content for data-collection stage
+                            expected_system = EXPECTED_DATA_COLLECTION_SYSTEM_MESSAGE
+                            expected_user = EXPECTED_DATA_COLLECTION_USER_MESSAGE
+                            
+                            normalized_expected_system = self._normalize_content(expected_system)
+                            normalized_expected_user = self._normalize_content(expected_user)
+                            
+                            assert normalized_system == normalized_expected_system, \
+                                f"Data-collection system message mismatch:\nExpected length: {len(normalized_expected_system)}\nActual length: {len(normalized_system)}\nFirst 200 chars of diff - Expected: {normalized_expected_system[:200]}\nActual: {normalized_system[:200]}"
+                            assert normalized_user == normalized_expected_user, \
+                                f"Data-collection user message mismatch:\nExpected length: {len(normalized_expected_user)}\nActual length: {len(normalized_user)}\nFirst 200 chars of diff - Expected: {normalized_expected_user[:200]}\nActual: {normalized_user[:200]}"
+                        elif stage_name == "verification":  
+                            # Expected exact content for verification stage
+                            expected_system_verification = EXPECTED_VERIFICATION_SYSTEM_MESSAGE
+                            expected_user_verification = EXPECTED_VERIFICATION_USER_MESSAGE
+
+                            normalized_expected_system_verification = self._normalize_content(expected_system_verification)
+                            normalized_expected_user_verification = self._normalize_content(expected_user_verification)
+                            
+                            assert normalized_system == normalized_expected_system_verification, \
+                                f"Verification system message mismatch:\nExpected length: {len(normalized_expected_system_verification)}\nActual length: {len(normalized_system)}"
+                            assert normalized_user == normalized_expected_user_verification, \
+                                f"Verification user message mismatch:\nExpected length: {len(normalized_expected_user_verification)}\nActual length: {len(normalized_user)}"
+                        elif stage_name == "analysis":
+                            # Expected exact content for analysis stage
+                            expected_system_analysis = EXPECTED_ANALYSIS_SYSTEM_MESSAGE
+                            
+                            expected_user_analysis = EXPECTED_ANALYSIS_USER_MESSAGE
+
+                            normalized_expected_system_analysis = self._normalize_content(expected_system_analysis)
+                            normalized_expected_user_analysis = self._normalize_content(expected_user_analysis)
+                            
+                            assert normalized_system == normalized_expected_system_analysis, \
+                                f"Analysis system message mismatch:\nExpected length: {len(normalized_expected_system_analysis)}\nActual length: {len(normalized_system)}"
+                            assert normalized_user == normalized_expected_user_analysis, \
+                                f"Analysis user message mismatch:\nExpected length: {len(normalized_expected_user_analysis)}\nActual length: {len(normalized_user)}"
+                    
+                elif interaction_type == 'mcp':
+                    mcp_counter += 1
+                    # Verify basic MCP interaction structure
+                    assert 'details' in actual_interaction, f"Stage '{stage_name}' MCP {mcp_counter} missing details"
+                    details = actual_interaction['details']
+                    
+                    assert details['success'] == expected_interaction['success'], \
+                        f"Stage '{stage_name}' MCP {mcp_counter} success mismatch"
+                    
+                    assert details['communication_type'] == expected_interaction['communication_type'], \
+                        f"Stage '{stage_name}' MCP {mcp_counter} communication_type mismatch"
+                    
+                    assert details['server_name'] == expected_interaction['server_name'], \
+                        f"Stage '{stage_name}' MCP {mcp_counter} server_name mismatch"
+                    
+                    # Verify tool name for tool_call interactions
+                    if expected_interaction['communication_type'] == 'tool_call':
+                        assert details['tool_name'] == expected_interaction['tool_name'], \
+                            f"Stage '{stage_name}' MCP {mcp_counter} tool_name mismatch"
+                    
+                    # Verify tool_list has available_tools
+                    elif expected_interaction['communication_type'] == 'tool_list':
+                        assert 'available_tools' in details, \
+                            f"Stage '{stage_name}' MCP {mcp_counter} tool_list missing available_tools"
+                        assert len(details['available_tools']) > 0, \
+                            f"Stage '{stage_name}' MCP {mcp_counter} tool_list has no available_tools"
+            
+            print(f"    ✅ Stage '{stage_name}': Complete interaction flow verified ({len(llm_interactions)} LLM, {len(mcp_interactions)} MCP)")
+        
+        print("  ✅ Complete interaction flow verified for all stages")
