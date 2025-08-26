@@ -11,7 +11,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from tarsy.integrations.llm.client import LLM_PROVIDERS, LLMClient
-from tarsy.models.unified_interactions import LLMMessage
+from tarsy.models.unified_interactions import LLMMessage, LLMConversation, MessageRole
 
 
 @pytest.mark.unit
@@ -139,9 +139,11 @@ class TestLLMClientMessageConversion:
     
     def test_convert_system_message(self, client):
         """Test system message conversion."""
-        messages = [LLMMessage(role="system", content="You are a helpful assistant")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant")
+        ])
         
-        result = client._convert_messages(messages)
+        result = client._convert_conversation_to_langchain(conversation)
         
         assert len(result) == 1
         assert isinstance(result[0], SystemMessage)
@@ -149,33 +151,41 @@ class TestLLMClientMessageConversion:
     
     def test_convert_user_message(self, client):
         """Test user message conversion."""
-        messages = [LLMMessage(role="user", content="Hello, world!")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message"),
+            LLMMessage(role=MessageRole.USER, content="Hello, world!")
+        ])
         
-        result = client._convert_messages(messages)
+        result = client._convert_conversation_to_langchain(conversation)
         
-        assert len(result) == 1
-        assert isinstance(result[0], HumanMessage)
-        assert result[0].content == "Hello, world!"
+        assert len(result) == 2
+        assert isinstance(result[0], SystemMessage)
+        assert isinstance(result[1], HumanMessage)
+        assert result[1].content == "Hello, world!"
     
     def test_convert_assistant_message(self, client):
         """Test assistant message conversion."""
-        messages = [LLMMessage(role="assistant", content="Hello! How can I help?")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message"),
+            LLMMessage(role=MessageRole.ASSISTANT, content="Hello! How can I help?")
+        ])
         
-        result = client._convert_messages(messages)
+        result = client._convert_conversation_to_langchain(conversation)
         
-        assert len(result) == 1
-        assert isinstance(result[0], AIMessage)
-        assert result[0].content == "Hello! How can I help?"
+        assert len(result) == 2
+        assert isinstance(result[0], SystemMessage)
+        assert isinstance(result[1], AIMessage)
+        assert result[1].content == "Hello! How can I help?"
     
     def test_convert_multiple_messages(self, client):
         """Test conversion of multiple messages."""
-        messages = [
-            LLMMessage(role="system", content="System prompt"),
-            LLMMessage(role="user", content="User message"),
-            LLMMessage(role="assistant", content="Assistant response")
-        ]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System prompt"),
+            LLMMessage(role=MessageRole.USER, content="User message"),
+            LLMMessage(role=MessageRole.ASSISTANT, content="Assistant response")
+        ])
         
-        result = client._convert_messages(messages)
+        result = client._convert_conversation_to_langchain(conversation)
         
         assert len(result) == 3
         assert isinstance(result[0], SystemMessage)
@@ -184,8 +194,15 @@ class TestLLMClientMessageConversion:
     
     def test_convert_empty_message_list(self, client):
         """Test conversion of empty message list."""
-        result = client._convert_messages([])
-        assert result == []
+        # Note: LLMConversation requires at least one message (system message)
+        # This test now tests with minimal valid conversation
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message")
+        ])
+        
+        result = client._convert_conversation_to_langchain(conversation)
+        assert len(result) == 1
+        assert isinstance(result[0], SystemMessage)
 
 
 @pytest.mark.unit
@@ -213,16 +230,22 @@ class TestLLMClientResponseGeneration:
     @pytest.mark.asyncio
     async def test_generate_response_success(self, client, mock_llm_client):
         """Test successful response generation with typed hooks."""
-        messages = [LLMMessage(role="user", content="Test question")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Test question")
+        ])
         
         with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
             mock_ctx = AsyncMock()
             mock_ctx.get_request_id.return_value = "req-123"
             mock_context.return_value.__aenter__.return_value = mock_ctx
             
-            result = await client.generate_response(messages, "test-session-123")
+            result = await client.generate_response(conversation, "test-session-123")
             
-            assert result == "Test response from LLM"
+            # The method should return an updated conversation, not just a string
+            assert isinstance(result, LLMConversation)
+            assert len(result.messages) == 3  # System + User + Assistant response
+            assert result.messages[2].content == "Test response from LLM"  # Assistant message is at index 2
             mock_llm_client.ainvoke.assert_called_once()
             
             # Verify context was used
@@ -232,38 +255,44 @@ class TestLLMClientResponseGeneration:
     async def test_generate_response_client_unavailable(self, client):
         """Test response generation when client is unavailable."""
         client.available = False
-        messages = [LLMMessage(role="user", content="Test question")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Test question")
+        ])
         
         with pytest.raises(Exception, match="openai client not available"):
-            await client.generate_response(messages, "test-session")
+            await client.generate_response(conversation, "test-session")
     
     @pytest.mark.asyncio
     async def test_generate_response_llm_error(self, client, mock_llm_client):
         """Test response generation handles LLM errors."""
         mock_llm_client.ainvoke.side_effect = Exception("LLM API error")
-        messages = [LLMMessage(role="user", content="Test question")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Test question")
+        ])
         
         with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
             mock_ctx = AsyncMock()
             mock_context.return_value.__aenter__.return_value = mock_ctx
             
-            with pytest.raises(Exception, match="LLM API error"):
-                await client.generate_response(messages, "test-session")
+            with pytest.raises(Exception, match="openai API error"):
+                await client.generate_response(conversation, "test-session")
     
     @pytest.mark.asyncio
-    async def test_generate_response_creates_proper_request_data(self, client, mock_llm_client):
+    async def test_generate_response_creates_proper_request_data(self, client):
         """Test that proper request data is created for typed context."""
-        messages = [
-            LLMMessage(role="system", content="System prompt"),
-            LLMMessage(role="user", content="User question")
-        ]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System prompt"),
+            LLMMessage(role=MessageRole.USER, content="User question")
+        ])
         
         with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
             mock_ctx = AsyncMock()
             mock_ctx.get_request_id.return_value = "req-456"
             mock_context.return_value.__aenter__.return_value = mock_ctx
             
-            await client.generate_response(messages, "test-session-456")
+            await client.generate_response(conversation, "test-session-456")
             
             # Check that context was called with proper data structure
             context_call_args = mock_context.call_args[0]  # positional args
@@ -413,7 +442,10 @@ class TestLLMClientRetryLogic:
         
         mock_llm_client.ainvoke.side_effect = [rate_limit_error, success_response]
         
-        messages = [LLMMessage(role="user", content="Test")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Test")
+        ])
         
         with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
             mock_ctx = AsyncMock()
@@ -421,9 +453,10 @@ class TestLLMClientRetryLogic:
             mock_context.return_value.__aenter__.return_value = mock_ctx
             
             with patch('asyncio.sleep') as mock_sleep:  # Speed up test
-                result = await client_with_retry.generate_response(messages, "test-session")
+                result = await client_with_retry.generate_response(conversation, "test-session")
                 
-                assert result == "Success after retry"
+                assert isinstance(result, LLMConversation)
+                assert result.get_latest_assistant_message().content == "Success after retry"
                 assert mock_llm_client.ainvoke.call_count == 2
                 mock_sleep.assert_called_once()  # Should have slept before retry
     
@@ -433,7 +466,10 @@ class TestLLMClientRetryLogic:
         rate_limit_error = Exception("rate_limit_exceeded")
         mock_llm_client.ainvoke.side_effect = rate_limit_error
         
-        messages = [LLMMessage(role="user", content="Test")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Test")
+        ])
         
         with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
             mock_ctx = AsyncMock()
@@ -441,7 +477,7 @@ class TestLLMClientRetryLogic:
             
             with patch('asyncio.sleep'):  # Speed up test
                 with pytest.raises(Exception, match="rate_limit_exceeded"):
-                    await client_with_retry.generate_response(messages, "test-session")
+                    await client_with_retry.generate_response(conversation, "test-session")
                 
                 # Should have tried max_retries + 1 times
                 assert mock_llm_client.ainvoke.call_count == 4  # 3 retries + 1 initial
@@ -457,7 +493,10 @@ class TestLLMClientRetryLogic:
         
         mock_llm_client.ainvoke.side_effect = [empty_response, success_response]
         
-        messages = [LLMMessage(role="user", content="Test")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Test")
+        ])
         
         with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
             mock_ctx = AsyncMock()
@@ -465,9 +504,10 @@ class TestLLMClientRetryLogic:
             mock_context.return_value.__aenter__.return_value = mock_ctx
             
             with patch('asyncio.sleep'):  # Speed up test
-                result = await client_with_retry.generate_response(messages, "test-session")
+                result = await client_with_retry.generate_response(conversation, "test-session")
                 
-                assert result == "Success after empty retry"
+                assert isinstance(result, LLMConversation)
+                assert result.get_latest_assistant_message().content == "Success after empty retry"
                 assert mock_llm_client.ainvoke.call_count == 2
     
     @pytest.mark.asyncio
@@ -477,18 +517,23 @@ class TestLLMClientRetryLogic:
         empty_response.content = ""
         mock_llm_client.ainvoke.return_value = empty_response
         
-        messages = [LLMMessage(role="user", content="Test")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Test")
+        ])
         
         with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
             mock_ctx = AsyncMock()
             mock_context.return_value.__aenter__.return_value = mock_ctx
             
             with patch('asyncio.sleep'):
-                result = await client_with_retry.generate_response(messages, "test-session")
+                result = await client_with_retry.generate_response(conversation, "test-session")
                 
                 # Should inject error message
-                assert "LLM Response Error" in result
-                assert "openai LLM returned empty responses" in result
+                assert isinstance(result, LLMConversation)
+                latest_message = result.get_latest_assistant_message()
+                assert "LLM Response Error" in latest_message.content
+                assert "openai LLM returned empty responses" in latest_message.content
     
     @pytest.mark.asyncio
     async def test_retry_delay_extraction(self, client_with_retry):
@@ -508,14 +553,17 @@ class TestLLMClientRetryLogic:
         generic_error = Exception("Generic API error")
         mock_llm_client.ainvoke.side_effect = generic_error
         
-        messages = [LLMMessage(role="user", content="Test")]
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Test")
+        ])
         
         with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
             mock_ctx = AsyncMock()
             mock_context.return_value.__aenter__.return_value = mock_ctx
             
             with pytest.raises(Exception, match="Generic API error"):
-                await client_with_retry.generate_response(messages, "test-session")
+                await client_with_retry.generate_response(conversation, "test-session")
             
             # Should only try once (no retries)
             assert mock_llm_client.ainvoke.call_count == 1
@@ -615,19 +663,20 @@ class TestLLMClientIntegration:
             assert client.available
             
             # Test message conversion and response generation
-            messages = [
-                LLMMessage(role="system", content="You are a test assistant"),
-                LLMMessage(role="user", content="Hello, test!")
-            ]
+            conversation = LLMConversation(messages=[
+                LLMMessage(role=MessageRole.SYSTEM, content="You are a test assistant"),
+                LLMMessage(role=MessageRole.USER, content="Hello, test!")
+            ])
             
             with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
                 mock_ctx = AsyncMock()
                 mock_ctx.get_request_id.return_value = "integration-req-789"
                 mock_context.return_value.__aenter__.return_value = mock_ctx
                 
-                result = await client.generate_response(messages, "integration-session")
+                result = await client.generate_response(conversation, "integration-session")
                 
-                assert result == "Integration test response"
+                assert isinstance(result, LLMConversation)
+                assert result.get_latest_assistant_message().content == "Integration test response"
                 
                 # Verify the complete flow
                 mock_openai.assert_called_once()

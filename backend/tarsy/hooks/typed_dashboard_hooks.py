@@ -39,21 +39,22 @@ class TypedLLMDashboardHook(BaseTypedHook[LLMInteraction]):
             interaction: Unified LLM interaction data
         """
         try:
-            # Create dashboard update from typed interaction
+            # Create dashboard update with complete conversation object
             update_data = {
                 "type": "llm_interaction",
                 "session_id": interaction.session_id,
-                "request_id": interaction.request_id,
+                "interaction_id": interaction.interaction_id,  # Use interaction_id instead of removed request_id
                 "model_name": interaction.model_name,
                 "provider": interaction.provider,
                 "step_description": f"LLM analysis using {interaction.model_name}",
-                "system_prompt": interaction.get_system_prompt(),
-                "user_prompt": interaction.get_user_prompt(),
-                "response_text": interaction.get_response_text(),
+                # Send complete conversation object instead of individual prompts
+                "conversation": (
+                    interaction.conversation.model_dump() 
+                    if interaction.conversation else None
+                ),
                 "success": interaction.success,
                 "error_message": interaction.error_message,
                 "duration_ms": interaction.duration_ms,
-                "token_usage": interaction.token_usage,
                 "timestamp_us": interaction.timestamp_us,
                 # Chain context for enhanced dashboard visualization
                 "stage_execution_id": interaction.stage_execution_id
@@ -65,12 +66,11 @@ class TypedLLMDashboardHook(BaseTypedHook[LLMInteraction]):
                 update_data=update_data
             )
             
-            logger.debug(f"Broadcasted LLM interaction {interaction.request_id} to dashboard")
+            logger.debug(f"Broadcasted LLM interaction {interaction.interaction_id} to dashboard")
             
         except Exception as e:
             logger.error(f"Failed to broadcast LLM interaction to dashboard: {e}")
             raise
-
 
 class TypedMCPDashboardHook(BaseTypedHook[MCPInteraction]):
     """

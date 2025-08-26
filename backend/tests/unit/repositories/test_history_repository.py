@@ -12,13 +12,215 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 from tarsy.models.db_models import AlertSession, StageExecution
-from tarsy.models.unified_interactions import LLMInteraction, MCPInteraction
+from tarsy.models.unified_interactions import LLMInteraction, MCPInteraction, LLMConversation, LLMMessage, MessageRole
 from tarsy.repositories.history_repository import HistoryRepository
 
 
 class TestHistoryRepository:
-    """Test suite for HistoryRepository class."""
     
+    def test_get_stage_interaction_counts_empty_list(self, repository):
+        """Test get_stage_interaction_counts with empty execution_ids list."""
+        result = repository.get_stage_interaction_counts([])
+        assert result == {}
+    
+    def test_get_stage_interaction_counts_with_data(self, repository):
+        """Test get_stage_interaction_counts with actual data."""
+        from tarsy.utils.timestamp import now_us
+        from tarsy.models.constants import StageStatus
+        
+        # Create a stage execution
+        stage_execution = StageExecution(
+            execution_id="test-stage-1",
+            session_id="test-session-1",
+            stage_id="analysis-stage",
+            stage_index=0,
+            stage_name="analysis",
+            agent="KubernetesAgent",
+            status=StageStatus.COMPLETED.value
+        )
+        repository.create_stage_execution(stage_execution)
+        
+        # Create some interactions
+        llm_interaction = LLMInteraction(
+            interaction_id="llm-1",
+            session_id="test-session-1",
+            stage_execution_id="test-stage-1",
+            provider="openai",
+            model_name="gpt-4",
+            success=True,
+            timestamp_us=now_us()
+        )
+        mcp_interaction = MCPInteraction(
+            communication_id="mcp-1",
+            session_id="test-session-1", 
+            stage_execution_id="test-stage-1",
+            server_name="kubernetes-server",
+            communication_type="tool_call",
+            step_description="Test MCP call",
+            success=True,
+            timestamp_us=now_us()
+        )
+        
+        repository.create_llm_interaction(llm_interaction)
+        repository.create_mcp_communication(mcp_interaction)
+        
+        # Test the method
+        result = repository.get_stage_interaction_counts(["test-stage-1"])
+        
+        assert "test-stage-1" in result
+        assert result["test-stage-1"]["llm_interactions"] == 1
+        assert result["test-stage-1"]["mcp_communications"] == 1
+    
+    def test_get_stage_interaction_counts_multiple_stages(self, repository):
+        """Test get_stage_interaction_counts with multiple stages."""
+        from tarsy.utils.timestamp import now_us
+        from tarsy.models.constants import StageStatus
+        
+        # Create two stage executions
+        stage1 = StageExecution(
+            execution_id="test-stage-1",
+            session_id="test-session-1",
+            stage_id="analysis-stage",
+            stage_index=0,
+            stage_name="analysis",
+            agent="KubernetesAgent",
+            status=StageStatus.COMPLETED.value
+        )
+        stage2 = StageExecution(
+            execution_id="test-stage-2", 
+            session_id="test-session-1",
+            stage_id="resolution-stage",
+            stage_index=1,
+            stage_name="resolution",
+            agent="KubernetesAgent",
+            status=StageStatus.COMPLETED.value
+        )
+        
+        repository.create_stage_execution(stage1)
+        repository.create_stage_execution(stage2)
+        
+        # Create interactions for both stages
+        llm1 = LLMInteraction(
+            interaction_id="llm-1",
+            session_id="test-session-1",
+            stage_execution_id="test-stage-1",
+            provider="openai",
+            model_name="gpt-4",
+            success=True,
+            timestamp_us=now_us()
+        )
+        mcp2 = MCPInteraction(
+            communication_id="mcp-2",
+            session_id="test-session-1",
+            stage_execution_id="test-stage-2", 
+            server_name="kubernetes-server",
+            communication_type="tool_call",
+            step_description="Test MCP call 2",
+            success=True,
+            timestamp_us=now_us()
+        )
+        
+        repository.create_llm_interaction(llm1)
+        repository.create_mcp_communication(mcp2)
+        
+        # Test with both stages
+        result = repository.get_stage_interaction_counts(["test-stage-1", "test-stage-2"])
+        
+        assert len(result) == 2
+        assert result["test-stage-1"]["llm_interactions"] == 1
+        assert result["test-stage-1"]["mcp_communications"] == 0
+        assert result["test-stage-2"]["llm_interactions"] == 0
+        assert result["test-stage-2"]["mcp_communications"] == 1
+    
+    def test_get_session_overview_not_found(self, repository):
+        """Test get_session_overview for non-existent session."""
+        result = repository.get_session_overview("non-existent")
+        assert result is None
+    
+    def test_get_session_overview_with_data(self, repository):
+        """Test get_session_overview with session and stage data."""
+        from tarsy.utils.timestamp import now_us
+        from tarsy.models.constants import AlertSessionStatus, StageStatus
+        
+        # Create session
+        session = AlertSession(
+            session_id="test-session-1",
+            alert_id="alert-123",
+            alert_type="kubernetes",
+            agent_type="kubernetes", 
+            status=AlertSessionStatus.COMPLETED.value,
+            started_at_us=now_us(),
+            completed_at_us=now_us() + 1000000,  # 1 second later
+            chain_id="chain-1",
+            current_stage_index=1
+        )
+        repository.create_alert_session(session)
+        
+        # Create stage executions
+        stage1 = StageExecution(
+            execution_id="stage-1",
+            session_id="test-session-1",
+            stage_id="analysis-stage",
+            stage_index=0,
+            stage_name="analysis",
+            agent="KubernetesAgent", 
+            status=StageStatus.COMPLETED.value
+        )
+        stage2 = StageExecution(
+            execution_id="stage-2",
+            session_id="test-session-1",
+            stage_id="resolution-stage", 
+            stage_index=1,
+            stage_name="resolution",
+            agent="KubernetesAgent",
+            status=StageStatus.FAILED.value
+        )
+        
+        repository.create_stage_execution(stage1)
+        repository.create_stage_execution(stage2)
+        
+        # Create some interactions
+        llm_interaction = LLMInteraction(
+            interaction_id="llm-1",
+            session_id="test-session-1",
+            stage_execution_id="stage-1",
+            provider="openai",
+            model_name="gpt-4", 
+            success=True,
+            timestamp_us=now_us()
+        )
+        mcp_interaction = MCPInteraction(
+            communication_id="mcp-1", 
+            session_id="test-session-1",
+            stage_execution_id="stage-1",
+            server_name="kubernetes-server",
+            communication_type="tool_call",
+            step_description="Test MCP call",
+            success=True,
+            timestamp_us=now_us()
+        )
+        
+        repository.create_llm_interaction(llm_interaction)
+        repository.create_mcp_communication(mcp_interaction)
+        
+        # Test get_session_overview
+        overview = repository.get_session_overview("test-session-1")
+        
+        assert overview is not None
+        assert overview.session_id == "test-session-1"
+        assert overview.alert_id == "alert-123"
+        assert overview.alert_type == "kubernetes"
+        assert overview.agent_type == "kubernetes"
+        assert overview.status == AlertSessionStatus.COMPLETED
+        assert overview.chain_id == "chain-1"
+        assert overview.total_stages == 2
+        assert overview.completed_stages == 1
+        assert overview.failed_stages == 1
+        assert overview.current_stage_index == 1
+        assert overview.llm_interaction_count == 1
+        assert overview.mcp_communication_count == 1
+        assert overview.total_interactions == 2
+
     @pytest.fixture
     def in_memory_engine(self):
         """Create in-memory SQLite engine for testing."""
@@ -61,25 +263,38 @@ class TestHistoryRepository:
     @pytest.fixture
     def sample_llm_interaction(self):
         """Create sample LLMInteraction for testing."""
+        from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
+        
+        # Create conversation with proper message structure
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Analyze the namespace termination issue"),
+            LLMMessage(role=MessageRole.ASSISTANT, content="The namespace is stuck due to finalizers")
+        ])
+        
         return LLMInteraction(
             session_id="test-session-123",
             model_name="gpt-4",
-            step_description="Initial analysis",
-            request_json={"messages": [{"role": "user", "content": "Analyze the namespace termination issue"}]},
-            response_json={"choices": [{"message": {"role": "assistant", "content": "The namespace is stuck due to finalizers"}, "finish_reason": "stop"}]},
+            conversation=conversation,
             duration_ms=1500,
             success=True
         )
     
     @pytest.fixture
     def sample_failed_llm_interaction(self):
-        """Create sample failed LLMInteraction for testing."""
+        """Create sample failed LLM interaction for testing."""
+        from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
+        
+        # Create conversation with request messages only (no assistant response since it failed)
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+            LLMMessage(role=MessageRole.USER, content="Analyze the namespace termination issue")
+        ])
+        
         return LLMInteraction(
             session_id="test-session-123",
             model_name="gemini-1.5-pro",
-            step_description="Failed analysis due to rate limiting",
-            request_json={"messages": [{"role": "user", "content": "Analyze the namespace termination issue"}]},
-            response_json=None,  # Failed interaction has no response
+            conversation=conversation,
             duration_ms=500,
             success=False,
             error_message="Resource has been exhausted (e.g. check quota). Error 429: Quota exceeded for requests"
@@ -157,7 +372,8 @@ class TestHistoryRepository:
         interactions = repository.get_llm_interactions_for_session(sample_alert_session.session_id)
         assert len(interactions) == 1
         assert interactions[0].model_name == sample_llm_interaction.model_name
-        assert interactions[0].step_description == sample_llm_interaction.step_description
+        assert interactions[0].conversation is not None
+        assert len(interactions[0].conversation.messages) == 3  # System + User + Assistant
     
     @pytest.mark.unit
     def test_create_mcp_communication_success(self, repository, sample_alert_session, sample_mcp_communication):
@@ -604,8 +820,11 @@ class TestHistoryRepository:
             session_id=sample_alert_session.session_id,
             model_name="gpt-4",
             step_description="First LLM interaction",
-            request_json={"messages": [{"role": "user", "content": "First prompt"}]},
-            response_json={"choices": [{"message": {"role": "assistant", "content": "First response"}, "finish_reason": "stop"}]},
+            conversation=LLMConversation(messages=[
+                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                LLMMessage(role=MessageRole.USER, content="First prompt"),
+                LLMMessage(role=MessageRole.ASSISTANT, content="First response")
+            ]),
             timestamp_us=int(base_time.timestamp() * 1_000_000),
             stage_execution_id=stage_execution_id
         )
@@ -626,8 +845,11 @@ class TestHistoryRepository:
             session_id=sample_alert_session.session_id,
             model_name="gpt-4",
             step_description="Second LLM interaction",
-            request_json={"messages": [{"role": "user", "content": "Second prompt"}]},
-            response_json={"choices": [{"message": {"role": "assistant", "content": "Second response"}, "finish_reason": "stop"}]},
+            conversation=LLMConversation(messages=[
+                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                LLMMessage(role=MessageRole.USER, content="Second prompt"),
+                LLMMessage(role=MessageRole.ASSISTANT, content="Second response")
+            ]),
             timestamp_us=int((base_time + timedelta(seconds=2)).timestamp() * 1_000_000),
             stage_execution_id=stage_execution_id
         )
@@ -692,8 +914,11 @@ class TestHistoryRepository:
             session_id=sample_alert_session.session_id,
             model_name="gpt-4",
             step_description="LLM interaction with precise timestamp",
-            request_json={"messages": [{"role": "user", "content": "Precise timestamp prompt"}]},
-            response_json={"choices": [{"message": {"role": "assistant", "content": "Precise timestamp response"}, "finish_reason": "stop"}]},
+            conversation=LLMConversation(messages=[
+                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                LLMMessage(role=MessageRole.USER, content="Precise timestamp prompt"),
+                LLMMessage(role=MessageRole.ASSISTANT, content="Precise timestamp response")
+            ]),
             timestamp_us=base_timestamp_us,
             stage_execution_id=stage_execution_id
         )
@@ -716,8 +941,11 @@ class TestHistoryRepository:
             session_id=sample_alert_session.session_id,
             model_name="gpt-4",
             step_description="LLM interaction in middle",
-            request_json={"messages": [{"role": "user", "content": "Middle timestamp prompt"}]},
-            response_json={"choices": [{"message": {"role": "assistant", "content": "Middle timestamp response"}, "finish_reason": "stop"}]},
+            conversation=LLMConversation(messages=[
+                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                LLMMessage(role=MessageRole.USER, content="Middle timestamp prompt"),
+                LLMMessage(role=MessageRole.ASSISTANT, content="Middle timestamp response")
+            ]),
             timestamp_us=base_timestamp_us + 500_000,  # 500ms later
             stage_execution_id=stage_execution_id
         )
@@ -963,7 +1191,8 @@ class TestHistoryRepository:
         assert len(interactions) == 1
         assert interactions[0].success == True
         assert interactions[0].error_message is None
-        assert interactions[0].response_json is not None
+        assert interactions[0].conversation is not None
+        assert len(interactions[0].conversation.messages) == 3  # system + user + assistant
 
     @pytest.mark.unit
     def test_create_failed_llm_interaction(self, repository, sample_alert_session, sample_failed_llm_interaction):
@@ -985,7 +1214,8 @@ class TestHistoryRepository:
         assert len(interactions) == 1
         assert interactions[0].success == False
         assert interactions[0].error_message == sample_failed_llm_interaction.error_message
-        assert interactions[0].response_json is None
+        assert interactions[0].conversation is not None
+        assert len(interactions[0].conversation.messages) == 2  # system + user only (no assistant response for failed)
 
     @pytest.mark.unit
     def test_get_session_details_includes_success_error_fields(self, repository, sample_alert_session):
@@ -1015,8 +1245,11 @@ class TestHistoryRepository:
             session_id=sample_alert_session.session_id,
             model_name="gpt-4",
             step_description="Successful analysis",
-            request_json={"messages": [{"role": "user", "content": "Test prompt"}]},
-            response_json={"choices": [{"message": {"role": "assistant", "content": "Test response"}, "finish_reason": "stop"}]},
+            conversation=LLMConversation(messages=[
+                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                LLMMessage(role=MessageRole.USER, content="Test prompt"),
+                LLMMessage(role=MessageRole.ASSISTANT, content="Test response")
+            ]),
             duration_ms=1000,
             success=True,
             stage_execution_id=stage_execution_id
@@ -1027,8 +1260,11 @@ class TestHistoryRepository:
             session_id=sample_alert_session.session_id,
             model_name="gemini-1.5-pro",
             step_description="Failed analysis",
-            request_json={"messages": [{"role": "user", "content": "Test prompt"}]},
-            response_json=None,
+            conversation=LLMConversation(messages=[
+                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                LLMMessage(role=MessageRole.USER, content="Test prompt")
+                # Note: No assistant response for failed interaction
+            ]),
             duration_ms=500,
             success=False,
             error_message="API rate limit exceeded",
@@ -1083,8 +1319,11 @@ class TestHistoryRepository:
                 session_id=sample_alert_session.session_id,
                 model_name="gpt-4",
                 step_description="First attempt - successful",
-                request_json={"messages": [{"role": "user", "content": "Analyze issue"}]},
-                response_json={"choices": [{"message": {"role": "assistant", "content": "Analysis complete"}, "finish_reason": "stop"}]},
+                conversation=LLMConversation(messages=[
+                    LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                    LLMMessage(role=MessageRole.USER, content="Analyze issue"),
+                    LLMMessage(role=MessageRole.ASSISTANT, content="Analysis complete")
+                ]),
                 duration_ms=1200,
                 success=True
             ),
@@ -1092,8 +1331,11 @@ class TestHistoryRepository:
                 session_id=sample_alert_session.session_id,
                 model_name="gemini-1.5-pro",
                 step_description="Second attempt - failed",
-                request_json={"messages": [{"role": "user", "content": "Follow up analysis"}]},
-                response_json=None,
+                conversation=LLMConversation(messages=[
+                    LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                    LLMMessage(role=MessageRole.USER, content="Follow up analysis")
+                    # Note: No assistant response for failed interaction
+                ]),
                 duration_ms=300,
                 success=False,
                 error_message="Connection timeout"
@@ -1102,8 +1344,11 @@ class TestHistoryRepository:
                 session_id=sample_alert_session.session_id,
                 model_name="gpt-4",
                 step_description="Third attempt - successful",
-                request_json={"messages": [{"role": "user", "content": "Final analysis"}]},
-                response_json={"choices": [{"message": {"role": "assistant", "content": "Final conclusion"}, "finish_reason": "stop"}]},
+                conversation=LLMConversation(messages=[
+                    LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                    LLMMessage(role=MessageRole.USER, content="Final analysis"),
+                    LLMMessage(role=MessageRole.ASSISTANT, content="Final conclusion")
+                ]),
                 duration_ms=900,
                 success=True
             )
@@ -1326,8 +1571,11 @@ class TestHistoryRepositoryPerformance:
                     session_id=session.session_id,
                     model_name="gpt-4",
                     step_description=f"Interaction {i}",
-                    request_json={"messages": [{"role": "user", "content": f"Prompt {i}"}]},
-                    response_json={"choices": [{"message": {"role": "assistant", "content": f"Response {i}"}, "finish_reason": "stop"}]},
+                    conversation=LLMConversation(messages=[
+                        LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                        LLMMessage(role=MessageRole.USER, content=f"Prompt {i}"),
+                        LLMMessage(role=MessageRole.ASSISTANT, content=f"Response {i}")
+                    ]),
                     timestamp_us=int((now - timedelta(minutes=i-1)).timestamp() * 1_000_000)
                 )
                 repository.create_llm_interaction(interaction)

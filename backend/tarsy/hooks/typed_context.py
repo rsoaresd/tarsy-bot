@@ -189,13 +189,17 @@ class InteractionHookContext(Generic[TInteraction]):
     async def __aenter__(self) -> 'InteractionHookContext[TInteraction]':
         """Enter async context - start timing."""
         self.start_time_us = now_us()
-        self.interaction.start_time_us = self.start_time_us
+        # Only set start_time_us if the interaction model has this field (for runtime-only fields)
+        if hasattr(self.interaction, 'start_time_us'):
+            self.interaction.start_time_us = self.start_time_us
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Exit async context - trigger error hooks if needed."""
         end_time_us = now_us()
-        self.interaction.end_time_us = end_time_us
+        # Only set end_time_us if the interaction model has this field (for runtime-only fields)
+        if hasattr(self.interaction, 'end_time_us'):
+            self.interaction.end_time_us = end_time_us
         self.interaction.timestamp_us = end_time_us
         
         if self.start_time_us:
@@ -217,7 +221,9 @@ class InteractionHookContext(Generic[TInteraction]):
             result_data: Either a dict of result data or complete interaction object
         """
         end_time_us = now_us()
-        self.interaction.end_time_us = end_time_us
+        # Only set end_time_us if the interaction model has this field (for runtime-only fields)
+        if hasattr(self.interaction, 'end_time_us'):
+            self.interaction.end_time_us = end_time_us
         self.interaction.timestamp_us = end_time_us
         
         if self.start_time_us:
@@ -238,14 +244,10 @@ class InteractionHookContext(Generic[TInteraction]):
         # Type-specific result handling for unified models
         if isinstance(self.interaction, LLMInteraction):
             # LLM-specific result processing
-            if 'response_json' in result_data:
-                self.interaction.response_json = result_data['response_json']
             if 'provider' in result_data:
                 self.interaction.provider = result_data['provider']
             if 'model_name' in result_data:
                 self.interaction.model_name = result_data['model_name']
-            if 'token_usage' in result_data:
-                self.interaction.token_usage = result_data['token_usage']
                 
         elif isinstance(self.interaction, MCPInteraction):
             # MCP-specific result processing
@@ -269,7 +271,13 @@ class InteractionHookContext(Generic[TInteraction]):
 
     def get_request_id(self) -> str:
         """Get the unique request ID for this operation."""
-        return self.interaction.request_id
+        # LLMInteraction uses interaction_id, MCPInteraction uses request_id
+        if hasattr(self.interaction, 'request_id'):
+            return self.interaction.request_id
+        elif hasattr(self.interaction, 'interaction_id'):
+            return self.interaction.interaction_id
+        else:
+            return f"unknown_{id(self.interaction)}"
 
 
 # Global typed hook manager instance
@@ -300,9 +308,8 @@ async def llm_interaction_context(session_id: str, request_data: Dict[str, Any],
         stage_execution_id=stage_execution_id,
         model_name=request_data.get('model', 'unknown'),
         provider=request_data.get('provider', 'unknown'),
-        request_json=request_data,
-        start_time_us=now_us(),
-        step_description=""  # Will be set by history service
+        temperature=request_data.get('temperature')
+        # Note: conversation will be set by LLMClient after successful response
     )
     
     async with InteractionHookContext(interaction, get_typed_hook_manager()) as ctx:

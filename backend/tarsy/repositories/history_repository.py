@@ -15,8 +15,7 @@ from tarsy.models.constants import AlertSessionStatus, StageStatus
 from tarsy.models.db_models import AlertSession, StageExecution
 from tarsy.models.history_models import (
     PaginatedSessions, DetailedSession, FilterOptions, TimeRangeOption, PaginationInfo,
-    SessionOverview, DetailedStage, LLMTimelineEvent, MCPTimelineEvent, 
-    LLMEventDetails, MCPEventDetails, LLMMessage
+    SessionOverview, DetailedStage, LLMTimelineEvent, MCPTimelineEvent, MCPEventDetails
 )
 from tarsy.models.unified_interactions import LLMInteraction, MCPInteraction
 from tarsy.repositories.base_repository import BaseRepository
@@ -513,53 +512,20 @@ class HistoryRepository:
             # Group interactions by stage_execution_id
             interactions_by_stage = defaultdict(list)
             
-            # Convert LLM interactions to type-safe models
+            # Convert LLM DB interaction models to timeline events using LLMInteraction directly
             for llm_db in llm_interactions_db:
-                # Convert request messages if available  
-                messages = []
-                if llm_db.request_json and isinstance(llm_db.request_json, dict):
-                    for msg in llm_db.request_json.get('messages', []):
-                        if isinstance(msg, dict) and 'role' in msg and 'content' in msg:
-                            messages.append(LLMMessage(role=msg['role'], content=msg['content']))
-                
-                # Add assistant response from response_json if available
-                if llm_db.response_json and isinstance(llm_db.response_json, dict):
-                    choices = llm_db.response_json.get('choices', [])
-                    if choices and len(choices) > 0:
-                        first_choice = choices[0]
-                        if isinstance(first_choice, dict) and 'message' in first_choice:
-                            assistant_msg = first_choice['message']
-                            if isinstance(assistant_msg, dict) and 'content' in assistant_msg:
-                                messages.append(LLMMessage(role="assistant", content=assistant_msg['content']))
-                
-                # Extract token usage
-                tokens_used = llm_db.token_usage or {}
-                
-                llm_details = LLMEventDetails(
-                    messages=messages,
-                    model_name=llm_db.model_name,
-                    temperature=llm_db.request_json.get('temperature') if isinstance(llm_db.request_json, dict) else None,
-                    success=llm_db.success,
-                    error_message=llm_db.error_message,
-                    input_tokens=tokens_used.get('prompt_tokens'),
-                    output_tokens=tokens_used.get('completion_tokens'),
-                    total_tokens=tokens_used.get('total_tokens'),
-                    tool_calls=llm_db.tool_calls,
-                    tool_results=llm_db.tool_results
-                )
-                
-                llm_interaction = LLMTimelineEvent(
+                llm_event = LLMTimelineEvent(
                     id=llm_db.interaction_id,
                     event_id=llm_db.interaction_id,
                     timestamp_us=llm_db.timestamp_us,
-                    step_description=llm_db.step_description,
                     duration_ms=llm_db.duration_ms,
                     stage_execution_id=llm_db.stage_execution_id or 'unknown',
-                    details=llm_details
+                    step_description=f"LLM analysis using {llm_db.model_name}",
+                    details=llm_db
                 )
                 
                 stage_id = llm_db.stage_execution_id or 'unknown'
-                interactions_by_stage[stage_id].append(llm_interaction)
+                interactions_by_stage[stage_id].append(llm_event)
             
             # Convert MCP communications to type-safe models
             for mcp_db in mcp_communications_db:

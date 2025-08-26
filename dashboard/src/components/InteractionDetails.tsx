@@ -6,7 +6,7 @@ import {
   Divider,
   Stack
 } from '@mui/material';
-import type { LLMInteraction, MCPInteraction, SystemEvent } from '../types';
+import type { LLMInteraction, MCPInteraction, SystemEvent, LLMMessage } from '../types';
 import CopyButton from './CopyButton';
 import JsonDisplay from './JsonDisplay';
 
@@ -32,28 +32,125 @@ function InteractionDetails({
            (mcpDetails.communication_type === 'tool_call' && mcpDetails.tool_name === 'list_tools');
   };
 
-  const extractSystemUserFromRequest = (llm: LLMInteraction) => {
-    // EP-0010: messages are now directly in LLMEventDetails
-    const systemMsg = llm.messages?.find((m: any) => m?.role === 'system');
-    const userMsg = llm.messages?.find((m: any) => m?.role === 'user');
-    return {
-      system: typeof systemMsg?.content === 'string' ? systemMsg.content : 
-              (systemMsg?.content == null || systemMsg?.content === '') ? '' : 
-              JSON.stringify(systemMsg.content),
-      user: typeof userMsg?.content === 'string' ? userMsg.content : 
-            (userMsg?.content == null || userMsg?.content === '') ? '' : 
-            JSON.stringify(userMsg.content),
-    };
+  // EP-0014: Helper to get messages array from either new conversation or legacy messages field
+  const getMessages = (llm: LLMInteraction): LLMMessage[] => {
+    // Try new conversation field first (EP-0014)
+    if (llm.conversation?.messages) {
+      return llm.conversation.messages;
+    }
+    // Fall back to legacy messages field for backward compatibility
+    if (llm.messages) {
+      return llm.messages;
+    }
+    return [];
   };
 
-  const extractResponseText = (llm: LLMInteraction) => {
-    // EP-0010: Look for assistant message in the messages array
-    const assistantMsg = llm.messages?.find((m: any) => m?.role === 'assistant');
-    if (assistantMsg && assistantMsg.content) {
-      if (typeof assistantMsg.content === 'string') return assistantMsg.content;
-      return JSON.stringify(assistantMsg.content);
+
+
+
+
+  // EP-0014: New function to render all conversation messages in sequence
+  const renderConversationMessages = (llm: LLMInteraction) => {
+    const messages = getMessages(llm);
+    
+    if (messages.length === 0) {
+      return null;
     }
-    return '';
+
+    // Helper function to get message-specific styling
+    const getMessageStyle = (role: string) => {
+      switch (role) {
+        case 'system':
+          return {
+            bgcolor: 'secondary.main',
+            color: 'secondary.contrastText',
+            label: 'System'
+          };
+        case 'user':
+          return {
+            bgcolor: 'primary.main',
+            color: 'primary.contrastText',
+            label: 'User'
+          };
+        case 'assistant':
+          return {
+            bgcolor: 'success.main',
+            color: 'success.contrastText',
+            label: 'Assistant'
+          };
+        default:
+          return {
+            bgcolor: 'grey.500',
+            color: 'common.white',
+            label: role.charAt(0).toUpperCase() + role.slice(1)
+          };
+      }
+    };
+
+    return (
+      <Stack spacing={2}>
+        {messages.map((message, index) => {
+          const style = getMessageStyle(message.role);
+          const content = typeof message.content === 'string' ? message.content : 
+                         (message.content == null || message.content === '') ? '' :
+                         JSON.stringify(message.content);
+          
+          return (
+            <Box key={index}>
+              <Box sx={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                mb: 1
+              }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{
+                    px: 1,
+                    py: 0.5,
+                    bgcolor: style.bgcolor,
+                    color: style.color,
+                    borderRadius: 1,
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}>
+                    {style.label}
+                  </Box>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
+                    {content.length.toLocaleString()} chars
+                  </Typography>
+                  <CopyButton
+                    text={content}
+                    variant="icon"
+                    size="small"
+                    tooltip={`Copy ${style.label.toLowerCase()} message`}
+                  />
+                </Box>
+              </Box>
+              <Typography 
+                variant="body2" 
+                sx={{ 
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  p: 1.5,
+                  bgcolor: 'grey.50',
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: 'divider',
+                  maxHeight: message.role === 'system' ? 200 : (message.role === 'assistant' ? 300 : 200),
+                  overflow: 'auto'
+                }}
+              >
+                {content}
+              </Typography>
+            </Box>
+          );
+        })}
+      </Stack>
+    );
   };
 
   const renderLLMDetails = (llmDetails: LLMInteraction) => {
@@ -108,175 +205,45 @@ function InteractionDetails({
           </Box>
         )}
 
+        {/* EP-0014: Show conversation messages in sequence */}
         <Box>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-              Prompt
+              Conversation
             </Typography>
             <CopyButton
               text={(() => {
-                const { system, user } = extractSystemUserFromRequest(llmDetails);
-                if (system || user) {
-                  return `System:\n${system}\n\nUser:\n${user}`;
+                const messages = getMessages(llmDetails);
+                if (messages.length === 0) return '';
+                
+                let conversation = `=== LLM CONVERSATION ===\n\n`;
+                messages.forEach((message) => {
+                  const role = message.role.toUpperCase();
+                  const content = typeof message.content === 'string' ? message.content : 
+                                 (message.content == null || message.content === '') ? '' :
+                                 JSON.stringify(message.content);
+                  conversation += `${role}:\n${content}\n\n`;
+                });
+                
+                conversation += `--- METADATA ---\n`;
+                conversation += `Model: ${llmDetails.model_name}\n`;
+                if (llmDetails.total_tokens) {
+                  conversation += `Tokens: ${llmDetails.total_tokens.toLocaleString()}\n`;
                 }
-                return '';
+                if (llmDetails.temperature !== undefined) {
+                  conversation += `Temperature: ${llmDetails.temperature}\n`;
+                }
+                
+                return conversation;
               })()}
               variant="icon"
               size="small"
-              tooltip="Copy prompt"
+              tooltip="Copy entire conversation"
             />
           </Box>
-        {(() => {
-          const { system, user } = extractSystemUserFromRequest(llmDetails);
-          if (system || user) {
-            return (
-              <Stack spacing={2}>
-                {system && (
-                  <Box>
-                    <Box sx={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      mb: 1
-                    }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box sx={{
-                          px: 1,
-                          py: 0.5,
-                          bgcolor: 'secondary.main',
-                          color: 'secondary.contrastText',
-                          borderRadius: 1,
-                          fontSize: '0.75rem',
-                          fontWeight: 600,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.5px'
-                        }}>
-                          System
-                        </Box>
-                      </Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-                        {system.length.toLocaleString()} chars
-                      </Typography>
-                    </Box>
-                    <Typography 
-                      variant="body2" 
-                      sx={{ 
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        p: 1.5,
-                        bgcolor: 'grey.50',
-                        borderRadius: 1,
-                        border: 1,
-                        borderColor: 'divider',
-                        maxHeight: 200,
-                        overflow: 'auto'
-                      }}
-                    >
-                      {system}
-                    </Typography>
-                  </Box>
-                )}
-                {user && (
-                  <Box>
-                    <Box sx={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      mb: 1
-                    }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box sx={{
-                          px: 1,
-                          py: 0.5,
-                          bgcolor: 'primary.main',
-                          color: 'primary.contrastText',
-                          borderRadius: 1,
-                          fontSize: '0.75rem',
-                          fontWeight: 600,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.5px'
-                        }}>
-                          User
-                        </Box>
-                      </Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-                        {user.length.toLocaleString()} chars
-                      </Typography>
-                    </Box>
-                    <Typography 
-                      variant="body2" 
-                      sx={{ 
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        p: 1.5,
-                        bgcolor: 'grey.50',
-                        borderRadius: 1,
-                        border: 1,
-                        borderColor: 'divider',
-                        maxHeight: 200,
-                        overflow: 'auto'
-                      }}
-                    >
-                      {user}
-                    </Typography>
-                  </Box>
-                )}
-              </Stack>
-            );
-          }
-          return null;
-        })()}
+          {/* Render all conversation messages */}
+          {renderConversationMessages(llmDetails)}
         </Box>
-        
-        {/* Only show Response section for successful interactions */}
-        {!isFailed && (
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box sx={{
-                  px: 1,
-                  py: 0.5,
-                  bgcolor: 'success.main',
-                  color: 'success.contrastText',
-                  borderRadius: 1,
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Response
-                </Box>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-                  {extractResponseText(llmDetails).length.toLocaleString()} chars
-                </Typography>
-                <CopyButton
-                  text={extractResponseText(llmDetails)}
-                  variant="icon"
-                  size="small"
-                  tooltip="Copy response"
-                />
-              </Box>
-            </Box>
-            <Typography 
-              variant="body2" 
-              sx={{ 
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                p: 1.5,
-                bgcolor: 'grey.50',
-                borderRadius: 1,
-                border: 1,
-                borderColor: 'divider',
-                maxHeight: 300,
-                overflow: 'auto'
-              }}
-            >
-              {extractResponseText(llmDetails)}
-            </Typography>
-          </Box>
-        )}
 
       {/* Model metadata */}
       <Box>
@@ -454,34 +421,22 @@ function InteractionDetails({
     switch (type) {
       case 'llm': {
         const llm = details as LLMInteraction;
-        // Parse and format LLM messages nicely
-        let formatted = '=== LLM INTERACTION ===\n\n';
-        
-        // EP-0010: Format messages directly from the messages array
-        if (llm.messages?.length) {
-          const system = llm.messages.find((m: any) => m?.role === 'system');
-          const user = llm.messages.find((m: any) => m?.role === 'user');
-          if (system) {
-            const s = typeof system.content === 'string' ? system.content : 
-                     (system.content == null || system.content === '') ? '' : 
-                     JSON.stringify(system.content);
-            if (s) formatted += `SYSTEM:\n${s}\n\n`;
-          }
-          if (user) {
-            const u = typeof user.content === 'string' ? user.content : 
-                     (user.content == null || user.content === '') ? '' : 
-                     JSON.stringify(user.content);
-            if (u) formatted += `USER:\n${u}\n\n`;
-          }
-        }
-
-        const resp = extractResponseText(llm);
-        formatted += `RESPONSE:\n${resp}\n\n`;
-        formatted += `MODEL: ${llm.model_name}`;
-        if (llm.total_tokens) formatted += ` | TOKENS: ${llm.total_tokens}`;
-        if (llm.temperature !== undefined) formatted += ` | TEMPERATURE: ${llm.temperature}`;
-        
-        return formatted;
+        const messages = getMessages(llm);
+        let conversation = '=== LLM CONVERSATION ===\n\n';
+        messages.forEach((message) => {
+          const role = message.role.toUpperCase();
+          const content =
+            typeof message.content === 'string'
+              ? message.content
+              : message.content == null || message.content === ''
+              ? ''
+              : JSON.stringify(message.content);
+          conversation += `${role}:\n${content}\n\n`;
+        });
+        conversation += `MODEL: ${llm.model_name}`;
+        if (llm.total_tokens) conversation += ` | TOKENS: ${llm.total_tokens}`;
+        if (llm.temperature !== undefined) conversation += ` | TEMPERATURE: ${llm.temperature}`;
+        return conversation;
       }
       case 'mcp': {
         const mcp = details as MCPInteraction;
@@ -521,8 +476,9 @@ function InteractionDetails({
     switch (type) {
       case 'llm': {
         const llm = details as LLMInteraction;
-        const system = llm.messages?.find((m: any) => m?.role === 'system');
-        const user = llm.messages?.find((m: any) => m?.role === 'user');
+        const messages = getMessages(llm);
+        const system = messages.find((m: any) => m?.role === 'system');
+        const user = messages.find((m: any) => m?.role === 'user');
         const s = system ? (typeof system.content === 'string' ? system.content : 
                           (system.content == null || system.content === '') ? '' : 
                           JSON.stringify(system.content)) : '';
@@ -530,7 +486,7 @@ function InteractionDetails({
                          (user.content == null || user.content === '') ? '' : 
                          JSON.stringify(user.content)) : '';
         // Use the same logic as extractResponseText() and formatInteractionForCopy()
-        const assistant = llm.messages?.find((m: any) => m?.role === 'assistant');
+        const assistant = messages.find((m: any) => m?.role === 'assistant');
         let respStr = '';
         if (assistant && assistant.content) {
           if (typeof assistant.content === 'string') {
