@@ -40,6 +40,9 @@ class ReactFinalAnalysisController(IterationController):
         """Execute final analysis with StageContext."""
         logger.info("Starting final analysis with StageContext")
         
+        # Import exception class at method start to avoid scoping issues
+        from ..exceptions import MaxIterationsFailureError
+        
         # Pass StageContext directly to prompt builder
         prompt = self.prompt_builder.build_final_analysis_prompt(context)
         
@@ -63,11 +66,49 @@ class ReactFinalAnalysisController(IterationController):
         # Create LLMConversation object for EP-0014 compatibility
         conversation = LLMConversation(messages=messages)
         
-        # Generate response and get the latest assistant message content
-        updated_conversation = await self.llm_client.generate_response(conversation, context.session_id, context.agent.get_current_stage_execution_id())
-        latest_message = updated_conversation.get_latest_assistant_message()
+        # Capture stage execution ID once for reuse
+        stage_execution_id = context.agent.get_current_stage_execution_id()
         
-        if latest_message:
-            return latest_message.content
-        else:
-            return "No response generated from LLM"
+        # Generate response and get the latest assistant message content
+        try:
+            updated_conversation = await self.llm_client.generate_response(
+                conversation, 
+                context.session_id, 
+                stage_execution_id
+            )
+            latest_message = updated_conversation.get_latest_assistant_message()
+            
+            if latest_message:
+                return latest_message.content
+            else:
+                # No response from LLM - this is a failure condition for final analysis
+                error_msg = "Final analysis stage failed: no response generated from LLM"
+                failure_msg = "Final analysis stage failed: LLM returned no response"
+                logger.error(error_msg)
+                raise MaxIterationsFailureError(
+                    failure_msg,
+                    max_iterations=1,
+                    context={
+                        "session_id": context.session_id,
+                        "stage_execution_id": stage_execution_id,
+                        "stage_type": "final_analysis"
+                    }
+                )
+        except MaxIterationsFailureError:
+            # Re-raise our own exceptions
+            raise
+        except Exception as e:
+            # Any LLM exception in final analysis stage = stage failure
+            original_error = str(e)
+            error_msg = f"Final analysis stage failed: {original_error}"
+            logger.exception(error_msg)
+            raise MaxIterationsFailureError(
+                error_msg,
+                max_iterations=1,
+                context={
+                    "session_id": context.session_id,
+                    "stage_execution_id": stage_execution_id,
+                    "stage_type": "final_analysis",
+                    "original_error": original_error
+                }
+            ) from e

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, lazy, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense, useMemo, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
@@ -19,8 +19,8 @@ import {
   ToggleButtonGroup
 } from '@mui/material';
 import { ArrowBack, Speed, Psychology, BugReport } from '@mui/icons-material';
-import { apiClient, handleAPIError } from '../services/api';
 import { webSocketService } from '../services/websocket';
+import { useSession } from '../contexts/SessionContext';
 import type { DetailedSession } from '../types';
 
 // Lazy load shared components
@@ -83,8 +83,9 @@ const TimelineSkeleton = () => (
 
 interface SessionDetailPageBaseProps {
   viewType: 'conversation' | 'technical';
-  timelineComponent: (session: DetailedSession, useVirtualization?: boolean) => ReactNode;
+  timelineComponent: (session: DetailedSession, useVirtualization?: boolean, autoScroll?: boolean) => ReactNode;
   timelineSkeleton?: ReactNode;
+  onViewChange?: (newView: 'conversation' | 'technical') => void;
 }
 
 /**
@@ -94,22 +95,45 @@ interface SessionDetailPageBaseProps {
 function SessionDetailPageBase({ 
   viewType, 
   timelineComponent,
-  timelineSkeleton = <TimelineSkeleton />
+  timelineSkeleton = <TimelineSkeleton />,
+  onViewChange
 }: SessionDetailPageBaseProps) {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   
-  // Session detail state
-  const [session, setSession] = useState<DetailedSession | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  // Use shared session context instead of local state
+  const { 
+    session, 
+    loading, 
+    error, 
+    refetch, 
+    refreshSessionSummary,
+    refreshSessionStages,
+    updateFinalAnalysis,
+    updateSessionStatus 
+  } = useSession(sessionId);
 
   // Performance optimization settings
   const [useVirtualization, setUseVirtualization] = useState<boolean | null>(null); // null = auto-detect
   const [showPerformanceMode, setShowPerformanceMode] = useState<boolean>(false);
   
+  // Auto-scroll settings
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState<boolean>(true);
+  
+  // Refs for auto-scroll targeting
+  const finalAnalysisRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll state
+  const userScrolledAwayRef = useRef<boolean>(false);
+  const isUserAtBottomRef = useRef<boolean>(true);
+  
   // View toggle state
   const [currentView, setCurrentView] = useState<string>(viewType);
+  
+  // Sync local state with prop changes to prevent desync
+  useEffect(() => {
+    setCurrentView(viewType);
+  }, [viewType]);
 
   // Performance metrics
   const performanceMetrics = useMemo(() => {
@@ -189,143 +213,105 @@ function SessionDetailPageBase({
     }
   };
 
-  // Fetch just session summary statistics (lightweight)
-  const refreshSessionSummary = async (id: string) => {
-    try {
-      console.log('🔄 Refreshing session summary statistics for:', id);
-      const summaryData = await apiClient.getSessionSummary(id);
-      
-      setSession(prevSession => {
-        if (!prevSession) return prevSession;
-        
-        console.log('📊 Updating session summary with fresh data:', summaryData);
-        return {
-          ...prevSession,
-          // Update the summary field
-          summary: summaryData,
-          // Update main session count fields that SessionHeader uses
-          llm_interaction_count: summaryData.llm_interactions,
-          mcp_communication_count: summaryData.mcp_communications,
-          total_interactions: summaryData.total_interactions,
-          // Update other relevant fields from summary
-          total_stages: summaryData.chain_statistics?.total_stages || prevSession.total_stages,
-          completed_stages: summaryData.chain_statistics?.completed_stages || prevSession.completed_stages,
-          failed_stages: summaryData.chain_statistics?.failed_stages || prevSession.failed_stages
-        };
-      });
-      
-    } catch (error) {
-      console.error('Failed to refresh session summary:', error);
-    }
-  };
+  // Helper function to check if user is at bottom of scrollable area
+  const isAtBottom = useCallback((): boolean => {
+    // Check if user is at bottom of page
+    const documentHeight = document.documentElement.scrollHeight;
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const windowHeight = window.innerHeight;
 
-  // Partial update for session stages (avoids full page refresh)
-  const refreshSessionStages = async (id: string) => {
-    try {
-      console.log('🔄 Refreshing session stages for:', id);
-      const sessionData = await apiClient.getSessionDetail(id);
-      
-      setSession(prevSession => {
-        if (!prevSession) return prevSession;
-        
-        // Only update if stages have actually changed
-        const stagesChanged = JSON.stringify(prevSession.stages) !== JSON.stringify(sessionData.stages);
-        const analysisChanged = prevSession.final_analysis !== sessionData.final_analysis;
-        const statusChanged = prevSession.status !== sessionData.status;
-        
-        if (!stagesChanged && !analysisChanged && !statusChanged) {
-          console.log('📊 No stage changes detected, skipping update');
-          return prevSession;
+    // Consider user at bottom if within 50px of the bottom
+    const threshold = 50;
+    return documentHeight - scrollTop - windowHeight <= threshold;
+  }, []);
+
+  // Scroll position-based auto-scroll control
+  useEffect(() => {
+    if (!autoScrollEnabled) return;
+
+    // Initialize scroll position on mount
+    isUserAtBottomRef.current = isAtBottom();
+    userScrolledAwayRef.current = !isUserAtBottomRef.current;
+
+    const handleScroll = () => {
+      const wasAtBottom = isUserAtBottomRef.current;
+      const isNowAtBottom = isAtBottom();
+
+      // Update our tracking of user's position
+      isUserAtBottomRef.current = isNowAtBottom;
+
+      if (wasAtBottom && !isNowAtBottom) {
+        // User scrolled away from bottom - disable auto-scroll
+        userScrolledAwayRef.current = true;
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`👆 SessionDetail: User scrolled away from bottom - disabling auto-scroll`);
         }
-        
-        console.log('📊 Updating session stages and analysis:', { stagesChanged, analysisChanged, statusChanged });
-        return {
-          ...prevSession,
-          stages: sessionData.stages,
-          final_analysis: sessionData.final_analysis,
-          status: sessionData.status as typeof prevSession.status,
-          error_message: sessionData.error_message
-        };
-      });
-      
-    } catch (error) {
-      console.error('Failed to refresh session stages:', error);
+      } else if (!wasAtBottom && isNowAtBottom) {
+        // User scrolled back to bottom - re-enable auto-scroll
+        userScrolledAwayRef.current = false;
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`👇 SessionDetail: User scrolled back to bottom - re-enabling auto-scroll`);
+        }
+      }
+    };
+
+    // Listen to scroll events on window
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, [autoScrollEnabled, isAtBottom]);
+
+  // Helper function to check and scroll to final analysis if it has new content
+  const checkAndScrollToFinalAnalysis = useCallback((delay: number = 500) => {
+    if (!autoScrollEnabled) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`🎯 Final analysis auto-scroll blocked: autoScrollEnabled=${autoScrollEnabled}`);
+      }
+      return;
     }
-  };
 
-  // Lightweight function to update just final analysis
-  const updateFinalAnalysis = (analysis: string) => {
-    console.log('🎯 Updating final analysis directly');
-    setSession(prevSession => {
-      if (!prevSession) return prevSession;
-      if (prevSession.final_analysis === analysis) {
-        console.log('🎯 Analysis unchanged, skipping update');
-        return prevSession;
-      }
-      return {
-        ...prevSession,
-        final_analysis: analysis
-      };
-    });
-  };
-
-  // Lightweight function to update session status
-  const updateSessionStatus = (newStatus: string, errorMessage?: string) => {
-    console.log('🔄 Updating session status directly:', newStatus);
-    setSession(prevSession => {
-      if (!prevSession) return prevSession;
-      if (prevSession.status === newStatus && prevSession.error_message === errorMessage) {
-        console.log('🔄 Status unchanged, skipping update');
-        return prevSession;
-      }
-      return {
-        ...prevSession,
-        status: newStatus as typeof prevSession.status,
-        error_message: errorMessage || prevSession.error_message
-      };
-    });
-  };
-
-  // Fetch session detail data with performance tracking
-  const fetchSessionDetail = async (id: string) => {
-    const startTime = performance.now();
+    // For final analysis, we use a more lenient check
+    // Only skip if user has actively scrolled up significantly (not just minor movements)
+    const documentHeight = document.documentElement.scrollHeight;
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const windowHeight = window.innerHeight;
+    const distanceFromBottom = documentHeight - scrollTop - windowHeight;
     
-    try {
-      setLoading(true);
-      setError(null);
-      console.log(`🚀 Fetching ${viewType} session detail for ID:`, id);
-      
-      const sessionData = await apiClient.getSessionDetail(id);
-      
-      // Validate and normalize session status
-      const normalizedStatus = ['completed', 'failed', 'in_progress', 'pending'].includes(sessionData.status) 
-        ? sessionData.status 
-        : 'in_progress';
-      
-      const normalizedSession = {
-        ...sessionData,
-        status: normalizedStatus as 'completed' | 'failed' | 'in_progress' | 'pending'
-      };
-      
-      setSession(normalizedSession);
-      
-      const loadTime = performance.now() - startTime;
-      console.log(`✅ ${viewType} session loaded:`, {
-        sessionId: id,
-        loadTime: `${loadTime.toFixed(2)}ms`,
-        stages: normalizedSession.stages?.length || 0,
-        totalInteractions: totalTimelineLength(normalizedSession.stages),
-        status: normalizedSession.status
-      });
-      
-    } catch (err) {
-      const errorMessage = handleAPIError(err);
-      setError(errorMessage);
-      console.error(`❌ Failed to fetch ${viewType} session:`, err);
-    } finally {
-      setLoading(false);
+    // Allow auto-scroll if user is within 200px of bottom (more lenient than regular 50px)
+    const isNearBottom = distanceFromBottom <= 200;
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`🎯 Final analysis auto-scroll check: distanceFromBottom=${distanceFromBottom}, isNearBottom=${isNearBottom}, userScrolledAway=${userScrolledAwayRef.current}`);
     }
-  };
+
+    if (!isNearBottom) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('🎯 Final analysis auto-scroll skipped - user scrolled too far up');
+      }
+      return;
+    }
+
+    setTimeout(() => {
+      if (finalAnalysisRef.current) {
+        const analysisElement = finalAnalysisRef.current;
+        const content = analysisElement.textContent?.trim() || '';
+
+        if (content.length > 50) { // Min length check
+          analysisElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+          console.log('🎯 Auto-scrolled to final analysis (live update)');
+        }
+      }
+    }, delay);
+  }, [autoScrollEnabled]);
+
+  // Helper functions are now provided by the SessionContext
+
+
 
   // WebSocket setup for real-time updates
   useEffect(() => {
@@ -338,47 +324,62 @@ function SessionDetailPageBase({
 
     // Handle granular session updates for better performance
     const handleSessionUpdate = (update: any) => {
-      console.log(`📡 ${viewType} view received update:`, update.type, update);
+      console.log(`📡 ${viewType} view received update:`, update.type);
       
-      // Handle different update types intelligently with partial updates
+      // Handle different update types with granular updates for optimal performance
       switch (update.type) {
         case 'summary_update':
-          // Quick summary refresh for both views
-          refreshSessionSummary(sessionId);
+          // Quick summary refresh - lightweight API call
+          console.log('🔄 Summary update, using lightweight summary refresh');
+          if (sessionId) {
+            refreshSessionSummary(sessionId);
+          }
           break;
           
         case 'session_status_change':
           // Update status immediately to prevent UI lag
-          updateSessionStatus(update.new_status, update.error_message);
+          updateSessionStatus(update.status, update.error_message);
           
           // For major status changes, also refresh stages and analysis
-          if (['completed', 'failed'].includes(update.new_status)) {
+          if (['completed', 'failed'].includes(update.status)) {
             console.log('🔄 Major status change, refreshing stages');
             throttledUpdate(() => {
               if (sessionId) {
                 refreshSessionStages(sessionId);
+                
+                // Auto-scroll to final analysis when session completes
+                if (update.status === 'completed') {
+                  checkAndScrollToFinalAnalysis(800);
+                }
               }
             }, 200);
           }
           
           // Always update summary for accurate counts
-          refreshSessionSummary(sessionId);
+          if (sessionId) {
+            refreshSessionSummary(sessionId);
+          }
           break;
           
         case 'llm_interaction':
         case 'mcp_communication':
+        case 'mcp_interaction':
           // For ongoing sessions, use lightweight updates
           if (sessionRef.current?.status === 'in_progress') {
             console.log('🔄 Activity update, using partial refresh');
             
             // Always update summary for real-time statistics (lightweight)
-            refreshSessionSummary(sessionId);
+            if (sessionId) {
+              refreshSessionSummary(sessionId);
+            }
             
             // Use throttled partial stage updates instead of full session refresh
             const updateDelay = viewType === 'conversation' ? 800 : 500;
             throttledUpdate(() => {
               if (sessionId) {
                 refreshSessionStages(sessionId);
+                // Check for final analysis after interaction updates
+                checkAndScrollToFinalAnalysis(updateDelay + 400);
               }
             }, updateDelay);
           }
@@ -391,12 +392,16 @@ function SessionDetailPageBase({
           console.log('🔄 Stage update, using partial refresh');
           
           // Update summary immediately
-          refreshSessionSummary(sessionId);
+          if (sessionId) {
+            refreshSessionSummary(sessionId);
+          }
           
           // Use throttled partial update for stage content
           throttledUpdate(() => {
             if (sessionId) {
               refreshSessionStages(sessionId);
+              // Check for final analysis after stage updates
+              checkAndScrollToFinalAnalysis(600);
             }
           }, 250);
           break;
@@ -408,26 +413,75 @@ function SessionDetailPageBase({
           if (update.analysis) {
             // Direct update if analysis is provided in update
             updateFinalAnalysis(update.analysis);
+            
+            // Auto-scroll to final analysis if enabled and user is near bottom
+            if (autoScrollEnabled && finalAnalysisRef.current) {
+              // Use more lenient distance check for final analysis
+              const documentHeight = document.documentElement.scrollHeight;
+              const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+              const windowHeight = window.innerHeight;
+              const distanceFromBottom = documentHeight - scrollTop - windowHeight;
+              const isNearBottom = distanceFromBottom <= 200;
+
+              if (process.env.NODE_ENV !== 'production') {
+                console.log(`🎯 Final analysis auto-scroll check: distanceFromBottom=${distanceFromBottom}, isNearBottom=${isNearBottom}`);
+              }
+
+              if (isNearBottom) {
+                setTimeout(() => {
+                  finalAnalysisRef.current?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                  });
+                  console.log('🎯 Auto-scrolled to final analysis');
+                }, 300);
+              } else {
+                console.log('🎯 Final analysis auto-scroll skipped - user scrolled too far up');
+              }
+            }
           } else {
             // Otherwise use partial refresh
             throttledUpdate(() => {
               if (sessionId) {
                 refreshSessionStages(sessionId);
+                
+                // Check if final analysis was added and auto-scroll
+                checkAndScrollToFinalAnalysis(500);
               }
             }, 150);
           }
           break;
           
+        case 'stage_progress':
+          // Stage progress updates - these often coincide with final analysis
+          console.log('🔄 Stage progress update');
+          
+          if (sessionId) {
+            refreshSessionSummary(sessionId);
+            throttledUpdate(() => {
+              if (sessionId) {
+                refreshSessionStages(sessionId);
+                // Check for final analysis after stage progress
+                checkAndScrollToFinalAnalysis(800);
+              }
+            }, 300);
+          }
+          break;
+
         default:
           // Unknown update types - be conservative and update summary
           console.log(`🔄 Unknown update type: ${update.type}, using partial refresh`);
-          refreshSessionSummary(sessionId);
+          if (sessionId) {
+            refreshSessionSummary(sessionId);
+          }
           
           // If it contains data that might affect content, use partial refresh
           if (update.data || update.content) {
             throttledUpdate(() => {
               if (sessionId) {
                 refreshSessionStages(sessionId);
+                // Check for final analysis after unknown updates
+                checkAndScrollToFinalAnalysis(1000);
               }
             }, 800);
           }
@@ -453,15 +507,9 @@ function SessionDetailPageBase({
     };
   }, [sessionId, viewType]);
 
-  // Initial load
-  useEffect(() => {
-    if (sessionId) {
-      fetchSessionDetail(sessionId);
-    } else {
-      setError('Session ID not provided');
-      setLoading(false);
-    }
-  }, [sessionId]);
+
+
+  // Note: Initial load is now handled by the SessionContext automatically
 
   // Navigation handlers
   const handleBack = () => {
@@ -469,11 +517,17 @@ function SessionDetailPageBase({
   };
 
   const handleViewChange = (_event: React.MouseEvent<HTMLElement>, newView: string) => {
-    if (newView !== null) {
-      if (newView === 'technical' && sessionId) {
-        navigate(`/sessions/${sessionId}/technical`);
-      } else if (newView === 'conversation' && sessionId) {
-        navigate(`/sessions/${sessionId}`);
+    if (newView !== null && (newView === 'conversation' || newView === 'technical')) {
+      if (onViewChange) {
+        // Use external view change handler if provided (for unified wrapper)
+        onViewChange(newView);
+      } else {
+        // Fallback to direct navigation (for legacy usage)
+        if (newView === 'technical' && sessionId) {
+          navigate(`/sessions/${sessionId}/technical`);
+        } else if (newView === 'conversation' && sessionId) {
+          navigate(`/sessions/${sessionId}`);
+        }
       }
       setCurrentView(newView);
     }
@@ -481,12 +535,16 @@ function SessionDetailPageBase({
 
   const handleRetry = () => {
     if (sessionId) {
-      fetchSessionDetail(sessionId);
+      refetch();
     }
   };
 
   const handleVirtualizationToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
     setUseVirtualization(event.target.checked);
+  };
+
+  const handleAutoScrollToggle = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setAutoScrollEnabled(event.target.checked);
   };
 
   return (
@@ -590,6 +648,32 @@ function SessionDetailPageBase({
             </ToggleButton>
           </ToggleButtonGroup>
           
+
+
+          {/* Auto-scroll toggle - only show for active sessions */}
+          {session && (session.status === 'in_progress' || session.status === 'pending') && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={autoScrollEnabled}
+                    onChange={handleAutoScrollToggle}
+                    size="small"
+                    color="default"
+                  />
+                }
+                label={
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Typography variant="caption" sx={{ color: 'inherit' }}>
+                      🔄 Auto-scroll
+                    </Typography>
+                  </Box>
+                }
+                sx={{ m: 0, color: 'inherit' }}
+              />
+            </Box>
+          )}
+
           {/* Performance mode toggle */}
           {showPerformanceMode && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
@@ -701,7 +785,7 @@ function SessionDetailPageBase({
             {/* Timeline Content - Conditional based on view type */}
             {session.stages && session.stages.length > 0 ? (
               <Suspense fallback={timelineSkeleton}>
-                {timelineComponent(session, useVirtualization || undefined)}
+                {timelineComponent(session, useVirtualization ?? undefined, autoScrollEnabled)}
               </Suspense>
             ) : (
               <Alert severity="error" sx={{ mb: 2 }}>
@@ -723,13 +807,15 @@ function SessionDetailPageBase({
             )}
 
             {/* Final AI Analysis - Lazy loaded */}
-            <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
-              <FinalAnalysisCard 
-                analysis={session.final_analysis}
-                sessionStatus={session.status}
-                errorMessage={session.error_message}
-              />
-            </Suspense>
+            <Box ref={finalAnalysisRef} data-final-analysis>
+              <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
+                <FinalAnalysisCard 
+                  analysis={session.final_analysis}
+                  sessionStatus={session.status}
+                  errorMessage={session.error_message}
+                />
+              </Suspense>
+            </Box>
           </Box>
         )}
 
