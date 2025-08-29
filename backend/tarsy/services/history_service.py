@@ -453,6 +453,41 @@ class HistoryService:
                     if session_overview.started_at_us and session_overview.completed_at_us:
                         total_duration_ms = (session_overview.completed_at_us - session_overview.started_at_us) // 1000
                     
+                    # Calculate token usage aggregations - prefer repository-provided session totals
+                    session_input_tokens = 0
+                    session_output_tokens = 0
+                    session_total_tokens = 0
+
+                    # Check if aggregated token totals are already available in session overview
+                    if (session_overview.session_input_tokens is not None and 
+                        session_overview.session_output_tokens is not None and 
+                        session_overview.session_total_tokens is not None):
+                        # Use the already-available aggregated session totals from overview
+                        session_input_tokens = session_overview.session_input_tokens
+                        session_output_tokens = session_overview.session_output_tokens
+                        session_total_tokens = session_overview.session_total_tokens
+                    else:
+                        # Aggregates not available in overview, get detailed session for fallback calculation
+                        detailed_session = repo.get_session_details(session_id)
+                        if detailed_session:
+                            # Check if aggregated session totals are available in detailed session
+                            if (detailed_session.session_input_tokens is not None and 
+                                detailed_session.session_output_tokens is not None and 
+                                detailed_session.session_total_tokens is not None):
+                                # Use the repository-provided aggregated session totals
+                                session_input_tokens = detailed_session.session_input_tokens
+                                session_output_tokens = detailed_session.session_output_tokens
+                                session_total_tokens = detailed_session.session_total_tokens
+                            else:
+                                # Fall back to manual per-stage summation if aggregates are missing
+                                for stage in detailed_session.stages:
+                                    if stage.stage_input_tokens:
+                                        session_input_tokens += stage.stage_input_tokens
+                                    if stage.stage_output_tokens: 
+                                        session_output_tokens += stage.stage_output_tokens
+                                    if stage.stage_total_tokens:
+                                        session_total_tokens += stage.stage_total_tokens
+                    
                     # Create chain statistics from SessionOverview
                     chain_stats = ChainStatistics(
                         total_stages=session_overview.total_stages or 0,
@@ -468,6 +503,9 @@ class HistoryService:
                         system_events=0,  # Not tracked in SessionOverview
                         errors_count=1 if session_overview.error_message else 0,
                         total_duration_ms=total_duration_ms,
+                        session_input_tokens=session_input_tokens,
+                        session_output_tokens=session_output_tokens,
+                        session_total_tokens=session_total_tokens,
                         chain_statistics=chain_stats
                     )
                     return session_stats
@@ -684,6 +722,75 @@ class HistoryService:
             return repo.get_filter_options()
 
     # Maintenance Operations
+    def _cleanup_orphaned_stages_for_session(self, repo: 'HistoryRepository', session_id: str) -> int:
+        """
+        Mark all non-terminal stages in a session as failed.
+        
+        This is a helper method called when cleaning up orphaned sessions to ensure
+        that all stages that were in progress or pending are also marked as failed.
+        
+        Args:
+            repo: History repository instance 
+            session_id: Session ID to cleanup stages for
+            
+        Returns:
+            Number of stages marked as failed
+        """
+        from sqlmodel import select
+        from tarsy.models.db_models import StageExecution
+        from tarsy.models.constants import StageStatus
+        
+        try:
+            # Get all stages for this session that are not already in terminal states
+            stages_stmt = (
+                select(StageExecution)
+                .where(StageExecution.session_id == session_id)
+                .where(StageExecution.status.in_([
+                    StageStatus.PENDING.value, 
+                    StageStatus.ACTIVE.value
+                ]))
+            )
+            active_stages = repo.session.exec(stages_stmt).all()
+            
+            if not active_stages:
+                logger.debug(f"No active stages found for session {session_id}")
+                return 0
+            
+            stage_cleanup_count = 0
+            current_time = now_us()
+            
+            for stage in active_stages:
+                try:
+                    # Update stage to failed status
+                    stage.status = StageStatus.FAILED.value
+                    stage.error_message = "Session terminated due to backend restart"
+                    stage.completed_at_us = current_time
+                    
+                    # Calculate duration if stage was started
+                    if stage.started_at_us and stage.completed_at_us:
+                        stage.duration_ms = int((stage.completed_at_us - stage.started_at_us) / 1000)
+                    
+                    # Update the stage execution
+                    success = repo.update_stage_execution(stage)
+                    if success:
+                        stage_cleanup_count += 1
+                        logger.debug(f"Marked orphaned stage {stage.stage_id} (index {stage.stage_index}) as failed for session {session_id}")
+                    else:
+                        logger.warning(f"Failed to update orphaned stage {stage.stage_id} for session {session_id}")
+                        
+                except Exception as stage_update_error:
+                    logger.error(f"Error updating stage {stage.stage_id} for session {session_id}: {str(stage_update_error)}")
+                    continue
+            
+            if stage_cleanup_count > 0:
+                logger.debug(f"Cleaned up {stage_cleanup_count} orphaned stages for session {session_id}")
+            
+            return stage_cleanup_count
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup stages for session {session_id}: {str(e)}")
+            return 0
+
     def cleanup_orphaned_sessions(self) -> int:
         """
         Clean up sessions that were left in active states due to unexpected backend shutdown.
@@ -733,6 +840,13 @@ class HistoryService:
                         
                         success = repo.update_alert_session(session)
                         if success:
+                            # Also mark all stages in this session as failed
+                            try:
+                                self._cleanup_orphaned_stages_for_session(repo, session.session_id)
+                            except Exception as stage_error:
+                                logger.warning(f"Failed to cleanup stages for session {session.session_id}: {str(stage_error)}")
+                                # Continue with session cleanup even if stage cleanup fails
+                            
                             cleanup_count += 1
                             logger.debug(f"Marked orphaned session {session.session_id} as failed")
                         else:

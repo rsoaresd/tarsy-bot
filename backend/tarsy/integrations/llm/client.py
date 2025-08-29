@@ -8,11 +8,9 @@ import httpx
 import pprint
 import traceback
 import urllib3
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-# Suppress SSL warnings when SSL verification is disabled
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -25,6 +23,9 @@ from tarsy.hooks.typed_context import llm_interaction_context
 from tarsy.models.constants import DEFAULT_LLM_TEMPERATURE
 from tarsy.models.unified_interactions import LLMConversation, MessageRole
 from tarsy.utils.logger import get_module_logger
+
+# Suppress SSL warnings when SSL verification is disabled
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Setup logger for this module
 logger = get_module_logger(__name__)
@@ -189,8 +190,19 @@ class LLMClient:
                 # Convert typed conversation to LangChain format  
                 langchain_messages = self._convert_conversation_to_langchain(conversation)
                 
-                # Execute LLM call with retry logic
-                response = await self._execute_with_retry(langchain_messages)
+                # Get both response and usage metadata
+                response, usage_metadata = await self._execute_with_retry(langchain_messages)
+                
+                # Store token usage in dedicated type-safe fields on interaction
+                if usage_metadata:
+                    input_tokens = usage_metadata.get('input_tokens', 0)
+                    output_tokens = usage_metadata.get('output_tokens', 0)
+                    total_tokens = usage_metadata.get('total_tokens', 0)
+                    
+                    # Store token data (use None instead of 0 for cleaner database storage)
+                    ctx.interaction.input_tokens = input_tokens if input_tokens > 0 else None
+                    ctx.interaction.output_tokens = output_tokens if output_tokens > 0 else None
+                    ctx.interaction.total_tokens = total_tokens if total_tokens > 0 else None
                 
                 # Extract response content
                 response_content = response.content if hasattr(response, 'content') else str(response)
@@ -221,11 +233,20 @@ class LLMClient:
                 
                 raise Exception(enhanced_message) from e
     
-    async def _execute_with_retry(self, langchain_messages: List, max_retries: int = 3):
-        """Execute LLM call with exponential backoff for rate limiting and retry for empty responses."""        
+    async def _execute_with_retry(
+        self, 
+        langchain_messages: List, 
+        max_retries: int = 3
+    ) -> Tuple[Any, Optional[Dict[str, Any]]]:
+        """Execute LLM call with usage tracking and retry logic."""
         for attempt in range(max_retries + 1):
             try:
-                response = await self.llm_client.ainvoke(langchain_messages)
+                # Add callback handler to capture token usage
+                callback = UsageMetadataCallbackHandler()
+                response = await self.llm_client.ainvoke(
+                    langchain_messages, 
+                    config={"callbacks": [callback]}
+                )
                 
                 # Check for empty response content
                 if response and hasattr(response, 'content'):
@@ -248,7 +269,21 @@ class LLMClient:
                             error_message = f"⚠️ **LLM Response Error**\n\nThe {self.provider_name} LLM returned an empty response on the final attempt (attempt {attempt + 1}/{max_retries + 1}). This may be due to:\n- Temporary provider issues\n- API rate limiting\n- Model overload\n\nPlease try processing this alert again in a few moments."
                             response.content = error_message
                 
-                return response
+                # Return both response and usage metadata from first model
+                usage_metadata = None
+                if callback.usage_metadata:
+                    # Log the entire usage_metadata object for debugging
+                    logger.info(f"Complete usage_metadata object: {pprint.pformat(callback.usage_metadata, width=100, depth=5)}")
+                    
+                    # Extract the first (and likely only) model's usage metadata
+                    first_model_name = next(iter(callback.usage_metadata.keys()), None)
+                    if first_model_name:
+                        model_usage = callback.usage_metadata[first_model_name]
+                        if isinstance(model_usage, dict):
+                            # Create a simple UsageMetadata-like object
+                            usage_metadata = model_usage
+                
+                return response, usage_metadata
                 
             except Exception as e:
                 error_str = str(e).lower()

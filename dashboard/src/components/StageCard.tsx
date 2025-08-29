@@ -14,6 +14,7 @@ import {
   ListItemIcon,
   Divider,
   Button,
+  alpha,
 } from '@mui/material';
 import {
   ExpandMore,
@@ -27,6 +28,7 @@ import {
   Timeline as TimelineIcon,
   Info,
 } from '@mui/icons-material';
+import TokenUsageDisplay from './TokenUsageDisplay';
 import type { StageCardProps, TimelineItem } from '../types';
 import { formatTimestamp, formatDurationMs } from '../utils/timestamp';
 
@@ -89,6 +91,9 @@ const StageCard: React.FC<StageCardProps> = ({
   const stageInteractions = [...(stage.llm_interactions || []), ...(stage.mcp_communications || [])].sort((a, b) => a.timestamp_us - b.timestamp_us);
   const hasInteractions = stageInteractions.length > 0;
   const hasOutput = stage.stage_output !== null && stage.stage_output !== undefined;
+  const hasTokenData =
+    [stage.stage_input_tokens, stage.stage_output_tokens, stage.stage_total_tokens]
+      .some((v) => v !== null && v !== undefined);
   const hasError =
     stage.error_message != null &&
     String(stage.error_message).trim().length > 0;
@@ -195,8 +200,8 @@ const StageCard: React.FC<StageCardProps> = ({
         )}
 
         {/* Quick stats */}
-        {!expanded && (hasInteractions || hasOutput) && (
-          <Box display="flex" gap={1} mt={1}>
+        {!expanded && (hasInteractions || hasOutput || hasTokenData) && (
+          <Box display="flex" gap={1} mt={1} flexWrap="wrap">
             {hasInteractions && (
               <Chip
                 icon={<TimelineIcon />}
@@ -212,6 +217,19 @@ const StageCard: React.FC<StageCardProps> = ({
                 size="small"
                 variant="outlined"
                 color="primary"
+              />
+            )}
+            {/* EP-0009: Stage token usage chip in collapsed view */}
+            {hasTokenData && (
+              <TokenUsageDisplay
+                tokenData={{
+                  input_tokens: stage.stage_input_tokens,
+                  output_tokens: stage.stage_output_tokens,
+                  total_tokens: stage.stage_total_tokens
+                }}
+                variant="badge"
+                size="small"
+                color="success"
               />
             )}
           </Box>
@@ -325,6 +343,34 @@ const StageCard: React.FC<StageCardProps> = ({
                         <Typography variant="caption" color="secondary.main" sx={{ fontSize: '0.65rem' }}>
                           MCP
                         </Typography>
+                      </Box>
+                    )}
+                    
+                    {/* EP-0009: Stage token usage display */}
+                    {hasTokenData && (
+                      <Box sx={(theme) => ({ 
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.25,
+                        px: 0.75,
+                        py: 0.25,
+                        backgroundColor: alpha(theme.palette.success.main, 0.08),
+                        borderRadius: '12px',
+                        border: '1px solid',
+                        borderColor: alpha(theme.palette.success.main, 0.3)
+                      })}>
+                        <Typography variant="caption" sx={(theme) => ({ fontWeight: 600, color: theme.palette.success.main, fontSize: '0.65rem' })}>
+                          🪙
+                        </Typography>
+                        <TokenUsageDisplay
+                          tokenData={{
+                            input_tokens: stage.stage_input_tokens,
+                            output_tokens: stage.stage_output_tokens,
+                            total_tokens: stage.stage_total_tokens
+                          }}
+                          variant="inline"
+                          size="small"
+                        />
                       </Box>
                     )}
                   </Box>

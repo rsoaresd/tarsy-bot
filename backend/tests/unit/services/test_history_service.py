@@ -1267,6 +1267,80 @@ async def test_cleanup_orphaned_sessions():
     )
     mock_repo.update_alert_session.return_value = True
     
+    # Mock stage data for the orphaned sessions
+    from tarsy.models.db_models import StageExecution
+    from tarsy.models.constants import StageStatus
+    
+    mock_orphaned_stages = [
+        # Stages for orphaned-pending-1 session
+        StageExecution(
+            execution_id="stage-1-pending",
+            session_id="orphaned-pending-1",
+            stage_id="initial-analysis",
+            stage_index=0,
+            stage_name="Initial Analysis",
+            agent="KubernetesAgent",
+            status=StageStatus.PENDING.value,
+            started_at_us=None,
+            completed_at_us=None
+        ),
+        # Stages for orphaned-progress-1 session 
+        StageExecution(
+            execution_id="stage-2-active",
+            session_id="orphaned-progress-1",
+            stage_id="initial-analysis",
+            stage_index=0,
+            stage_name="Initial Analysis",
+            agent="KubernetesAgent", 
+            status=StageStatus.ACTIVE.value,
+            started_at_us=1640995200000000,
+            completed_at_us=None
+        ),
+        StageExecution(
+            execution_id="stage-3-pending",
+            session_id="orphaned-progress-1",
+            stage_id="deep-analysis",
+            stage_index=1,
+            stage_name="Deep Analysis",
+            agent="KubernetesAgent",
+            status=StageStatus.PENDING.value,
+            started_at_us=None,
+            completed_at_us=None
+        )
+    ]
+    
+    # Track which session we're currently processing for more targeted stage mocking
+    session_stage_mapping = {
+        "orphaned-pending-1": [stage for stage in mock_orphaned_stages if stage.session_id == "orphaned-pending-1"],
+        "orphaned-progress-1": [stage for stage in mock_orphaned_stages if stage.session_id == "orphaned-progress-1"]
+    }
+    
+    current_session_context = []
+    
+    # Mock repository's session.exec method for stage queries 
+    def mock_session_exec(stmt):
+        mock_result = Mock()
+        # Use a simple approach: return stages for the session being processed
+        # Since the test executes sequentially, we can track the order
+        if len(current_session_context) == 0:
+            # First call - return stages for first session
+            current_session_context.append("orphaned-pending-1")
+            stages = session_stage_mapping["orphaned-pending-1"]
+        elif len(current_session_context) == 1:
+            # Second call - return stages for second session
+            current_session_context.append("orphaned-progress-1")
+            stages = session_stage_mapping["orphaned-progress-1"]
+        else:
+            # No more stages
+            stages = []
+        
+        mock_result.all.return_value = stages
+        return mock_result
+    
+    mock_repo.session = Mock()
+    mock_repo.session.exec.side_effect = mock_session_exec
+    mock_repo.update_stage_execution.return_value = True
+    
     # Mock get_alert_session to return existing AlertSession objects for each session_id
     def mock_get_alert_session(session_id):
         # Find the corresponding session from our test data
@@ -1311,6 +1385,27 @@ async def test_cleanup_orphaned_sessions():
         assert updated_session.status == AlertSessionStatus.FAILED.value
         assert updated_session.error_message == "Backend was restarted - session terminated unexpectedly"
         assert updated_session.completed_at_us is not None
+    
+    # Verify that stages were also updated
+    # We should have 3 stage updates (1 from orphaned-pending-1, 2 from orphaned-progress-1)
+    assert mock_repo.update_stage_execution.call_count == 3
+    
+    # Verify stage update calls - check that all stages were marked as failed
+    stage_update_calls = mock_repo.update_stage_execution.call_args_list
+    updated_stages = [call[0][0] for call in stage_update_calls]
+    
+    for updated_stage in updated_stages:
+        assert updated_stage.status == StageStatus.FAILED.value
+        assert updated_stage.error_message == "Session terminated due to backend restart"
+        assert updated_stage.completed_at_us is not None
+        
+        # Verify duration was calculated for stages that had started_at_us
+        if updated_stage.started_at_us is not None:
+            assert updated_stage.duration_ms is not None
+            assert updated_stage.duration_ms >= 0
+    
+    # Verify the session.exec was called to query stages
+    assert mock_repo.session.exec.call_count == 2  # Once per orphaned session
 
 
 @pytest.mark.asyncio
@@ -1603,3 +1698,209 @@ class TestHistoryAPIResponseStructure:
         # Verify repository method was called once (no retries needed when session not found)
         assert dependencies['repository'].get_session_overview.call_count == 1
         dependencies['repository'].get_session_overview.assert_called_with(session_id)
+
+
+@pytest.mark.unit
+class TestHistoryServiceTokenAggregations:
+    """Test token usage aggregation functionality in HistoryService added in EP-0009."""
+    
+    @pytest.fixture
+    def history_service(self, isolated_test_settings):
+        """Create HistoryService instance for testing."""
+        with patch('tarsy.services.history_service.get_settings', return_value=isolated_test_settings):
+            service = HistoryService()
+            service._initialization_attempted = True
+            service._is_healthy = True
+            return service
+    
+    @pytest.mark.asyncio
+    async def test_get_session_summary_calculates_token_aggregations(self, history_service):
+        """Test that session summary calculates token totals from stages."""
+        # Arrange
+        session_id = "token-test-session"
+        
+        # Create mock session overview
+        mock_session_overview = MockFactory.create_mock_session_overview(
+            session_id=session_id,
+            chain_id="test-chain",
+            total_interactions=3,
+            llm_interaction_count=3
+        )
+        
+        # Create mock detailed session with token data
+        mock_detailed_session = Mock()
+        # Set session-level token aggregation properties to None to force stage-level calculation
+        mock_detailed_session.session_input_tokens = None
+        mock_detailed_session.session_output_tokens = None
+        mock_detailed_session.session_total_tokens = None
+        
+        # Create stages with token data
+        stage1 = Mock()
+        stage1.stage_input_tokens = 100
+        stage1.stage_output_tokens = 30 
+        stage1.stage_total_tokens = 130
+        
+        stage2 = Mock()  
+        stage2.stage_input_tokens = 150
+        stage2.stage_output_tokens = 45
+        stage2.stage_total_tokens = 195
+        
+        stage3 = Mock()  # Stage without token data
+        stage3.stage_input_tokens = None
+        stage3.stage_output_tokens = None
+        stage3.stage_total_tokens = None
+        
+        mock_detailed_session.stages = [stage1, stage2, stage3]
+        
+        # Mock repository
+        dependencies = MockFactory.create_mock_history_service_dependencies()
+        dependencies['repository'].get_session_overview.return_value = mock_session_overview
+        dependencies['repository'].get_session_details.return_value = mock_detailed_session
+        
+        with patch.object(history_service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = dependencies['repository']
+            mock_get_repo.return_value.__exit__.return_value = None
+            
+            # Act
+            summary = await history_service.get_session_summary(session_id)
+        
+        # Assert
+        assert summary is not None
+        assert summary.session_input_tokens == 250  # 100 + 150 + 0
+        assert summary.session_output_tokens == 75   # 30 + 45 + 0  
+        assert summary.session_total_tokens == 325   # 130 + 195 + 0
+        
+        # Verify both repository methods were called
+        dependencies['repository'].get_session_overview.assert_called_once_with(session_id)
+        dependencies['repository'].get_session_details.assert_called_once_with(session_id)
+    
+    @pytest.mark.asyncio
+    async def test_get_session_summary_handles_no_token_data(self, history_service):
+        """Test session summary when no stages have token data."""
+        # Arrange
+        session_id = "no-token-session"
+        
+        mock_session_overview = MockFactory.create_mock_session_overview(
+            session_id=session_id,
+            chain_id="test-chain",
+            llm_interaction_count=0  # No LLM interactions
+        )
+        
+        # Mock detailed session with stages but no token data
+        mock_detailed_session = Mock()
+        # Set session-level token aggregation properties to None to force stage-level calculation
+        mock_detailed_session.session_input_tokens = None
+        mock_detailed_session.session_output_tokens = None
+        mock_detailed_session.session_total_tokens = None
+        
+        stage1 = Mock()
+        stage1.stage_input_tokens = None
+        stage1.stage_output_tokens = None
+        stage1.stage_total_tokens = None
+        
+        mock_detailed_session.stages = [stage1]
+        
+        # Mock repository
+        dependencies = MockFactory.create_mock_history_service_dependencies()
+        dependencies['repository'].get_session_overview.return_value = mock_session_overview
+        dependencies['repository'].get_session_details.return_value = mock_detailed_session
+        
+        with patch.object(history_service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = dependencies['repository']
+            mock_get_repo.return_value.__exit__.return_value = None
+            
+            # Act
+            summary = await history_service.get_session_summary(session_id)
+        
+        # Assert
+        assert summary is not None
+        assert summary.session_input_tokens == 0   # No token data defaults to 0
+        assert summary.session_output_tokens == 0
+        assert summary.session_total_tokens == 0
+    
+    @pytest.mark.asyncio
+    async def test_get_session_summary_handles_missing_detailed_session(self, history_service):
+        """Test session summary when detailed session is not available."""
+        # Arrange
+        session_id = "missing-details-session"
+        
+        mock_session_overview = MockFactory.create_mock_session_overview(
+            session_id=session_id,
+            chain_id="test-chain"
+        )
+        
+        # Mock repository - detailed session not available
+        dependencies = MockFactory.create_mock_history_service_dependencies()
+        dependencies['repository'].get_session_overview.return_value = mock_session_overview
+        dependencies['repository'].get_session_details.return_value = None  # No detailed session
+        
+        with patch.object(history_service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = dependencies['repository']
+            mock_get_repo.return_value.__exit__.return_value = None
+            
+            # Act
+            summary = await history_service.get_session_summary(session_id)
+        
+        # Assert
+        assert summary is not None
+        # Should default to 0 when detailed session unavailable
+        assert summary.session_input_tokens == 0
+        assert summary.session_output_tokens == 0
+        assert summary.session_total_tokens == 0
+    
+    @pytest.mark.asyncio
+    async def test_get_session_summary_token_aggregation_edge_cases(self, history_service):
+        """Test token aggregation with various edge cases."""
+        # Arrange
+        session_id = "edge-case-session"
+        
+        mock_session_overview = MockFactory.create_mock_session_overview(
+            session_id=session_id,
+            chain_id="test-chain",
+            llm_interaction_count=2
+        )
+        
+        # Create detailed session with edge case token data
+        mock_detailed_session = Mock()
+        # Set session-level token aggregation properties to None to force stage-level calculation
+        mock_detailed_session.session_input_tokens = None
+        mock_detailed_session.session_output_tokens = None
+        mock_detailed_session.session_total_tokens = None
+        
+        # Stage with large token numbers
+        stage1 = Mock()
+        stage1.stage_input_tokens = 5000
+        stage1.stage_output_tokens = 2000
+        stage1.stage_total_tokens = 7000
+        
+        # Stage with very small token numbers
+        stage2 = Mock()
+        stage2.stage_input_tokens = 1
+        stage2.stage_output_tokens = 1  
+        stage2.stage_total_tokens = 2
+        
+        # Stage with mixed token availability
+        stage3 = Mock()
+        stage3.stage_input_tokens = 50
+        stage3.stage_output_tokens = None  # Missing output tokens
+        stage3.stage_total_tokens = 50
+        
+        mock_detailed_session.stages = [stage1, stage2, stage3]
+        
+        # Mock repository
+        dependencies = MockFactory.create_mock_history_service_dependencies() 
+        dependencies['repository'].get_session_overview.return_value = mock_session_overview
+        dependencies['repository'].get_session_details.return_value = mock_detailed_session
+        
+        with patch.object(history_service, 'get_repository') as mock_get_repo:
+            mock_get_repo.return_value.__enter__.return_value = dependencies['repository']
+            mock_get_repo.return_value.__exit__.return_value = None
+            
+            # Act
+            summary = await history_service.get_session_summary(session_id)
+        
+        # Assert
+        assert summary is not None
+        assert summary.session_input_tokens == 5051  # 5000 + 1 + 50
+        assert summary.session_output_tokens == 2001  # 2000 + 1 + 0 (None treated as 0)
+        assert summary.session_total_tokens == 7052   # 7000 + 2 + 50

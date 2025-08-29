@@ -165,6 +165,11 @@ class SessionOverview(BaseModel):
     mcp_communication_count: int = 0
     total_interactions: int = 0
     
+    # Token usage aggregations
+    session_input_tokens: Optional[int] = None
+    session_output_tokens: Optional[int] = None  
+    session_total_tokens: Optional[int] = None
+    
     # Chain progress info (for dashboard filtering/display)
     chain_id: str
     total_stages: Optional[int] = None
@@ -221,6 +226,36 @@ class DetailedStage(BaseModel):
         return total if total > 0 else None
     
     @computed_field
+    @property  
+    def stage_input_tokens(self) -> Optional[int]:
+        """Sum of input tokens from all LLM interactions in this stage"""
+        total = sum(
+            interaction.details.input_tokens or 0 
+            for interaction in self.llm_interactions
+        )
+        return total if total > 0 else None
+
+    @computed_field
+    @property
+    def stage_output_tokens(self) -> Optional[int]:
+        """Sum of output tokens from all LLM interactions in this stage"""
+        total = sum(
+            interaction.details.output_tokens or 0 
+            for interaction in self.llm_interactions
+        )
+        return total if total > 0 else None
+
+    @computed_field
+    @property
+    def stage_total_tokens(self) -> Optional[int]:
+        """Sum of total tokens from all LLM interactions in this stage"""
+        total = sum(
+            interaction.details.total_tokens or 0 
+            for interaction in self.llm_interactions
+        )
+        return total if total > 0 else None
+    
+    @computed_field
     @property
     def chronological_interactions(self) -> List[TimelineEvent]:
         """
@@ -271,6 +306,11 @@ class DetailedSession(BaseModel):
     llm_interaction_count: int = 0
     mcp_communication_count: int = 0
     
+    # Token usage aggregations
+    session_input_tokens: Optional[int] = None
+    session_output_tokens: Optional[int] = None  
+    session_total_tokens: Optional[int] = None
+    
     # Complete stage executions with all their interactions
     stages: List[DetailedStage] = Field(default_factory=list)  # Each stage contains its full interaction timeline
     
@@ -293,6 +333,11 @@ class SessionStats(BaseModel):
     system_events: int = 0
     errors_count: int
     total_duration_ms: int
+    
+    # Token usage aggregations
+    session_input_tokens: int = 0
+    session_output_tokens: int = 0  
+    session_total_tokens: int = 0
     
     # Chain progress (always present since all sessions are chains)
     chain_statistics: ChainStatistics
