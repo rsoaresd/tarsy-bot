@@ -852,3 +852,104 @@ class TestLLMClientTokenUsageTracking:
             assert 'callbacks' in call_args.kwargs['config']
             assert call_args.kwargs['config']['callbacks'] == [mock_callback_instance]
     
+    @pytest.mark.asyncio
+    async def test_generate_response_with_llm_config(self, client, mock_llm_client):
+        """Test that max_tokens parameter is properly passed to ainvoke."""
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System prompt"),
+            LLMMessage(role=MessageRole.USER, content="User question")
+        ])
+
+        # Mock successful LLM response
+        mock_response = Mock()
+        mock_response.content = "Test response"
+        mock_llm_client.ainvoke.return_value = mock_response
+
+        # Test with max_tokens parameter
+        max_tokens = 500
+
+        with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
+            mock_ctx = Mock()
+            mock_ctx.get_request_id.return_value = "test-request-id"
+            mock_ctx.interaction = Mock()
+            mock_ctx.complete_success = AsyncMock()  # Make this async
+            mock_context.return_value.__aenter__.return_value = mock_ctx
+            mock_context.return_value.__aexit__.return_value = None
+
+            await client.generate_response(
+                conversation, "test-session", "test-stage", max_tokens=max_tokens
+            )
+
+        # Verify ainvoke was called with correct config
+        call_args = mock_llm_client.ainvoke.call_args
+        assert 'config' in call_args.kwargs
+        config = call_args.kwargs['config']
+
+        # Config should only contain callbacks, not max_tokens
+        assert 'callbacks' in config
+        assert 'max_tokens' not in config
+        
+        # max_tokens should be passed as top-level keyword arg
+        assert 'max_tokens' in call_args.kwargs
+        assert call_args.kwargs['max_tokens'] == 500
+    
+    @pytest.mark.asyncio
+    async def test_generate_response_without_llm_config(self, client, mock_llm_client):
+        """Test that generate_response works without llm_config (backward compatibility)."""
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System prompt"),
+            LLMMessage(role=MessageRole.USER, content="User question")
+        ])
+        
+        # Mock successful LLM response
+        mock_response = Mock()
+        mock_response.content = "Test response"
+        mock_llm_client.ainvoke.return_value = mock_response
+        
+        with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
+            mock_ctx = Mock()
+            mock_ctx.get_request_id.return_value = "test-request-id"
+            mock_ctx.interaction = Mock()
+            mock_ctx.complete_success = AsyncMock()  # Make this async
+            mock_context.return_value.__aenter__.return_value = mock_ctx
+            mock_context.return_value.__aexit__.return_value = None
+            
+            await client.generate_response(conversation, "test-session", "test-stage")
+        
+        # Verify ainvoke was called with only callbacks (no extra config)
+        call_args = mock_llm_client.ainvoke.call_args
+        assert 'config' in call_args.kwargs
+        config = call_args.kwargs['config']
+        
+        # Should only have callbacks in config, no extra LLM parameters as kwargs
+        assert 'callbacks' in config
+        assert 'max_tokens' not in config
+        assert 'temperature' not in config
+        # Verify max_tokens is not passed as direct kwarg
+        assert 'max_tokens' not in call_args.kwargs
+    
+    @pytest.mark.asyncio
+    async def test_execute_with_retry_with_llm_config(self, client):
+        """Test that _execute_with_retry properly handles max_tokens parameter."""
+        # Mock successful LLM response
+        mock_response = Mock()
+        mock_response.content = "Test response"
+        client.llm_client.ainvoke.return_value = mock_response
+
+        max_tokens = 1000
+
+        with patch('tarsy.integrations.llm.client.UsageMetadataCallbackHandler') as mock_callback_class:
+            mock_callback_instance = Mock()
+            mock_callback_instance.usage_metadata = None
+            mock_callback_class.return_value = mock_callback_instance
+
+            response, usage_metadata = await client._execute_with_retry(
+                [], max_retries=3, max_tokens=max_tokens
+            )
+
+            # Verify config was properly created
+            call_args = client.llm_client.ainvoke.call_args
+            config = call_args.kwargs['config']
+            assert 'callbacks' in config
+            assert config['callbacks'] == [mock_callback_instance]
+            assert call_args.kwargs.get('max_tokens') == 1000

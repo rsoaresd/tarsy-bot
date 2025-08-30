@@ -9,10 +9,8 @@ for building various types of prompts in the system.
 from langchain_core.prompts import PromptTemplate
 
 
-# ReAct System Message Template
-REACT_SYSTEM_TEMPLATE = PromptTemplate.from_template("""{composed_instructions}
-
-🚨 WARNING: NEVER GENERATE FAKE OBSERVATIONS! 🚨
+# ReAct formatting instructions constant
+REACT_FORMATTING_INSTRUCTIONS = """🚨 WARNING: NEVER GENERATE FAKE OBSERVATIONS! 🚨
 After writing "Action Input:", you MUST stop immediately. The system will provide the "Observation:" for you.
 DO NOT write fake tool results or continue the conversation after "Action Input:"
 
@@ -69,7 +67,7 @@ CRITICAL FORMATTING REQUIREMENTS:
 
 VIOLATION EXAMPLES (DO NOT DO THIS):
 ❌ Action Input: apiVersion=v1, kind=Secret, name=my-secret
-❌ Observation: kubernetes-server.resources_get: {{"result": "..."}} 
+❌ Observation: kubernetes-server.resources_get: {"result": "..."} 
 ❌ Thought: I have retrieved the data...
 
 CORRECT BEHAVIOR:
@@ -111,7 +109,12 @@ CRITICAL VIOLATIONS TO AVOID:
 ✅ CORRECT: "Thought:\nThe user wants me to investigate..."
 ✅ CORRECT: "Action:\nkubernetes-server.resources_get"
 
-THE #1 MISTAKE: Writing fake observations and continuing the conversation after Action Input
+THE #1 MISTAKE: Writing fake observations and continuing the conversation after Action Input"""
+
+# Updated ReAct System Message Template  
+REACT_SYSTEM_TEMPLATE = PromptTemplate.from_template("""{composed_instructions}
+
+{react_formatting_instructions}
 
 Focus on {task_focus} for human operators to execute.""")
 
@@ -199,3 +202,48 @@ Your task is to provide a comprehensive analysis of the incident based on:
 3. Real-time system data from MCP servers
 
 Please provide detailed, actionable insights about what's happening and potential next steps.""")
+
+
+# MCP Result Summarization Templates
+MCP_SUMMARIZATION_SYSTEM_TEMPLATE = PromptTemplate.from_template("""You are an expert at summarizing technical output from system administration and monitoring tools for ongoing incident investigation.
+
+Your specific task is to summarize output from **{server_name}.{tool_name}** in a way that:
+
+1. **Preserves Critical Information**: Keep all details essential for troubleshooting and investigation
+2. **Maintains Investigation Context**: Focus on information relevant to what the investigator was looking for
+3. **Reduces Verbosity**: Remove redundant details while preserving technical accuracy  
+4. **Highlights Key Findings**: Emphasize errors, warnings, unusual patterns, and actionable insights
+5. **Stays Concise**: Keep summary under {max_summary_tokens} tokens while preserving meaning
+
+## Summarization Guidelines:
+
+- **Always Preserve**: Error messages, warnings, status indicators, resource metrics, timestamps
+- **Intelligently Summarize**: Large lists by showing patterns, counts, and notable exceptions
+- **Focus On**: Non-default configurations, problematic settings, resource utilization issues
+- **Maintain**: Technical accuracy and context about what the data represents
+- **Format**: Clean, structured text suitable for continued technical investigation
+
+Your summary will be inserted as an observation in the ongoing investigation conversation.""")
+
+MCP_SUMMARIZATION_USER_TEMPLATE = PromptTemplate.from_template("""Below is the ongoing investigation conversation that provides context for what the investigator has been looking for and thinking about:
+
+## Investigation Context:
+=== CONVERSATION START ===
+{conversation_context}
+=== CONVERSATION END ===
+
+## Tool Result to Summarize:
+The investigator just executed `{server_name}.{tool_name}` and got the following output:
+
+=== TOOL OUTPUT START ===
+{result_text}
+=== TOOL OUTPUT END ===
+
+## Your Task:
+Based on the investigation context above, provide a concise summary of the tool result that:
+- Preserves information most relevant to what the investigator was looking for
+- Removes verbose or redundant details that don't impact the investigation
+- Maintains technical accuracy and actionable insights
+- Fits naturally as the next "Observation:" in the investigation conversation
+
+CRITICAL INSTRUCTION: You MUST return ONLY plain text. DO NOT include "Final Answer:", "Thought:", "Action:", or any other formatting. Just the summary text that will be inserted as an observation in the conversation.""")
