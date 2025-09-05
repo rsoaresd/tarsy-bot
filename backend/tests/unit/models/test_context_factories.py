@@ -14,9 +14,10 @@ from tarsy.models.constants import StageStatus
 from tarsy.models.processing_context import (
     AvailableTools,
     ChainContext,
-    MCPTool,
     StageContext,
+    ToolWithServer,
 )
+from mcp.types import Tool
 
 
 class ChainContextFactory:
@@ -138,80 +139,152 @@ class AvailableToolsFactory:
     
     @staticmethod
     def create_kubernetes_tools() -> AvailableTools:
-        """Create AvailableTools with Kubernetes-specific tools."""
+        """Create AvailableTools with Kubernetes-specific tools using official MCP Tool objects."""
         tools = [
-            MCPTool(
+            ToolWithServer(
                 server="kubernetes-server",
-                name="get_pods",
-                description="Get pod information and status",
-                parameters=[
-                    {"name": "namespace", "type": "string", "description": "Kubernetes namespace"},
-                    {"name": "label_selector", "type": "string", "description": "Label selector for filtering"}
-                ]
+                tool=Tool(
+                    name="get_pods",
+                    description="Get pod information and status",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "namespace": {
+                                "type": "string",
+                                "description": "Kubernetes namespace"
+                            },
+                            "label_selector": {
+                                "type": "string", 
+                                "description": "Label selector for filtering"
+                            }
+                        }
+                    }
+                )
             ),
-            MCPTool(
+            ToolWithServer(
                 server="kubernetes-server",
-                name="get_pod_logs",
-                description="Get logs from a specific pod",
-                parameters=[
-                    {"name": "pod_name", "type": "string", "description": "Name of the pod"},
-                    {"name": "namespace", "type": "string", "description": "Pod namespace"},
-                    {"name": "tail_lines", "type": "integer", "description": "Number of lines to tail"}
-                ]
+                tool=Tool(
+                    name="get_pod_logs",
+                    description="Get logs from a specific pod",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "pod_name": {
+                                "type": "string",
+                                "description": "Name of the pod"
+                            },
+                            "namespace": {
+                                "type": "string",
+                                "description": "Pod namespace"
+                            },
+                            "tail_lines": {
+                                "type": "integer",
+                                "description": "Number of lines to tail"
+                            }
+                        }
+                    }
+                )
             ),
-            MCPTool(
+            ToolWithServer(
                 server="kubernetes-server",
-                name="describe_pod",
-                description="Get detailed pod description including events",
-                parameters=[
-                    {"name": "pod_name", "type": "string", "description": "Name of the pod"},
-                    {"name": "namespace", "type": "string", "description": "Pod namespace"}
-                ]
+                tool=Tool(
+                    name="describe_pod",
+                    description="Get detailed pod description including events",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "pod_name": {
+                                "type": "string",
+                                "description": "Name of the pod"
+                            },
+                            "namespace": {
+                                "type": "string",
+                                "description": "Pod namespace"
+                            }
+                        }
+                    }
+                )
             )
         ]
         return AvailableTools(tools=tools)
     
     @staticmethod
     def create_aws_tools() -> AvailableTools:
-        """Create AvailableTools with AWS-specific tools."""
+        """Create AvailableTools with AWS-specific tools using official MCP Tool objects."""
         tools = [
-            MCPTool(
+            ToolWithServer(
                 server="aws-server",
-                name="describe_instances",
-                description="Describe EC2 instances",
-                parameters=[
-                    {"name": "instance_ids", "type": "array", "description": "List of instance IDs"},
-                    {"name": "filters", "type": "object", "description": "EC2 filters"}
-                ]
+                tool=Tool(
+                    name="describe_instances",
+                    description="Describe EC2 instances",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "instance_ids": {
+                                "type": "array",
+                                "description": "List of instance IDs"
+                            },
+                            "filters": {
+                                "type": "object",
+                                "description": "EC2 filters"
+                            }
+                        }
+                    }
+                )
             ),
-            MCPTool(
-                server="aws-server", 
-                name="get_cloudwatch_metrics",
-                description="Get CloudWatch metrics for resources",
-                parameters=[
-                    {"name": "metric_name", "type": "string", "description": "CloudWatch metric name"},
-                    {"name": "namespace", "type": "string", "description": "CloudWatch namespace"},
-                    {"name": "dimensions", "type": "object", "description": "Metric dimensions"}
-                ]
+            ToolWithServer(
+                server="aws-server",
+                tool=Tool(
+                    name="get_cloudwatch_metrics",
+                    description="Get CloudWatch metrics for resources",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "metric_name": {
+                                "type": "string",
+                                "description": "CloudWatch metric name"
+                            },
+                            "namespace": {
+                                "type": "string",
+                                "description": "CloudWatch namespace"
+                            },
+                            "dimensions": {
+                                "type": "object",
+                                "description": "Metric dimensions"
+                            }
+                        }
+                    }
+                )
             )
         ]
         return AvailableTools(tools=tools)
     
     @staticmethod
     def create_mixed_tools() -> AvailableTools:
-        """Create AvailableTools with tools from multiple servers."""
+        """Create AvailableTools with tools from multiple servers using official MCP Tool objects."""
         k8s_tools = AvailableToolsFactory.create_kubernetes_tools().tools
         aws_tools = AvailableToolsFactory.create_aws_tools().tools
         
         # Add a monitoring tool
-        monitoring_tool = MCPTool(
+        monitoring_tool = ToolWithServer(
             server="monitoring-server",
-            name="query_prometheus",
-            description="Execute Prometheus query",
-            parameters=[
-                {"name": "query", "type": "string", "description": "PromQL query"},
-                {"name": "time_range", "type": "string", "description": "Time range for query"}
-            ]
+            tool=Tool(
+                name="query_prometheus",
+                description="Execute Prometheus query",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "PromQL query"
+                        },
+                        "time_range": {
+                            "type": "string",
+                            "description": "Time range for query"
+                        }
+                    }
+                }
+            )
         )
         
         return AvailableTools(tools=k8s_tools + aws_tools + [monitoring_tool])

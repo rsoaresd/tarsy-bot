@@ -1,14 +1,15 @@
 """
-Phase 2: Tests using the new context models in real scenarios.
+Phase 2: Tests using the context models in real scenarios.
 
-This module demonstrates how the new ChainContext and StageContext models
+This module demonstrates how the ChainContext and StageContext models
 work in actual test scenarios, alongside the existing models.
 """
 
 
+from tarsy.agents.prompts.builders import PromptBuilder
 from tarsy.models.agent_execution_result import AgentExecutionResult
 from tarsy.models.constants import StageStatus
-from tarsy.models.processing_context import ChainContext, MCPTool, StageContext
+from tarsy.models.processing_context import ChainContext, StageContext, ToolWithServer
 from tests.unit.models.test_context_factories import (
     AvailableToolsFactory,
     ChainContextFactory,
@@ -172,9 +173,9 @@ class TestNewStageContextUsage:
         
         # Test formatted context generation
         formatted = context.format_previous_stages_context()
-        assert "## Results from 'Data Collection' stage:" in formatted
+        assert "### Results from 'Data Collection' stage:" in formatted
         assert "Collected instance metrics" in formatted
-        assert "## Results from 'Root Cause Analysis' stage:" in formatted
+        assert "### Results from 'Root Cause Analysis' stage:" in formatted
         assert "memory leak" in formatted
     
     def test_kubernetes_troubleshooting_scenario(self):
@@ -193,7 +194,8 @@ class TestNewStageContextUsage:
         assert "Check pod logs" in runbook
         
         # Verify tools are available
-        tools_format = context.available_tools.to_prompt_format()
+        builder = PromptBuilder()
+        tools_format = builder._format_available_actions(context.available_tools.tools)
         assert "kubernetes-server.get_pods" in tools_format
         assert "kubernetes-server.get_pod_logs" in tools_format
         assert "kubernetes-server.describe_pod" in tools_format
@@ -210,7 +212,8 @@ class TestNewStageContextUsage:
         tools = context.available_tools
         assert len(tools.tools) >= 6  # K8s + AWS + monitoring tools
         
-        tools_format = tools.to_prompt_format()
+        builder = PromptBuilder()
+        tools_format = builder._format_available_actions(tools.tools)
         assert "kubernetes-server" in tools_format
         assert "aws-server" in tools_format
         assert "monitoring-server" in tools_format
@@ -239,18 +242,23 @@ class TestAvailableToolsUsage:
         tools = AvailableToolsFactory.create_kubernetes_tools()
         
         assert len(tools.tools) == 3
-        assert all(isinstance(tool, MCPTool) for tool in tools.tools)
+        assert all(isinstance(tool, ToolWithServer) for tool in tools.tools)
         
         # Test tool details
-        get_pods_tool = next(tool for tool in tools.tools if tool.name == "get_pods")
+        get_pods_tool = next(tool for tool in tools.tools if tool.tool.name == "get_pods")
         assert get_pods_tool.server == "kubernetes-server"
-        assert "pod information" in get_pods_tool.description
-        assert len(get_pods_tool.parameters) == 2
+        assert "pod information" in get_pods_tool.tool.description
+        # Check that tool has parameters in inputSchema
+        input_schema = get_pods_tool.tool.inputSchema
+        assert input_schema is not None
+        assert 'properties' in input_schema
+        assert len(input_schema['properties']) == 2
         
         # Test prompt formatting
-        prompt = tools.to_prompt_format()
-        assert "kubernetes-server.get_pods: Get pod information and status" in prompt
-        assert "kubernetes-server.get_pod_logs: Get logs from a specific pod" in prompt
+        builder = PromptBuilder()
+        prompt = builder._format_available_actions(tools.tools)
+        assert "**kubernetes-server.get_pods**: Get pod information and status" in prompt
+        assert "**kubernetes-server.get_pod_logs**: Get logs from a specific pod" in prompt
     
     def test_mixed_tools_scenario(self):
         """Test AvailableTools with tools from multiple servers."""
@@ -263,7 +271,8 @@ class TestAvailableToolsUsage:
         assert "monitoring-server" in servers
         
         # Test comprehensive prompt format
-        prompt = tools.to_prompt_format()
+        builder = PromptBuilder()
+        prompt = builder._format_available_actions(tools.tools)
         assert "kubernetes-server.get_pods" in prompt
         assert "aws-server.describe_instances" in prompt
         assert "monitoring-server.query_prometheus" in prompt

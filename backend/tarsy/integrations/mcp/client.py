@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.types import Tool
 
 from tarsy.config.settings import Settings
 from tarsy.hooks.typed_context import mcp_interaction_context, mcp_list_context
@@ -99,7 +100,12 @@ class MCPClient:
         
         self._initialized = True
     
-    async def list_tools(self, session_id: str, server_name: Optional[str] = None, stage_execution_id: Optional[str] = None) -> Dict[str, List[Dict[str, Any]]]:
+    async def list_tools(
+        self,
+        session_id: str,
+        server_name: Optional[str] = None,
+        stage_execution_id: Optional[str] = None,
+    ) -> Dict[str, List[Tool]]:
         """List available tools from MCP servers."""
         if not self._initialized:
             await self.initialize()
@@ -124,18 +130,11 @@ class MCPClient:
                     try:
                         session = self.sessions[server_name]
                         tools_result = await session.list_tools()
-                        tools = []
-                        for tool in tools_result.tools:
-                            tool_dict = {
-                                "name": tool.name,
-                                "description": tool.description or "",
-                                "inputSchema": tool.inputSchema
-                            }
-                            tools.append(tool_dict)
-                        all_tools[server_name] = tools
+                        # Keep the official Tool objects with full schema information
+                        all_tools[server_name] = tools_result.tools
                         
                         # Log the successful response
-                        self._log_mcp_list_tools_response(server_name, tools, request_id)
+                        self._log_mcp_list_tools_response(server_name, tools_result.tools, request_id)
                         
                     except Exception as e:
                         logger.error(f"Error listing tools from {server_name}: {str(e)}")
@@ -146,26 +145,34 @@ class MCPClient:
                 for name, session in self.sessions.items():
                     try:
                         tools_result = await session.list_tools()
-                        tools = []
-                        for tool in tools_result.tools:
-                            tool_dict = {
-                                "name": tool.name,
-                                "description": tool.description or "",
-                                "inputSchema": tool.inputSchema
-                            }
-                            tools.append(tool_dict)
-                        all_tools[name] = tools
+                        # Keep the official Tool objects with full schema information
+                        all_tools[name] = tools_result.tools
                         
                         # Log the successful response for this server
-                        self._log_mcp_list_tools_response(name, tools, request_id)
+                        self._log_mcp_list_tools_response(name, tools_result.tools, request_id)
                         
                     except Exception as e:
                         logger.error(f"Error listing tools from {name}: {str(e)}")
                         self._log_mcp_list_tools_error(name, str(e), request_id)
                         all_tools[name] = []
             
+            # Convert Tool objects to dictionaries for JSON serialization in hook context
+            serializable_tools: Dict[str, List[Dict[str, Any]]] = {}
+            for srv_name, tools in all_tools.items():
+                if tools:
+                    serializable_tools[srv_name] = [
+                        {
+                            "name": tool.name,
+                            "description": tool.description or "",
+                            "inputSchema": tool.inputSchema or {}
+                        }
+                        for tool in tools
+                    ]
+                else:
+                    serializable_tools[srv_name] = []
+            
             # Update the interaction with result data
-            ctx.interaction.available_tools = all_tools
+            ctx.interaction.available_tools = serializable_tools
             
             # Complete the typed context with success
             await ctx.complete_success({})
@@ -357,7 +364,7 @@ class MCPClient:
         mcp_comm_logger.info(f"Target: {target}")
         mcp_comm_logger.info(f"=== END LIST TOOLS REQUEST [ID: {request_id}] ===")
     
-    def _log_mcp_list_tools_response(self, server_name: str, tools: List[Dict[str, Any]], request_id: str):
+    def _log_mcp_list_tools_response(self, server_name: str, tools: List[Tool], request_id: str):
         """Log the MCP list tools response."""
         mcp_comm_logger.info(f"=== MCP LIST TOOLS RESPONSE [{server_name}] [ID: {request_id}] ===")
         mcp_comm_logger.info(f"Request ID: {request_id}")
@@ -365,9 +372,9 @@ class MCPClient:
         mcp_comm_logger.info(f"Tools count: {len(tools)}")
         mcp_comm_logger.info("--- TOOLS ---")
         for i, tool in enumerate(tools):
-            mcp_comm_logger.info(f"Tool {i+1}: {tool['name']}")
-            mcp_comm_logger.info(f"  Description: {tool['description']}")
-            mcp_comm_logger.info(f"  Schema: {json.dumps(tool['inputSchema'], indent=2, default=str)}")
+            mcp_comm_logger.info(f"Tool {i+1}: {tool.name}")
+            mcp_comm_logger.info(f"  Description: {tool.description or 'No description'}")
+            mcp_comm_logger.info(f"  Schema: {json.dumps(tool.inputSchema or {}, indent=2, default=str)}")
         mcp_comm_logger.info(f"=== END LIST TOOLS RESPONSE [ID: {request_id}] ===")
     
     def _log_mcp_list_tools_error(self, server_name: str, error_message: str, request_id: str):

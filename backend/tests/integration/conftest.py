@@ -6,6 +6,7 @@ This module provides fixtures for mocking external services in e2e tests.
 
 import asyncio
 from unittest.mock import AsyncMock, Mock
+from mcp.types import Tool
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
@@ -57,35 +58,20 @@ def mock_settings():
     
     # Updated LLM providers configuration to match EP-0013
     settings.llm_providers = {
-        "google-default": {
-            "model": "gemini-2.5-flash",
-            "api_key_env": "GOOGLE_API_KEY",
-            "type": "google"
-        },
-        "openai-default": {
-            "model": "gpt-5",
-            "api_key_env": "OPENAI_API_KEY", 
-            "type": "openai"
-        },
-        "xai-default": {
-            "model": "grok-4-latest",
-            "api_key_env": "XAI_API_KEY",
-            "type": "xai"
-        },
-        "anthropic-default": {
-            "model": "claude-4-sonnet",
-            "api_key_env": "ANTHROPIC_API_KEY",
-            "type": "anthropic"
-        }
+        "google-default": {"model": "gemini-2.5-flash", "api_key_env": "GOOGLE_API_KEY", "type": "google"},
+        "openai-default": {"model": "gpt-5", "api_key_env": "OPENAI_API_KEY", "type": "openai"},
+        "xai-default": {"model": "grok-4-latest", "api_key_env": "XAI_API_KEY", "type": "xai"},
+        "anthropic-default": {"model": "claude-4-sonnet", "api_key_env": "ANTHROPIC_API_KEY", "type": "anthropic"},
     }
     
-    # Mock the get_llm_config method that Settings class provides  
-    def mock_get_llm_config(provider: str):
+    # Mock the get_llm_config method that Settings class provides
+    from tarsy.models.llm_models import LLMProviderConfig
+
+    def mock_get_llm_config(provider: str) -> LLMProviderConfig:
         if provider not in settings.llm_providers:
             raise ValueError(f"Unsupported LLM provider: {provider}")
-        base_config = settings.llm_providers[provider]
-        # Map provider to correct API key based on type
-        provider_type = base_config.type  # Type-safe field access
+        base_dict = settings.llm_providers[provider]
+        provider_type = base_dict["type"]
         if provider_type == "google":
             api_key = settings.google_api_key
         elif provider_type == "openai":
@@ -96,8 +82,12 @@ def mock_settings():
             api_key = settings.anthropic_api_key
         else:
             api_key = ""
-            
-        return base_config.model_copy(update={"api_key": api_key})
+
+        cfg = LLMProviderConfig.model_validate(base_dict)
+        return cfg.model_copy(update={
+            "api_key": api_key,
+            "disable_ssl_verification": getattr(settings, "disable_ssl_verification", False),
+        })
     
     settings.get_llm_config = mock_get_llm_config
     return settings
@@ -340,34 +330,34 @@ def mock_mcp_client():
     client.initialize = AsyncMock()
     client.close = AsyncMock()
     
-    # Mock tool listing - use simpler return structure
+    # Mock tool listing - use proper Tool objects
     def mock_list_tools_sync(session_id, server_name=None, stage_execution_id=None):
         """Mock tool listing response - synchronous version."""
         if server_name == "kubernetes-server":
             return {
                 "kubernetes-server": [
-                    {
-                        "name": "kubectl_get_namespace",
-                        "description": "Get namespace information",
-                        "parameters": {
+                    Tool(
+                        name="kubectl_get_namespace",
+                        description="Get namespace information",
+                        inputSchema={
                             "type": "object",
                             "properties": {
                                 "namespace": {"type": "string", "description": "Namespace name"}
                             },
                             "required": ["namespace"]
                         }
-                    },
-                    {
-                        "name": "kubectl_get_pods", 
-                        "description": "List pods in namespace",
-                        "parameters": {
+                    ),
+                    Tool(
+                        name="kubectl_get_pods", 
+                        description="List pods in namespace",
+                        inputSchema={
                             "type": "object",
                             "properties": {
                                 "namespace": {"type": "string", "description": "Namespace name"}
                             },
                             "required": ["namespace"]
                         }
-                    }
+                    )
                 ]
             }
         return {}
