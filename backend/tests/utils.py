@@ -1524,7 +1524,7 @@ class DataMaskingFactory:
         return base_data
     
     @staticmethod
-    def create_masking_rules(**overrides):
+    def create_masking_rules(*extra_rules):
         """Create a list of masking rules."""
         base_data = [
             {
@@ -1538,14 +1538,15 @@ class DataMaskingFactory:
                 "mask_length": 16
             }
         ]
-        base_data.update(overrides)
+        if extra_rules:
+            base_data.extend(extra_rules)
         return base_data
 
     @staticmethod
     def create_test_data_with_secrets(**overrides):
         """Create test data containing sensitive information."""
         base_data = {
-            "api_key": "sk_test_123456789012345678901234567890",
+            "api_key": "not-a-real-api-key-123456789012345678901234567890",
             "password": "mySecretPassword123",
             "token": "dGhpc2lzYWxvbmdlcmJhc2U2NGVuY29kZWR2YWx1ZQ==",
             "normal_field": "normal_value",
@@ -1585,7 +1586,7 @@ metadata:
         """Create a nested data structure for testing."""
         return {
             "result": {
-                "config": "api_key: sk_123456789012345678901234567890",
+                "config": "api_key: not-a-real-api-key-123456789012345678901234567890",
                 "normal_field": "normal_value"
             },
             "string_field": "password: secret123",
@@ -1593,7 +1594,7 @@ metadata:
             "boolean_field": True,
             "null_field": None,
             "nested": {
-                "array": ["api_key: sk_123456789012345678901234567890"]
+                "array": ["api_key: not-a-real-api-key-123456789012345678901234567890"]
             }
         }
 
