@@ -280,17 +280,66 @@ function InteractionDetails({
   );
 };
 
-  const renderMCPDetails = (mcpDetails: MCPInteraction) => (
-    <Stack spacing={2}>
-      {/* Only show Tool Call section for actual tool calls, not tool lists */}
-      {!isToolList(mcpDetails) && (
+  const renderMCPDetails = (mcpDetails: MCPInteraction) => {
+    const isFailed = mcpDetails.success === false;
+    
+    return (
+      <Stack spacing={2}>
+        {/* Show error section first for failed interactions */}
+        {isFailed && (
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{
+                  px: 1,
+                  py: 0.5,
+                  bgcolor: 'error.main',
+                  color: 'error.contrastText',
+                  borderRadius: 1,
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  MCP Error
+                </Box>
+              </Box>
+              <CopyButton
+                text={mcpDetails.error_message || 'MCP tool call failed - no response received'}
+                variant="icon"
+                size="small"
+                tooltip="Copy error message"
+              />
+            </Box>
+            <Typography 
+              variant="body2" 
+              sx={{ 
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                p: 1.5,
+                bgcolor: 'grey.50',
+                borderRadius: 1,
+                border: 1,
+                borderColor: 'error.main',
+                color: 'error.main',
+                fontFamily: 'monospace',
+                fontSize: '0.875rem'
+              }}
+            >
+              {mcpDetails.error_message || 'MCP tool call failed - no response received'}
+            </Typography>
+          </Box>
+        )}
+        
+        {/* Only show Tool Call section for actual tool calls, not tool lists */}
+        {!isToolList(mcpDetails) && (
         <Box>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
               Tool Call
             </Typography>
             <CopyButton
-              text={`${mcpDetails.tool_name}(${JSON.stringify(mcpDetails.parameters, null, 2)})`}
+              text={`${mcpDetails.tool_name}(${JSON.stringify(mcpDetails.tool_arguments, null, 2)})`}
               variant="icon"
               size="small"
               tooltip="Copy tool call"
@@ -311,8 +360,8 @@ function InteractionDetails({
             >
               {mcpDetails.tool_name}
             </Typography>
-            {mcpDetails.parameters && Object.keys(mcpDetails.parameters).length > 0 && (
-              <JsonDisplay data={mcpDetails.parameters} collapsed={1} />
+            {mcpDetails.tool_arguments && Object.keys(mcpDetails.tool_arguments).length > 0 && (
+              <JsonDisplay data={mcpDetails.tool_arguments} collapsed={1} />
             )}
           </Box>
         </Box>
@@ -351,7 +400,7 @@ function InteractionDetails({
             text={JSON.stringify(
               isToolList(mcpDetails)
                 ? mcpDetails.available_tools 
-                : mcpDetails.result, 
+                : mcpDetails.tool_result, 
               null, 2
             )}
             variant="icon"
@@ -360,7 +409,7 @@ function InteractionDetails({
           />
         </Box>
         <JsonDisplay 
-          data={isToolList(mcpDetails) ? mcpDetails.available_tools : mcpDetails.result} 
+          data={isToolList(mcpDetails) ? mcpDetails.available_tools : mcpDetails.tool_result} 
           collapsed={isToolList(mcpDetails) ? false : 1}
           maxHeight={800}
         />
@@ -379,7 +428,8 @@ function InteractionDetails({
         </Stack>
       </Box>
     </Stack>
-  );
+    );
+  };
 
   const renderSystemDetails = (systemDetails: SystemEvent) => (
     <Stack spacing={2}>
@@ -462,8 +512,8 @@ function InteractionDetails({
           mcpFormatted += `TOOL: ${mcp.tool_name}\n`;
           mcpFormatted += `SERVER: ${mcp.server_name}\n`;
           // execution_time_ms removed in EP-0010
-          mcpFormatted += `\nPARAMETERS:\n${JSON.stringify(mcp.parameters, null, 2)}\n\n`;
-          mcpFormatted += `RESULT:\n${JSON.stringify(mcp.result, null, 2)}`;
+          mcpFormatted += `\nPARAMETERS:\n${JSON.stringify(mcp.tool_arguments, null, 2)}\n\n`;
+          mcpFormatted += `RESULT:\n${JSON.stringify(mcp.tool_result, null, 2)}`;
         }
         return mcpFormatted;
       }
@@ -512,7 +562,7 @@ function InteractionDetails({
         if (isToolList(mcp)) {
           return `Tool List from ${mcp.server_name}\n\n---\n\n${JSON.stringify(mcp.available_tools, null, 2)}`;
         } else {
-          return `${mcp.tool_name}(${JSON.stringify(mcp.parameters, null, 2)})\n\n---\n\n${JSON.stringify(mcp.result, null, 2)}`;
+          return `${mcp.tool_name}(${JSON.stringify(mcp.tool_arguments, null, 2)})\n\n---\n\n${JSON.stringify(mcp.tool_result, null, 2)}`;
         }
       }
       case 'system': {
