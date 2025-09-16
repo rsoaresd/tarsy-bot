@@ -56,7 +56,6 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
   // Dynamic key-value pairs
   const [keyValuePairs, setKeyValuePairs] = useState<KeyValuePair[]>([
     { id: generateId(), key: 'severity', value: 'critical' },
-    { id: generateId(), key: 'environment', value: 'production' },
     { id: generateId(), key: 'cluster', value: 'https://api.crc.testing:6443' },
     { id: generateId(), key: 'namespace', value: 'superman-dev' },
     { id: generateId(), key: 'message', value: 'Namespace is stuck in terminating state' }
