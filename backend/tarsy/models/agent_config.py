@@ -10,9 +10,10 @@ This module contains all configuration models
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 from .constants import IterationStrategy
+from .mcp_transport_config import TransportConfig
 
 
 # =============================================================================
@@ -195,8 +196,9 @@ class AgentConfigModel(BaseModel):
 class MCPServerConfigModel(BaseModel):
     """Configuration model for a single MCP server.
     
-    Defines how to connect to and use an MCP server, including connection
-    parameters and specialized instructions for the server's capabilities.
+    Defines how to connect to and use an MCP server, including transport-specific
+    configuration and specialized instructions for the server's capabilities.
+    Supports stdio, HTTP, and SSE transports via discriminated unions.
     """
     
     model_config = ConfigDict(
@@ -218,9 +220,10 @@ class MCPServerConfigModel(BaseModel):
         default=True,
         description="Whether this server is enabled for use"
     )
-    connection_params: Dict[str, Any] = Field(
+    transport: TransportConfig = Field(
         ...,
-        description="Server connection parameters (command, args, environment, etc.)"
+        description="Transport-specific configuration (stdio, HTTP, or SSE)",
+        discriminator='type'
     )
     instructions: str = Field(
         default="",

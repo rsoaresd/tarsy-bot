@@ -18,6 +18,7 @@ import copy
 from typing import Dict, Any
 from tarsy.models.llm_models import LLMProviderConfig
 from tarsy.models.constants import DEFAULT_LLM_TEMPERATURE
+from tarsy.models.mcp_transport_config import TRANSPORT_HTTP, TRANSPORT_STDIO, TRANSPORT_SSE
 
 
 # ==============================================================================
@@ -81,10 +82,25 @@ BUILTIN_MCP_SERVERS: Dict[str, Dict[str, Any]] = {
         "server_id": "kubernetes-server",
         "server_type": "kubernetes",
         "enabled": True,
-        "connection_params": {
+        "transport": {
+            "type": TRANSPORT_STDIO,
             "command": "npx",
             "args": ["-y", "kubernetes-mcp-server@latest", "--read-only", "--disable-destructive", "--kubeconfig", "${KUBECONFIG}"]
         },
+        # "transport": {
+        #     "type": TRANSPORT_SSE,
+        #     "url": "http://localhost:8081/sse",
+        #     # "bearer_token": "${KUBE_MCP_SERVER_TOKEN}",
+        #     # "verify_ssl": False,
+        #     "timeout": 10
+        # },
+        # "transport": {
+        #     "type": TRANSPORT_HTTP,
+        #     "url": "http://localhost:8081/mcp",
+        #     # "bearer_token": "${KUBE_MCP_SERVER_TOKEN}",
+        #     # "verify_ssl": False,
+        #     "timeout": 10
+        # },
         "instructions": """For Kubernetes operations:
 - Be careful with cluster-scoped resource listings in large clusters
 - Always prefer namespaced queries when possible
@@ -101,7 +117,8 @@ BUILTIN_MCP_SERVERS: Dict[str, Dict[str, Any]] = {
     #     "server_id": "argocd-server", 
     #     "server_type": "argocd",
     #     "enabled": True,
-    #     "connection_params": {
+    #     "transport": {
+    #         "type": TRANSPORT_STDIO,
     #         "command": "npx",
     #         "args": ["-y", "argocd-mcp-server@latest", "--server", "${ARGOCD_SERVER}", "--auth-token", "${ARGOCD_TOKEN}"]
     #     },

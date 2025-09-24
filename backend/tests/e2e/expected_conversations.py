@@ -179,8 +179,8 @@ Format:
 # Expected stages for the complete alert processing flow
 EXPECTED_STAGES = {
     'data-collection': {
-        'llm_count': 5,  # 4 regular interactions plus 1 tool result summarization interaction
-        'mcp_count': 5,  # Tool discovery calls + tool execution calls are all tracked as MCP interactions
+        'llm_count': 6,  # 5 regular interactions plus 1 tool result summarization interaction  
+        'mcp_count': 6,  # Tool discovery calls + tool execution calls are all tracked as MCP interactions
         'interactions': [
             # MCP 1 - Tool list discovery for kubernetes-server (first interaction)
             {'type': 'mcp', 'position': 1, 'communication_type': 'tool_list', 'success': True, 'server_name': 'kubernetes-server'},
@@ -197,12 +197,16 @@ EXPECTED_STAGES = {
             # LLM 3 - Third ReAct iteration
             {'type': 'llm', 'position': 3, 'success': True, 'conversation_index': 7, 'input_tokens': 220, 'output_tokens': 75, 'total_tokens': 295},
             # LLM 4 - Summarization of large system info result (separate LLM call, not in conversation)
-            # The summarization interaction happens within the MCPtool call interaction, so it's recorded before the MCP Ineraction
+            # The summarization interaction happens within the collect_system_info MCP call interaction, so it's recorded before the MCP interaction
             {'type': 'llm', 'position': 4, 'success': True, 'conversation': EXPECTED_DATA_COLLECTION_SUMMARIZATION_CONVERSATION, 'input_tokens': 100, 'output_tokens': 50, 'total_tokens': 150},
             # MCP 5 - Successful collect_system_info call (will trigger summarization)
             {'type': 'mcp', 'position': 5, 'communication_type': 'tool_call', 'success': True, 'tool_name': 'collect_system_info', 'server_name': 'test-data-server'},
-            # LLM 5 - Final completion with summarized observation
-            {'type': 'llm', 'position': 5, 'success': True, 'conversation_index': 9, 'input_tokens': 315, 'output_tokens': 125, 'total_tokens': 440}
+            # LLM 5 - Fourth ReAct iteration (kubectl events call) - continues after system info
+            {'type': 'llm', 'position': 5, 'success': True, 'conversation_index': 9, 'input_tokens': 200, 'output_tokens': 60, 'total_tokens': 260},
+            # MCP 6 - Successful kubectl_get events call
+            {'type': 'mcp', 'position': 6, 'communication_type': 'tool_call', 'success': True, 'tool_name': 'kubectl_get', 'server_name': 'kubernetes-server'},
+            # LLM 6 - Final completion with events observation
+            {'type': 'llm', 'position': 6, 'success': True, 'conversation_index': 11, 'input_tokens': 315, 'output_tokens': 125, 'total_tokens': 440}
         ]
     },
     'verification': {
@@ -485,7 +489,7 @@ Action Input: {"resource": "namespace", "name": "stuck-namespace"}"""
 Action: test-data-server.collect_system_info
 Action Input: {"detailed": false}"""
         },
-        # 4th LLM interaction - Gets summarized system info and provides final answer
+        # 4th LLM interaction - Gets summarized system info and continues with HTTP check
         {
             "role": "user",
             "content": """Observation: test-data-server.collect_system_info: {
@@ -494,6 +498,18 @@ Action Input: {"detailed": false}"""
         },
         {
             "role": "assistant",
+            "content": """Thought: Let me gather more information about the current state.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "events", "namespace": "test-namespace"}"""
+        },
+        {
+            "role": "user",
+            "content": """Observation: kubernetes-server.kubectl_get: {
+  "result": "Mock kubectl get events response"
+}"""
+        },
+        {
+            "role": "assistant", 
             "content": """Final Answer: Data collection completed. Found namespace 'stuck-namespace' in Terminating state with finalizers blocking deletion."""
         }
     ]
@@ -692,6 +708,12 @@ Action Input: {"detailed": false}
 Observation: test-data-server.collect_system_info: {
   "result": "Summarized: System healthy, CPU 45%, Memory 33%, Disk 76%, Network OK."
 }
+Thought: Let me gather more information about the current state.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "events", "namespace": "test-namespace"}
+Observation: kubernetes-server.kubectl_get: {
+  "result": "Mock kubectl get events response"
+}
 Final Answer: Data collection completed. Found namespace 'stuck-namespace' in Terminating state with finalizers blocking deletion.
 <!-- Analysis Result END -->
 
@@ -817,6 +839,12 @@ Action: test-data-server.collect_system_info
 Action Input: {"detailed": false}
 Observation: test-data-server.collect_system_info: {
   "result": "Summarized: System healthy, CPU 45%, Memory 33%, Disk 76%, Network OK."
+}
+Thought: Let me gather more information about the current state.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "events", "namespace": "test-namespace"}
+Observation: kubernetes-server.kubectl_get: {
+  "result": "Mock kubectl get events response"
 }
 Final Answer: Data collection completed. Found namespace 'stuck-namespace' in Terminating state with finalizers blocking deletion.
 <!-- Analysis Result END -->
