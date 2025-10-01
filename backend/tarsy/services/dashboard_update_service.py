@@ -8,21 +8,32 @@ performance and user experience.
 
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 from dataclasses import dataclass
 
 from tarsy.utils.logger import get_module_logger
 
+from tarsy.models.constants import AlertSessionStatus
 from tarsy.services.dashboard_broadcaster import DashboardBroadcaster
 
 logger = get_module_logger(__name__)
+
+# Type alias for session status - derived from AlertSessionStatus enum values
+# This provides compile-time type safety while maintaining
+# the enum as the single source of truth
+SessionStatusLiteral = Literal[
+    AlertSessionStatus.PENDING.value,
+    AlertSessionStatus.IN_PROGRESS.value,
+    AlertSessionStatus.COMPLETED.value,
+    AlertSessionStatus.FAILED.value
+]
 
 
 @dataclass
 class SessionSummary:
     """Summary information for active sessions."""
     session_id: str
-    status: str  # "active", "completed", "error", "timeout"
+    status: SessionStatusLiteral  # Must be a valid AlertSessionStatus enum value
     agent_type: Optional[str] = None
     start_time: Optional[datetime] = None
     last_activity: Optional[datetime] = None
@@ -63,14 +74,14 @@ class DashboardUpdateService:
         self.session_tracker_task: Optional[asyncio.Task] = None
         self.running = False
     
-    async def start(self):
+    async def start(self) -> None:
         """Start background tasks for session tracking."""
         if not self.running:
             self.running = True
             self.session_tracker_task = asyncio.create_task(self._session_tracker())
             logger.info("DashboardUpdateService started")
     
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop background tasks."""
         self.running = False
         
@@ -134,20 +145,22 @@ class DashboardUpdateService:
     async def process_session_status_change(
         self, 
         session_id: str, 
-        status: str, 
+        status: SessionStatusLiteral, 
         details: Optional[Dict[str, Any]] = None
     ) -> int:
         """
-        Process session status change (started, completed, error, etc.).
+        Process session status change.
         
         Args:
             session_id: Session identifier
-            status: New session status
+            status: New session status (must be a valid AlertSessionStatus enum value)
             details: Additional status details
             
         Returns:
             Number of clients the update was sent to
         """
+        logger.debug(f"Processing session status change for {session_id}: status={status}")
+        
         # Update session summary
         if session_id not in self.active_sessions:
             self.active_sessions[session_id] = SessionSummary(
@@ -156,9 +169,11 @@ class DashboardUpdateService:
                 start_time=datetime.now(),
                 last_activity=datetime.now()
             )
+            logger.debug(f"Created new session summary for {session_id}")
         else:
             self.active_sessions[session_id].status = status
             self.active_sessions[session_id].last_activity = datetime.now()
+            logger.debug(f"Updated existing session summary for {session_id}")
         
         # Add details if provided
         if details:
@@ -180,12 +195,18 @@ class DashboardUpdateService:
         if details:
             status_update.update(details)
         
+        logger.info(f"Broadcasting session status update for {session_id}: status={status}")
+        
         # Broadcast immediately for status changes
         sent_count = await self._broadcast_update(status_update)
         
+        logger.info(f"Session status update for {session_id} sent to {sent_count} clients")
+        
         # Move to history if session is completed
-        if status in ["completed", "error", "timeout"]:
+        # Use enum to ensure we catch all terminal statuses consistently
+        if status in AlertSessionStatus.terminal_values():
             self._archive_session(session_id)
+            logger.debug(f"Archived session {session_id} after terminal status: {status}")
         
         return sent_count
     
@@ -218,12 +239,12 @@ class DashboardUpdateService:
     
     # Private methods
     
-    def _update_session_from_llm(self, session_id: str, interaction_data: Dict[str, Any]):
+    def _update_session_from_llm(self, session_id: str, interaction_data: Dict[str, Any]) -> None:
         """Update session summary from LLM interaction."""
         if session_id not in self.active_sessions:
             self.active_sessions[session_id] = SessionSummary(
                 session_id=session_id,
-                status="active",
+                status=AlertSessionStatus.IN_PROGRESS.value,
                 start_time=datetime.now(),
                 last_activity=datetime.now()
             )
@@ -236,12 +257,12 @@ class DashboardUpdateService:
         if not interaction_data.get('success', True):
             session.errors_count += 1
     
-    def _update_session_from_mcp(self, session_id: str, communication_data: Dict[str, Any]):
+    def _update_session_from_mcp(self, session_id: str, communication_data: Dict[str, Any]) -> None:
         """Update session summary from MCP communication."""
         if session_id not in self.active_sessions:
             self.active_sessions[session_id] = SessionSummary(
                 session_id=session_id,
-                status="active",
+                status=AlertSessionStatus.IN_PROGRESS.value,
                 start_time=datetime.now(),
                 last_activity=datetime.now()
             )
@@ -284,13 +305,9 @@ class DashboardUpdateService:
     async def _broadcast_update(self, update: Dict[str, Any]) -> int:
         """Broadcast single update via broadcaster."""
         try:
-            # Add debug logging to understand message routing
-            logger.debug(f"_broadcast_update called with update: {update}")
-            
             # If this update is session-specific (contains session_id), send to both channels
             if 'session_id' in update:
                 session_id = update['session_id']
-                logger.debug(f"Broadcasting session-specific update for session {session_id}: {update['type']}")
                 
                 # Send to session-specific channel for detail views
                 session_count = await self.broadcaster.broadcast_session_update(session_id, update)
@@ -298,24 +315,22 @@ class DashboardUpdateService:
                 # FIXED: Send ALL session-specific updates to dashboard channel too
                 # This includes llm_interaction, mcp_communication, and session_status_change
                 # This ensures the dashboard receives real-time updates during processing
-                logger.debug(f"Also broadcasting session update to dashboard channel: {update['type']}")
                 dashboard_count = await self.broadcaster.broadcast_dashboard_update(update)
                 return session_count + dashboard_count
             else:
                 # Send general updates to dashboard channel
-                logger.debug(f"Broadcasting general dashboard update: {update['type']}")
                 return await self.broadcaster.broadcast_dashboard_update(update)
         except Exception as e:
             logger.error(f"Failed to broadcast dashboard update: {str(e)}")
             return 0
     
-    def _archive_session(self, session_id: str):
+    def _archive_session(self, session_id: str) -> None:
         """Remove completed session from active sessions."""
         if session_id in self.active_sessions:
             del self.active_sessions[session_id]
             logger.debug(f"Archived completed session: {session_id}")
     
-    async def _session_tracker(self):
+    async def _session_tracker(self) -> None:
         """Background task to track session changes and send heartbeats."""
         while self.running:
             try:
