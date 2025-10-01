@@ -91,6 +91,19 @@ make containers-deploy-fresh  # Clean rebuild including database
 - **Check status:** `make containers-status`
 - **Clean up:** `make containers-clean` (removes all containers and data)
 
+### OpenShift/Kubernetes Deployment
+
+For deploying TARSy to OpenShift or Kubernetes clusters:
+
+```bash
+# Complete deployment with local builds
+make openshift-deploy
+```
+
+**📖 For complete OpenShift deployment guide**: See [deploy/README.md](deploy/README.md)
+
+This deployment is designed for development and testing environments, serving as a reference for production deployments in separate repositories.
+
 ## Key Features
 
 - **🛠️ Configuration-Based Agents**: Deploy new agents and chain definitions via YAML configuration without code changes
@@ -254,7 +267,7 @@ npx -y kubernetes-mcp-server@latest --kubeconfig ~/.kube/config --help
 
 ### Core API
 - `GET /` - Health check endpoint
-- `GET /health` - Comprehensive health check with service status
+- `GET /health` - Comprehensive health check with service status and warnings
 - `POST /api/v1/alerts` - Submit a new alert for processing
 - `GET /api/v1/alert-types` - Get supported alert types
 - `GET /api/v1/session-id/{alert_id}` - Get session ID for alert tracking
@@ -265,6 +278,9 @@ npx -y kubernetes-mcp-server@latest --kubeconfig ~/.kube/config --help
 - `GET /api/v1/history/sessions` - List alert processing sessions with filtering and pagination
 - `GET /api/v1/history/sessions/{session_id}` - Get detailed session with chronological timeline
 - `GET /api/v1/history/health` - History service health check and database status
+
+### System API
+- `GET /api/v1/system/warnings` - Active system warnings (MCP/LLM init failures, etc.)
 
 ## Development
 

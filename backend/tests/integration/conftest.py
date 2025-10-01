@@ -238,8 +238,14 @@ def mock_llm_manager():
     """Mock LLM manager for testing."""
     manager = Mock(spec=LLMManager)
     manager.is_available.return_value = True
-    manager.list_available_providers.return_value = ["gemini", "openai"]
-    manager.get_availability_status.return_value = {"gemini": "available", "openai": "available"}
+    manager.list_available_providers.return_value = ["google-default", "openai-default", "xai-default", "anthropic-default"]
+    manager.get_availability_status.return_value = {
+        "google-default": "available",
+        "openai-default": "available",
+        "xai-default": "available",
+        "anthropic-default": "available"
+    }
+    manager.get_failed_providers = Mock(return_value={})  # No failed providers by default
     
     # Create mock client
     mock_client = Mock(spec=LLMClient)
@@ -386,6 +392,10 @@ problematic-pod-12345   0/1     Terminating   0          45m"""
     
     # Use AsyncMock with side_effect to track calls and return dynamic responses
     client.call_tool = AsyncMock(side_effect=mock_call_tool_sync)
+    
+    # Mock get_failed_servers - return empty dict (no failures by default)
+    client.get_failed_servers = Mock(return_value={})
+    
     return client
 
 

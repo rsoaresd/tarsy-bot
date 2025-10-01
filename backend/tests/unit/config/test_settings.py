@@ -178,7 +178,7 @@ class TestSettingsYAMLConfiguration:
         assert set(providers.keys()) == set(builtin_providers.keys())
     
     def test_yaml_provider_validation_invalid_type(self):
-        """Test validation rejects providers with invalid type."""
+        """Test validation fails fast with invalid provider type."""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
             content = {
                 'llm_providers': {
@@ -192,38 +192,20 @@ class TestSettingsYAMLConfiguration:
             import yaml
             yaml.safe_dump(content, f)
             
-            with patch('tarsy.utils.logger.get_module_logger') as mock_get_logger:
-                mock_logger = mock_get_logger.return_value
-                settings = Settings(llm_config_path=f.name)
-                providers = settings.llm_providers
-                
-                # Should log validation error
-                mock_logger.error.assert_called()
-                error_message = str(mock_logger.error.call_args)
-                # Pydantic validation error should mention the field validation failure
-                assert ("validation error" in error_message.lower() and 
-                       ("type" in error_message.lower() or "literal_error" in error_message.lower()))
-                
-                # Invalid provider should not be included
-                assert 'invalid-provider' not in providers
+            # Should raise ValueError for invalid configuration
+            settings = Settings(llm_config_path=f.name)
+            with pytest.raises(ValueError, match="Invalid LLM provider configurations"):
+                _ = settings.llm_providers
             
             os.unlink(f.name)
     
     def test_yaml_provider_validation_missing_fields(self, missing_fields_yaml_file):
-        """Test validation rejects providers with missing required fields."""
+        """Test validation fails fast with missing required fields."""
         settings = Settings(llm_config_path=missing_fields_yaml_file)
-        providers = settings.llm_providers
         
-        # Invalid provider should not be included due to missing required fields
-        assert 'incomplete-provider' not in providers
-        
-        # Should only contain valid built-in providers
-        from tarsy.config.builtin_config import get_builtin_llm_providers
-        builtin_providers = get_builtin_llm_providers()
-        
-        # All returned providers should be built-in ones (invalid provider rejected)
-        for provider_name in providers:
-            assert provider_name in builtin_providers
+        # Should raise ValueError for invalid configuration (missing required fields)
+        with pytest.raises(ValueError, match="Invalid LLM provider configurations"):
+            _ = settings.llm_providers
 
 
 @pytest.mark.unit
@@ -436,6 +418,123 @@ class TestSettingsDatabaseURL:
         assert settings.postgres_pool_timeout == 60
         assert settings.postgres_pool_recycle == 7200
         assert settings.postgres_pool_pre_ping is False
+
+    def test_database_url_composed_from_components(self):
+        """Test database URL composed from separate components."""
+        with patch('tarsy.config.settings.is_testing', return_value=False):
+            settings = Settings(
+                database_host="db.example.com",
+                database_port=5433,
+                database_user="myuser",
+                database_password="mypass",
+                database_name="mydb"
+            )
+            
+            expected_url = "postgresql://myuser:mypass@db.example.com:5433/mydb"
+            assert settings.database_url == expected_url
+
+    def test_database_url_composed_with_defaults(self):
+        """Test database URL composed with default values."""
+        with patch('tarsy.config.settings.is_testing', return_value=False):
+            settings = Settings(database_password="testpass")
+            
+            # Should use defaults for other components
+            expected_url = "postgresql://tarsy:testpass@localhost:5432/tarsy"
+            assert settings.database_url == expected_url
+
+    def test_database_url_no_password_falls_back_to_sqlite(self):
+        """Test that without password, falls back to SQLite."""
+        with patch('tarsy.config.settings.is_testing', return_value=False):
+            settings = Settings(
+                database_host="db.example.com",
+                database_user="myuser",
+                database_name="mydb"
+                # No password provided
+            )
+            
+            # Should fall back to SQLite
+            assert settings.database_url == "sqlite:///history.db"
+
+    def test_database_url_empty_password_falls_back_to_sqlite(self):
+        """Test that empty password falls back to SQLite."""
+        with patch('tarsy.config.settings.is_testing', return_value=False):
+            settings = Settings(
+                database_host="db.example.com", 
+                database_password="",  # Empty password
+                database_user="myuser"
+            )
+            
+            # Should fall back to SQLite
+            assert settings.database_url == "sqlite:///history.db"
+
+    def test_database_url_explicit_overrides_composition(self):
+        """Test explicit database_url overrides component composition."""
+        explicit_url = "postgresql://explicit:user@explicit.host:9999/explicitdb"
+        
+        with patch('tarsy.config.settings.is_testing', return_value=False):
+            settings = Settings(
+                database_url=explicit_url,
+                database_host="should.be.ignored.com",
+                database_password="should_be_ignored",
+                database_user="ignored_user"
+            )
+            
+            # Should use explicit URL, not composed one
+            assert settings.database_url == explicit_url
+
+    def test_database_url_testing_overrides_composition(self):
+        """Test testing environment overrides component composition."""
+        with patch('tarsy.config.settings.is_testing', return_value=True):
+            settings = Settings(
+                database_host="production.db.com",
+                database_password="prodpass",
+                database_user="produser"
+            )
+            
+            # Should use in-memory SQLite for testing, ignoring components
+            assert settings.database_url == "sqlite:///:memory:"
+
+    def test_database_component_defaults(self):
+        """Test database component default values."""
+        settings = Settings()
+        
+        assert settings.database_host == "localhost"
+        assert settings.database_port == 5432
+        assert settings.database_user == "tarsy"
+        assert settings.database_password == ""
+        assert settings.database_name == "tarsy"
+
+    def test_database_url_with_special_characters_in_password(self):
+        """Test database URL composition with special characters in password."""
+        with patch('tarsy.config.settings.is_testing', return_value=False):
+            settings = Settings(
+                database_password="p@ssw0rd!#$%"
+            )
+            
+            # Should compose URL with URL-encoded special characters
+            expected_url = "postgresql://tarsy:p%40ssw0rd%21%23%24%25@localhost:5432/tarsy"
+            assert settings.database_url == expected_url
+
+    def test_database_configuration_priority_order(self):
+        """Test the priority order: explicit URL > composed URL > SQLite fallback."""
+        # Test 1: Explicit URL has highest priority
+        explicit_url = "postgresql://explicit:pass@host:5432/db"
+        with patch('tarsy.config.settings.is_testing', return_value=False):
+            settings = Settings(
+                database_url=explicit_url,
+                database_password="ignored"
+            )
+            assert settings.database_url == explicit_url
+
+        # Test 2: Composed URL when password provided but no explicit URL
+        with patch('tarsy.config.settings.is_testing', return_value=False):
+            settings = Settings(database_password="testpass")
+            assert settings.database_url == "postgresql://tarsy:testpass@localhost:5432/tarsy"
+
+        # Test 3: SQLite fallback when no explicit URL and no password
+        with patch('tarsy.config.settings.is_testing', return_value=False):
+            settings = Settings()
+            assert settings.database_url == "sqlite:///history.db"
 
 
 @pytest.mark.unit
