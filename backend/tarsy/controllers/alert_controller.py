@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 
-from tarsy.models.alert import Alert, AlertResponse
+from tarsy.models.alert import Alert, AlertResponse, ProcessingAlert
 from tarsy.models.alert_processing import AlertKey
 from tarsy.utils.logger import get_logger
 
@@ -110,7 +110,8 @@ async def submit_alert(request: Request) -> AlertResponse:
                     detail={
                         "error": "Empty request body",
                         "message": "Request body is required and cannot be empty",
-                        "expected_fields": ["alert_type", "runbook", "data"]
+                        "required_fields": Alert.get_required_fields(),
+                        "optional_fields": Alert.get_optional_fields()
                     }
                 )
             
@@ -185,8 +186,8 @@ async def submit_alert(request: Request) -> AlertResponse:
                     "error": "Validation failed",
                     "message": "One or more fields are invalid",
                     "validation_errors": errors,
-                    "required_fields": ["alert_type", "runbook"],
-                    "optional_fields": ["data", "severity", "timestamp"]
+                    "required_fields": Alert.get_required_fields(),
+                    "optional_fields": Alert.get_optional_fields()
                 }
             )
         
@@ -201,18 +202,8 @@ async def submit_alert(request: Request) -> AlertResponse:
                 }
             )
         
-        if not alert_data.runbook or len(alert_data.runbook.strip()) == 0:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "Invalid runbook",
-                    "message": "runbook cannot be empty or contain only whitespace",
-                    "field": "runbook"
-                }
-            )
-        
-        # Validate runbook URL scheme for security
-        if alert_data.runbook:
+        # Validate runbook URL scheme for security (only if provided)
+        if alert_data.runbook and len(alert_data.runbook.strip()) > 0:
             runbook_url = alert_data.runbook.strip()
             try:
                 parsed_url = urlparse(runbook_url)
@@ -241,34 +232,9 @@ async def submit_alert(request: Request) -> AlertResponse:
                     }
                 )
         
-        # Apply defaults for missing fields (inline normalization)
-        normalized_data = alert_data.data.copy() if alert_data.data else {}
+        # Transform API alert to ProcessingAlert (adds metadata, keeps data pristine)
+        processing_alert = ProcessingAlert.from_api_alert(alert_data)
         
-        # Apply defaults
-        if alert_data.severity is None:
-            normalized_data["severity"] = "warning"
-        else:
-            normalized_data["severity"] = alert_data.severity
-            
-        if alert_data.timestamp is None:
-            from tarsy.utils.timestamp import now_us
-            normalized_data["timestamp"] = now_us()
-        else:
-            # Convert datetime to unix microseconds if needed
-            if isinstance(alert_data.timestamp, datetime):
-                normalized_data["timestamp"] = int(alert_data.timestamp.timestamp() * 1000000)
-            else:
-                normalized_data["timestamp"] = alert_data.timestamp
-        
-        # Apply default environment if not present in data
-        if "environment" not in normalized_data:
-            normalized_data["environment"] = "production"
-        
-        # Add required fields to data
-        normalized_data["alert_type"] = alert_data.alert_type
-        normalized_data["runbook"] = alert_data.runbook
-        
-        # Create alert structure for processing using ChainContext
         # Generate unique session ID
         session_id = str(uuid.uuid4())
         
@@ -276,9 +242,9 @@ async def submit_alert(request: Request) -> AlertResponse:
         from tarsy.models.processing_context import ChainContext
         from tarsy.main import process_alert_background, alert_service
         
-        alert_context = ChainContext(
-            alert_type=alert_data.alert_type,
-            alert_data=normalized_data,
+        # Create ChainContext from ProcessingAlert
+        alert_context = ChainContext.from_processing_alert(
+            processing_alert=processing_alert,
             session_id=session_id,
             current_stage_name="initializing"  # Will be updated to actual stage names from config during execution
         )

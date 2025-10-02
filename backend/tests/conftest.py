@@ -20,7 +20,7 @@ os.environ["TESTING"] = "true"
 # Import all database models to ensure they're registered with SQLModel.metadata
 import tarsy.models.db_models  # noqa: F401
 import tarsy.models.unified_interactions  # noqa: F401
-from tarsy.models.alert import Alert
+from tarsy.models.alert import Alert, ProcessingAlert
 from tarsy.models.llm_models import LLMProviderConfig
 from tarsy.models.processing_context import ChainContext
 from tarsy.utils.timestamp import now_us
@@ -30,24 +30,14 @@ def alert_to_api_format(alert: Alert) -> ChainContext:
     """
     Convert an Alert object to the ChainContext format that AlertService expects.
     
-    This matches the format created in main.py lines 350-353.
+    This matches the format created in the alert controller using ProcessingAlert.
     """
-    # Create normalized_data that matches what the API layer does
-    normalized_data = alert.data.copy() if alert.data else {}
-    
-    # Add core fields (matching API logic)
-    normalized_data["runbook"] = alert.runbook
-    normalized_data["severity"] = alert.severity or "warning"
-    normalized_data["timestamp"] = alert.timestamp or now_us()
-    
-    # Add default environment if not present
-    if "environment" not in normalized_data:
-        normalized_data["environment"] = "production"
+    # Transform API alert to ProcessingAlert (adds metadata, keeps data pristine)
+    processing_alert = ProcessingAlert.from_api_alert(alert)
     
     # Return ChainContext instance that AlertService expects
-    return ChainContext(
-        alert_type=alert.alert_type,
-        alert_data=normalized_data,
+    return ChainContext.from_processing_alert(
+        processing_alert=processing_alert,
         session_id=f"test-session-{hash(str(alert.data))}",  # EP-0012: Generate test session ID from alert data
         current_stage_name="initial"  # Default stage for tests
     )
@@ -219,4 +209,16 @@ def minimal_alert():
         alert_type="test",
         runbook="https://example.com/minimal-runbook",
         data={}
+    )
+
+
+@pytest.fixture
+def alert_without_runbook():
+    """Create an alert without runbook (should use built-in default)."""
+    return Alert(
+        alert_type="test",
+        data={
+            "environment": "production",
+            "message": "Test alert without runbook"
+        }
     ) 

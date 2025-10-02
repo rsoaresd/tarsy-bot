@@ -254,7 +254,7 @@ class AlertService:
             
             # Step 2: Get chain for alert type
             try:
-                chain_definition = self.chain_registry.get_chain_for_alert_type(chain_context.alert_type)
+                chain_definition = self.chain_registry.get_chain_for_alert_type(chain_context.processing_alert.alert_type)
             except ValueError as e:
                 error_msg = str(e)
                 logger.error(f"Chain selection failed: {error_msg}")
@@ -264,7 +264,7 @@ class AlertService:
                     
                 return self._format_error_response(chain_context, error_msg)
             
-            logger.info(f"Selected chain '{chain_definition.chain_id}' for alert type '{chain_context.alert_type}'")
+            logger.info(f"Selected chain '{chain_definition.chain_id}' for alert type '{chain_context.processing_alert.alert_type}'")
             
             # Create history session with chain info
             session_created = self._create_chain_history_session(chain_context, chain_definition)
@@ -277,14 +277,15 @@ class AlertService:
             self._update_session_status(chain_context.session_id, AlertSessionStatus.IN_PROGRESS.value)
             
             # Step 3: Extract runbook from alert data and download once per chain
-            runbook = chain_context.get_runbook_url()
-            if not runbook:
-                error_msg = "No runbook specified in alert data"
-                logger.error(error_msg)
-                self._update_session_error(chain_context.session_id, error_msg)
-                return self._format_error_response(chain_context, error_msg)
-            
-            runbook_content = await self.runbook_service.download_runbook(runbook)
+            # If no runbook URL provided, use the built-in default runbook
+            runbook = chain_context.processing_alert.runbook_url
+            if runbook:
+                logger.debug(f"Downloading runbook from: {runbook}")
+                runbook_content = await self.runbook_service.download_runbook(runbook)
+            else:
+                logger.debug("No runbook URL provided, using built-in default runbook")
+                from tarsy.config.builtin_config import DEFAULT_RUNBOOK_CONTENT
+                runbook_content = DEFAULT_RUNBOOK_CONTENT
             
             # Step 4: Set up chain context
             chain_context.set_chain_context(chain_definition.chain_id)
@@ -557,10 +558,10 @@ class AlertService:
         response_parts = [
             "# Alert Analysis Report",
             "",
-            f"**Alert Type:** {chain_context.alert_type}",
+            f"**Alert Type:** {chain_context.processing_alert.alert_type}",
             f"**Processing Agent:** {agent_name}",
-            f"**Environment:** {_format_alert_environment(chain_context.alert_data)}",
-            f"**Severity:** {_format_alert_severity(chain_context.alert_data)}",
+            f"**Environment:** {_format_alert_environment(chain_context.processing_alert.alert_data)}",
+            f"**Severity:** {_format_alert_severity(chain_context.processing_alert.alert_data)}",
             f"**Timestamp:** {timestamp_str}",
             "",
             "## Analysis",
@@ -601,11 +602,11 @@ class AlertService:
         response_parts = [
             "# Alert Analysis Report",
             "",
-            f"**Alert Type:** {chain_context.alert_type}",
+            f"**Alert Type:** {chain_context.processing_alert.alert_type}",
             f"**Processing Chain:** {chain_definition.chain_id}",
             f"**Stages:** {len(chain_definition.stages)}",
-            f"**Environment:** {_format_alert_environment(chain_context.alert_data)}",
-            f"**Severity:** {_format_alert_severity(chain_context.alert_data)}",
+            f"**Environment:** {_format_alert_environment(chain_context.processing_alert.alert_data)}",
+            f"**Severity:** {_format_alert_severity(chain_context.processing_alert.alert_data)}",
             f"**Timestamp:** {timestamp_str}",
             "",
             "## Analysis",
@@ -638,8 +639,8 @@ class AlertService:
         response_parts = [
             "# Alert Processing Error",
             "",
-            f"**Alert Type:** {chain_context.alert_type}",
-            f"**Environment:** {_format_alert_environment(chain_context.alert_data)}",
+            f"**Alert Type:** {chain_context.processing_alert.alert_type}",
+            f"**Environment:** {_format_alert_environment(chain_context.processing_alert.alert_data)}",
             f"**Error:** {error}",
         ]
         
@@ -678,7 +679,7 @@ class AlertService:
             # Generate unique alert ID for this processing session
             timestamp_us = now_us()
             unique_id = uuid.uuid4().hex[:12]  # Use 12 chars for uniqueness
-            alert_id = f"{chain_context.alert_type}_{unique_id}_{timestamp_us}"
+            alert_id = f"{chain_context.processing_alert.alert_type}_{unique_id}_{timestamp_us}"
             
             # Store chain information in session using ChainContext and ChainDefinition
             created_successfully = self.history_service.create_session(

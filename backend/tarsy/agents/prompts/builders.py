@@ -44,7 +44,7 @@ class PromptBuilder:
         """Build standard ReAct prompt."""
         logger.debug("Building ReAct prompt")
         # Build question components using StageContext properties directly
-        alert_section = self.alert_component.format(context.alert_data)
+        alert_section = self.alert_component.format(context.chain_context.processing_alert)
         runbook_section = self.runbook_component.format(context.runbook_content)
         
         # Use StageContext's built-in previous stages formatting
@@ -56,7 +56,7 @@ class PromptBuilder:
         
         # Build question
         question = ANALYSIS_QUESTION_TEMPLATE.format(
-            alert_type=context.chain_context.alert_type,
+            alert_type=context.chain_context.processing_alert.alert_type,
             alert_section=alert_section,
             runbook_section=runbook_section,
             chain_context=chain_context
@@ -79,7 +79,7 @@ class PromptBuilder:
         """Build stage analysis ReAct prompt."""
         logger.debug("Building stage analysis ReAct prompt")
         # Build question components using StageContext properties directly
-        alert_section = self.alert_component.format(context.alert_data)
+        alert_section = self.alert_component.format(context.chain_context.processing_alert)
         runbook_section = self.runbook_component.format(context.runbook_content)
         
         # Use StageContext's built-in previous stages formatting
@@ -92,7 +92,7 @@ class PromptBuilder:
         # Build question
         stage_name = context.stage_name or "analysis"
         question = STAGE_ANALYSIS_QUESTION_TEMPLATE.format(
-            alert_type=context.chain_context.alert_type,
+            alert_type=context.chain_context.processing_alert.alert_type,
             alert_section=alert_section,
             runbook_section=runbook_section,
             chain_context=chain_context,
@@ -128,7 +128,7 @@ class PromptBuilder:
             server_list=server_list
         )
         
-        alert_section = self.alert_component.format(context.alert_data)
+        alert_section = self.alert_component.format(context.chain_context.processing_alert)
         runbook_section = self.runbook_component.format(context.runbook_content)
         
         # Use StageContext's built-in previous stages formatting

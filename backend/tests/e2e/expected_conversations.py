@@ -95,11 +95,27 @@ Question: Investigate this test-kubernetes alert and provide stage-specific anal
 
 ## Alert Details
 
+### Alert Metadata
+**Alert Type:** test-kubernetes
 **Severity:** warning
 **Timestamp:** {TIMESTAMP}
 **Environment:** production
-**Alert Type:** test-kubernetes
-**Runbook:** https://runbooks.example.com/k8s-namespace-stuck
+
+### Alert Data
+```json
+{
+  "namespace": "test-namespace",
+  "description": "Namespace stuck in Terminating state",
+  "cluster": "test-cluster",
+  "labels": {
+    "env": "test",
+    "team": "platform"
+  },
+  "annotations": {
+    "finalizers": "kubernetes.io/pv-protection"
+  }
+}
+```
 
 ## Runbook Content
 ```markdown
@@ -432,11 +448,27 @@ Question: Investigate this test-kubernetes alert and provide stage-specific anal
 
 ## Alert Details
 
+### Alert Metadata
+**Alert Type:** test-kubernetes
 **Severity:** warning
 **Timestamp:** {TIMESTAMP}
 **Environment:** production
-**Alert Type:** test-kubernetes
-**Runbook:** https://runbooks.example.com/k8s-namespace-stuck
+
+### Alert Data
+```json
+{
+  "namespace": "test-namespace",
+  "description": "Namespace stuck in Terminating state",
+  "cluster": "test-cluster",
+  "labels": {
+    "env": "test",
+    "team": "platform"
+  },
+  "annotations": {
+    "finalizers": "kubernetes.io/pv-protection"
+  }
+}
+```
 
 ## Runbook Content
 ```markdown
@@ -673,11 +705,27 @@ Question: Analyze this test-kubernetes alert and provide actionable recommendati
 
 ## Alert Details
 
+### Alert Metadata
+**Alert Type:** test-kubernetes
 **Severity:** warning
 **Timestamp:** {TIMESTAMP}
 **Environment:** production
-**Alert Type:** test-kubernetes
-**Runbook:** https://runbooks.example.com/k8s-namespace-stuck
+
+### Alert Data
+```json
+{
+  "namespace": "test-namespace",
+  "description": "Namespace stuck in Terminating state",
+  "cluster": "test-cluster",
+  "labels": {
+    "env": "test",
+    "team": "platform"
+  },
+  "annotations": {
+    "finalizers": "kubernetes.io/pv-protection"
+  }
+}
+```
 
 ## Runbook Content
 ```markdown
@@ -805,11 +853,27 @@ Please provide detailed, actionable insights about what's happening and potentia
 
 ## Alert Details
 
+### Alert Metadata
+**Alert Type:** test-kubernetes
 **Severity:** warning
 **Timestamp:** {TIMESTAMP}
 **Environment:** production
-**Alert Type:** test-kubernetes
-**Runbook:** https://runbooks.example.com/k8s-namespace-stuck
+
+### Alert Data
+```json
+{
+  "namespace": "test-namespace",
+  "description": "Namespace stuck in Terminating state",
+  "cluster": "test-cluster",
+  "labels": {
+    "env": "test",
+    "team": "platform"
+  },
+  "annotations": {
+    "finalizers": "kubernetes.io/pv-protection"
+  }
+}
+```
 
 ## Runbook Content
 ```markdown

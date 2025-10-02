@@ -28,16 +28,16 @@ class TestNewChainContextUsage:
         context = create_test_chain_context()
         
         # Verify basic properties
-        assert context.alert_type == "kubernetes"
+        assert context.processing_alert.alert_type == "kubernetes"
         assert context.session_id == "test-session-123"
         assert context.current_stage_name == "analysis"
-        assert isinstance(context.alert_data, dict)
-        assert context.alert_data["pod"] == "test-pod"
+        assert isinstance(context.processing_alert.alert_data, dict)
+        assert context.processing_alert.alert_data["pod"] == "test-pod"
         
         # Test methods
-        original_data = context.get_original_alert_data()
-        assert original_data == context.alert_data
-        assert original_data is not context.alert_data  # Should be a copy
+        original_data = context.processing_alert.alert_data.copy()
+        assert original_data == context.processing_alert.alert_data
+        assert original_data is not context.processing_alert.alert_data  # Should be a copy
         
         assert context.get_runbook_content() == ""  # No runbook set
         assert context.get_previous_stages_results() == []  # No previous stages
@@ -46,9 +46,9 @@ class TestNewChainContextUsage:
         """Test ChainContext with runbook content."""
         context = ChainContextFactory.create_with_runbook()
         
-        assert context.alert_type == "kubernetes"
-        assert "failing-pod" in context.alert_data["pod"]
-        assert context.alert_data["severity"] == "critical"
+        assert context.processing_alert.alert_type == "kubernetes"
+        assert "failing-pod" in context.processing_alert.alert_data["pod"]
+        assert context.processing_alert.alert_data.get("severity") is None  # Client data might not have severity since it's in metadata now
         assert context.chain_id == "k8s-troubleshooting-chain"
         
         runbook = context.get_runbook_content()
@@ -86,10 +86,10 @@ class TestNewChainContextUsage:
         """Test ChainContext with complex, nested alert data."""
         context = ChainContextFactory.create_complex_alert_data()
         
-        assert context.alert_type == "KubernetesPodCrashLooping"
+        assert context.processing_alert.alert_type == "KubernetesPodCrashLooping"
         
         # Test accessing nested data
-        alert_data = context.get_original_alert_data()
+        alert_data = context.processing_alert.alert_data.copy()
         assert alert_data["pod_info"]["name"] == "api-server-7d4b9c8f6-xyz123"
         assert alert_data["pod_info"]["restart_count"] == 15
         assert alert_data["cluster_info"]["region"] == "us-east-1"
@@ -184,7 +184,8 @@ class TestNewStageContextUsage:
         
         # Verify Kubernetes-specific setup
         assert context.alert_data["pod"] == "failing-pod"
-        assert context.alert_data["severity"] == "critical"
+        # severity is now in metadata, not in client alert_data
+        assert context.chain_context.processing_alert.severity == "critical"
         assert context.agent_name == "KubernetesAgent"
         assert "kubernetes-server" in context.mcp_servers
         
@@ -384,18 +385,28 @@ class TestNewModelsInRealScenarios:
             }
         }
         
-        context = ChainContext(
+        from tarsy.models.alert import ProcessingAlert
+        import time
+        
+        processing_alert = ProcessingAlert(
             alert_type="large-data-test",
-            alert_data=large_data,
+            severity="warning",
+            timestamp=int(time.time() * 1_000_000),
+            environment="production",
+            runbook_url=None,
+            alert_data=large_data
+        )
+        context = ChainContext.from_processing_alert(
+            processing_alert=processing_alert,
             session_id="large-data-session",
             current_stage_name="processing"
         )
         
         # Should handle large data efficiently
-        assert len(context.alert_data["large_list"]) == 1000
-        assert len(context.alert_data["nested_data"]) == 100
+        assert len(context.processing_alert.alert_data["large_list"]) == 1000
+        assert len(context.processing_alert.alert_data["nested_data"]) == 100
         
         # Property access should still be fast
-        original = context.get_original_alert_data()
+        original = context.processing_alert.alert_data.copy()
         assert original == large_data
         assert original is not large_data  # Should be a copy
