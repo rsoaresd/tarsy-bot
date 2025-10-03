@@ -277,7 +277,7 @@ npx -y kubernetes-mcp-server@latest --kubeconfig ~/.kube/config --help
 ### History API
 - `GET /api/v1/history/sessions` - List alert processing sessions with filtering and pagination
 - `GET /api/v1/history/sessions/{session_id}` - Get detailed session with chronological timeline
-- `GET /api/v1/history/health` - History service health check and database status
+- `GET /api/v1/history/health` - History service health check, database status, and migration info
 
 ### System API
 - `GET /api/v1/system/warnings` - Active system warnings (MCP/LLM init failures, etc.)
@@ -292,6 +292,38 @@ npx -y kubernetes-mcp-server@latest --kubeconfig ~/.kube/config --help
 - **LLM Providers**: Built-in providers work out-of-the-box (OpenAI, Google, xAI, Anthropic). Add custom providers via `config/llm_providers.yaml` for proxy configurations or model overrides
 
 > **📖 For detailed extensibility examples**: See [Extensibility section](docs/architecture-overview.md#extensibility) in the Architecture Overview
+
+### Database Migrations
+
+TARSy uses **Alembic** for database schema versioning and migrations. The migration system automatically applies pending migrations on startup, ensuring your database schema is always up-to-date.
+
+**Quick Migration Workflow:**
+
+```bash
+# 1. Modify SQLModel in backend/tarsy/models/
+# 2. Generate migration from model changes
+make migration msg="Add new field to AlertSession"
+
+# 3. Review generated file in backend/alembic/versions/
+# 4. Test migration
+make migration-upgrade
+
+# 5. If needed, rollback
+make migration-downgrade
+```
+
+**Available Migration Commands:**
+
+```bash
+make migration msg="Description"     # Generate migration from model changes
+make migration-manual msg="Desc"     # Create empty migration for manual changes
+make migration-upgrade               # Apply all pending migrations
+make migration-downgrade             # Rollback last migration
+make migration-status                # Show current database version
+make migration-history               # Show full migration history
+```
+
+> **📖 For complete migration documentation**: See [docs/database-migrations.md](docs/database-migrations.md)
 
 ### Running Tests
 
