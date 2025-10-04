@@ -83,7 +83,38 @@ const getInteractionIcon = (type: string) => {
   }
 };
 
-
+// Helper function to get interaction type styles for LLM interactions
+const getInteractionTypeStyle = (interaction: TimelineItem) => {
+  if (interaction.type !== 'llm') return null;
+  
+  const llmDetails = interaction.details as LLMInteraction;
+  const interactionType = llmDetails?.interaction_type || 'investigation';
+  
+  switch (interactionType) {
+    case 'summarization':
+      return {
+        label: 'Summarization',
+        color: 'warning' as const,
+        borderColor: '2px solid rgba(237, 108, 2, 0.5)',
+        hoverBorderColor: '2px solid rgba(237, 108, 2, 0.8)'
+      };
+    case 'final_analysis':
+      return {
+        label: 'Final Analysis',
+        color: 'success' as const,
+        borderColor: '2px solid rgba(46, 125, 50, 0.5)',
+        hoverBorderColor: '2px solid rgba(46, 125, 50, 0.8)'
+      };
+    case 'investigation':
+    default:
+      return {
+        label: 'Investigation',
+        color: 'primary' as const,
+        borderColor: '2px solid rgba(25, 118, 210, 0.5)',
+        hoverBorderColor: '2px solid rgba(25, 118, 210, 0.8)'
+      };
+  }
+};
 
 // Removed duplicate helper functions - now imported from shared utils
 
@@ -424,9 +455,12 @@ const NestedAccordionTimeline: React.FC<NestedAccordionTimelineProps> = ({
                 </Box>
               </AccordionSummary>
 
-              <AccordionDetails sx={{ pt: 0 }}>
+              <AccordionDetails sx={{ pt: 1, px: 1 }}>
                 {/* Stage Metadata */}
-                <Card variant="outlined" sx={{ mb: 3, bgcolor: 'grey.25' }}>
+                <Card
+                  variant="outlined"
+                  sx={{ mb: 1, bgcolor: (theme) => theme.palette.grey[50] }}
+                >
                   <CardContent>
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                       <Typography variant="subtitle2">
@@ -439,14 +473,47 @@ const NestedAccordionTimeline: React.FC<NestedAccordionTimelineProps> = ({
                         tooltip="Copy stage timeline to clipboard"
                       />
                     </Box>
-                    <Box display="flex" gap={3} flexWrap="wrap">
-                      <Typography variant="body2">
-                        <strong>Agent:</strong> {stage.agent}
-                      </Typography>
+                    <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
+                      {(() => {
+                        const metadataItems = [
+                          { label: 'Agent', value: stage.agent },
+                          { label: 'Interactions', value: stageInteractions.length },
+                        ];
 
-                      <Typography variant="body2">
-                        <strong>Interactions:</strong> {stageInteractions.length}
-                      </Typography>
+                        if (stage.llm_interaction_count > 0) {
+                          metadataItems.push({ 
+                            label: 'LLM Calls', 
+                            value: stage.llm_interaction_count 
+                          });
+                        }
+
+                        if (stage.mcp_communication_count > 0) {
+                          metadataItems.push({ 
+                            label: 'MCP Calls', 
+                            value: stage.mcp_communication_count 
+                          });
+                        }
+
+                        if (stage.duration_ms != null) {
+                          metadataItems.push({ 
+                            label: 'Duration', 
+                            value: formatDurationMs(stage.duration_ms) 
+                          });
+                        }
+
+                        return metadataItems.map((item, index) => (
+                          <React.Fragment key={index}>
+                            <Typography variant="body2">
+                              <strong>{item.label}:</strong> {item.value}
+                            </Typography>
+                            {index < metadataItems.length - 1 && (
+                              <Typography variant="body2" color="text.disabled">
+                                •
+                              </Typography>
+                            )}
+                          </React.Fragment>
+                        ));
+                      })()}
                     </Box>
                     
                     {stage.error_message && (
@@ -460,13 +527,13 @@ const NestedAccordionTimeline: React.FC<NestedAccordionTimelineProps> = ({
                 </Card>
 
                 {/* Chronological Interactions Timeline within Stage */}
-                <Typography variant="subtitle1" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="subtitle1" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                   <TimelineIcon color="primary" fontSize="small" />
                   Interactions Timeline
                 </Typography>
 
                 {stageInteractions.length > 0 ? (
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {stageInteractions.map((interaction: TimelineItem, interactionIndex: number) => {
                       const itemKey = interaction.event_id || `interaction-${interactionIndex}`;
                       const isDetailsExpanded = expandedInteractionDetails[itemKey];
@@ -480,19 +547,21 @@ const NestedAccordionTimeline: React.FC<NestedAccordionTimelineProps> = ({
                             borderRadius: 2,
                             overflow: 'hidden',
                             transition: 'all 0.2s ease-in-out',
-                            border: interaction.type === 'llm' 
-                              ? '2px solid #90caf9' 
-                              : interaction.type === 'mcp'
-                              ? '2px solid #ce93d8'
-                              : '2px solid #ffcc02',
+                            border: (() => {
+                              const typeStyle = getInteractionTypeStyle(interaction);
+                              if (typeStyle) return typeStyle.borderColor;
+                              if (interaction.type === 'mcp') return '2px solid #ce93d8';
+                              return '2px solid #ffcc02';
+                            })(),
                             '&:hover': {
                               elevation: 4,
                               transform: 'translateY(-1px)',
-                              border: interaction.type === 'llm' 
-                                ? '2px solid #42a5f5' 
-                                : interaction.type === 'mcp'
-                                ? '2px solid #ba68c8'
-                                : '2px solid #ffa000'
+                              border: (() => {
+                                const typeStyle = getInteractionTypeStyle(interaction);
+                                if (typeStyle) return typeStyle.hoverBorderColor;
+                                if (interaction.type === 'mcp') return '2px solid #ba68c8';
+                                return '2px solid #ffa000';
+                              })()
                             }
                           }}
                         >
@@ -514,6 +583,20 @@ const NestedAccordionTimeline: React.FC<NestedAccordionTimelineProps> = ({
                                 <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                                   {interaction.step_description}
                                 </Typography>
+                                
+                                {/* Show interaction type for LLM interactions */}
+                                {(() => {
+                                  const typeStyle = getInteractionTypeStyle(interaction);
+                                  return typeStyle && (
+                                    <Chip 
+                                      label={typeStyle.label}
+                                      size="small"
+                                      color={typeStyle.color}
+                                      sx={{ fontSize: '0.7rem', height: 22, fontWeight: 600 }}
+                                    />
+                                  );
+                                })()}
+                                
                                 {interaction.duration_ms && (
                                   <Chip 
                                     label={formatDurationMs(interaction.duration_ms)} 
@@ -677,7 +760,7 @@ const NestedAccordionTimeline: React.FC<NestedAccordionTimelineProps> = ({
                 })()}
 
                 {/* Stage Summary/Next Steps */}
-                <Box mt={3} display="flex" justifyContent="space-between" alignItems="center">
+                <Box mt={1.5} display="flex" justifyContent="space-between" alignItems="center">
                   <Typography variant="body2" color="text.secondary">
                     {stage.status === 'completed' 
                       ? `Stage completed in ${formatDurationMs(stage.duration_ms || 0)}`
