@@ -52,9 +52,9 @@ def _apply_llm_interaction_truncation(interaction: LLMInteraction) -> LLMInterac
     return interaction
 
 
-class BaseTypedHook(ABC, Generic[TInteraction]):
+class BaseHook(ABC, Generic[TInteraction]):
     """
-    Abstract base class for typed hooks.
+    Abstract base class for hooks.
     
     Provides type-safe hook execution with proper error handling.
     """
@@ -95,45 +95,45 @@ class BaseTypedHook(ABC, Generic[TInteraction]):
             
         except Exception as e:
             self.error_count += 1
-            logger.error(f"Typed hook '{self.name}' error ({self.error_count}/{self.max_errors}): {e}")
+            logger.error(f"Hook '{self.name}' error ({self.error_count}/{self.max_errors}): {e}")
             
             if self.error_count >= self.max_errors:
                 self.is_enabled = False
-                logger.warning(f"Typed hook '{self.name}' disabled due to excessive errors")
+                logger.warning(f"Hook '{self.name}' disabled due to excessive errors")
             
             return False
 
 
-class TypedHookManager:
+class HookManager:
     """
-    Manages registration and execution of typed hooks.
+    Manages registration and execution of hooks.
     
-    Provides centralized typed hook management with async execution
+    Provides centralized hook management with async execution
     and error isolation.
     """
     
     def __init__(self):
-        self.llm_hooks: Dict[str, BaseTypedHook[LLMInteraction]] = {}
-        self.mcp_hooks: Dict[str, BaseTypedHook[MCPInteraction]] = {}
-        self.mcp_list_hooks: Dict[str, BaseTypedHook[MCPInteraction]] = {}
-        self.stage_hooks: Dict[str, BaseTypedHook[StageExecution]] = {}
+        self.llm_hooks: Dict[str, BaseHook[LLMInteraction]] = {}
+        self.mcp_hooks: Dict[str, BaseHook[MCPInteraction]] = {}
+        self.mcp_list_hooks: Dict[str, BaseHook[MCPInteraction]] = {}
+        self.stage_hooks: Dict[str, BaseHook[StageExecution]] = {}
 
-    def register_llm_hook(self, hook: BaseTypedHook[LLMInteraction]) -> None:
+    def register_llm_hook(self, hook: BaseHook[LLMInteraction]) -> None:
         """Register an LLM interaction hook."""
         self.llm_hooks[hook.name] = hook
         logger.info(f"Registered typed LLM hook: {hook.name}")
 
-    def register_mcp_hook(self, hook: BaseTypedHook[MCPInteraction]) -> None:
+    def register_mcp_hook(self, hook: BaseHook[MCPInteraction]) -> None:
         """Register an MCP interaction hook."""
         self.mcp_hooks[hook.name] = hook
         logger.info(f"Registered typed MCP hook: {hook.name}")
 
-    def register_mcp_list_hook(self, hook: BaseTypedHook[MCPInteraction]) -> None:
+    def register_mcp_list_hook(self, hook: BaseHook[MCPInteraction]) -> None:
         """Register an MCP tool list hook."""
         self.mcp_list_hooks[hook.name] = hook
         logger.info(f"Registered typed MCP list hook: {hook.name}")
 
-    def register_stage_hook(self, hook: BaseTypedHook[StageExecution]) -> None:
+    def register_stage_hook(self, hook: BaseHook[StageExecution]) -> None:
         """Register a stage execution hook."""
         self.stage_hooks[hook.name] = hook
         logger.info(f"Registered typed stage execution hook: {hook.name}")
@@ -154,7 +154,7 @@ class TypedHookManager:
         """Trigger all stage execution hooks with typed data."""
         return await self._trigger_hooks(self.stage_hooks, stage_execution, "STAGE_EXECUTION")
 
-    async def _trigger_hooks(self, hooks: Dict[str, BaseTypedHook[TInteraction]], 
+    async def _trigger_hooks(self, hooks: Dict[str, BaseHook[TInteraction]], 
                            interaction: TInteraction, hook_type: str) -> Dict[str, bool]:
         """Generic hook triggering with type safety."""
         if not hooks:
@@ -205,16 +205,16 @@ class InteractionHookContext(Generic[TInteraction]):
     Manages interaction-specific fields like start_time_us, end_time_us, duration_ms, success, etc.
     """
     
-    def __init__(self, interaction_template: TInteraction, typed_hook_manager: TypedHookManager):
+    def __init__(self, interaction_template: TInteraction, hook_manager: HookManager):
         """
         Initialize typed hook context.
         
         Args:
             interaction_template: Template interaction with session_id and basic info
-            typed_hook_manager: Manager for typed hooks
+            hook_manager: Manager for hooks
         """
         self.interaction = interaction_template
-        self.typed_hook_manager = typed_hook_manager
+        self.hook_manager = hook_manager
         self.start_time_us = None
 
     async def __aenter__(self) -> 'InteractionHookContext[TInteraction]':
@@ -290,13 +290,13 @@ class InteractionHookContext(Generic[TInteraction]):
     async def _trigger_appropriate_hooks(self) -> None:
         """Trigger the appropriate typed hooks based on interaction type."""
         if isinstance(self.interaction, LLMInteraction):
-            await self.typed_hook_manager.trigger_llm_hooks(self.interaction)
+            await self.hook_manager.trigger_llm_hooks(self.interaction)
         elif isinstance(self.interaction, MCPInteraction):
             # Determine if it's a tool list or tool call based on communication_type
             if self.interaction.communication_type == "tool_list":
-                await self.typed_hook_manager.trigger_mcp_list_hooks(self.interaction)
+                await self.hook_manager.trigger_mcp_list_hooks(self.interaction)
             else:
-                await self.typed_hook_manager.trigger_mcp_hooks(self.interaction)
+                await self.hook_manager.trigger_mcp_hooks(self.interaction)
         else:
             logger.warning(f"Unknown interaction type: {type(self.interaction)}")
 
@@ -311,15 +311,15 @@ class InteractionHookContext(Generic[TInteraction]):
             return f"unknown_{id(self.interaction)}"
 
 
-# Global typed hook manager instance
-_global_typed_hook_manager: Optional[TypedHookManager] = None
+# Global hook manager instance
+_global_hook_manager: Optional[HookManager] = None
 
-def get_typed_hook_manager() -> TypedHookManager:
-    """Get the global typed hook manager instance."""
-    global _global_typed_hook_manager
-    if _global_typed_hook_manager is None:
-        _global_typed_hook_manager = TypedHookManager()
-    return _global_typed_hook_manager
+def get_hook_manager() -> HookManager:
+    """Get the global hook manager instance."""
+    global _global_hook_manager
+    if _global_hook_manager is None:
+        _global_hook_manager = HookManager()
+    return _global_hook_manager
 
 
 @asynccontextmanager
@@ -345,7 +345,7 @@ async def llm_interaction_context(session_id: str, request_data: Dict[str, Any],
         # Note: interaction_type may be updated by LLMClient based on response content
     )
     
-    async with InteractionHookContext(interaction, get_typed_hook_manager()) as ctx:
+    async with InteractionHookContext(interaction, get_hook_manager()) as ctx:
         yield ctx
 
 
@@ -375,7 +375,7 @@ async def mcp_interaction_context(session_id: str, server_name: str, tool_name: 
         step_description=""  # Will be set by history service
     )
     
-    async with InteractionHookContext(interaction, get_typed_hook_manager()) as ctx:
+    async with InteractionHookContext(interaction, get_hook_manager()) as ctx:
         yield ctx
 
 
@@ -401,7 +401,7 @@ async def mcp_list_context(session_id: str, server_name: Optional[str] = None, s
         step_description=""  # Will be set by history service
     )
     
-    async with InteractionHookContext(interaction, get_typed_hook_manager()) as ctx:
+    async with InteractionHookContext(interaction, get_hook_manager()) as ctx:
         yield ctx
 
 
@@ -413,9 +413,9 @@ class StageExecutionHookContext:
     which has different field names and semantics.
     """
     
-    def __init__(self, stage_execution: StageExecution, typed_hook_manager: TypedHookManager):
+    def __init__(self, stage_execution: StageExecution, hook_manager: HookManager):
         self.stage_execution = stage_execution
-        self.typed_hook_manager = typed_hook_manager
+        self.hook_manager = hook_manager
 
     async def __aenter__(self) -> 'StageExecutionHookContext':
         """Enter async context."""
@@ -425,7 +425,7 @@ class StageExecutionHookContext:
         """Exit async context - trigger hooks."""
         # Always trigger stage hooks - stage execution state is managed by the service
         try:
-            await self.typed_hook_manager.trigger_stage_hooks(self.stage_execution)
+            await self.hook_manager.trigger_stage_hooks(self.stage_execution)
         except Exception as e:
             logger.error(f"Failed to trigger stage execution hooks: {e}")
         
@@ -444,5 +444,5 @@ async def stage_execution_context(session_id: str, stage_execution: StageExecuti
     Yields:
         Simple hook context for stage execution
     """
-    async with StageExecutionHookContext(stage_execution, get_typed_hook_manager()) as ctx:
+    async with StageExecutionHookContext(stage_execution, get_hook_manager()) as ctx:
         yield ctx

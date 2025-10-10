@@ -35,7 +35,9 @@ venv.bak/
 # IDEs
 .vscode/
 .idea/
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 *.swp
 *.swo
 *~

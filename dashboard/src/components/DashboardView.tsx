@@ -10,7 +10,7 @@ import UserMenu from './UserMenu';
 import { SystemWarningBanner } from './SystemWarningBanner';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient, handleAPIError } from '../services/api';
-import { webSocketService } from '../services/websocket';
+import { websocketService } from '../services/websocketService';
 import {
   saveFiltersToStorage,
   loadFiltersFromStorage,
@@ -25,7 +25,7 @@ import {
   getDefaultSort,
   mergeWithDefaults
 } from '../utils/filterPersistence';
-import type { Session, SessionUpdate, SessionFilter, PaginationState, SortState, FilterOptions } from '../types';
+import type { Session, SessionFilter, PaginationState, SortState, FilterOptions } from '../types';
 
 /**
  * DashboardView component for the Tarsy Dashboard - Phase 6
@@ -294,103 +294,11 @@ function DashboardView() {
 
   // Set up WebSocket event handlers for real-time updates
   useEffect(() => {
-    const handleSessionUpdate = (update: SessionUpdate) => {
-      console.log('DashboardView received session update:', update);
-      // Update active alerts if the session is still active
-      setActiveAlerts(prev => 
-        prev.map(session => 
-          session.session_id === update.session_id 
-            ? { ...session, status: update.status, duration_ms: update.duration_ms || session.duration_ms }
-            : session
-        )
-      );
-    };
-
-    const handleSessionCompleted = (update: SessionUpdate) => {
-      console.log('DashboardView received session completed:', update);
-      // Remove from active alerts and add to historical alerts
-      setActiveAlerts(prev => prev.filter(session => session.session_id !== update.session_id));
-      
-      // Refresh historical alerts to include the newly completed session
-      fetchHistoricalAlerts();
-    };
-
-    const handleSessionFailed = (update: SessionUpdate) => {
-      console.log('DashboardView received session failed:', update);
-      // Remove from active alerts and add to historical alerts
-      setActiveAlerts(prev => prev.filter(session => session.session_id !== update.session_id));
-      
-      // Refresh historical alerts to include the newly failed session
-      fetchHistoricalAlerts();
-    };
-
-    // WebSocket error handler
-    const handleWebSocketError = (error: Event) => {
-      console.warn('WebSocket connection error - real-time updates unavailable:', error);
-      console.log('💡 Use manual refresh buttons if needed');
-      setWsConnected(false); // Update connection status immediately
-    };
-
-    // WebSocket close handler  
-    const handleWebSocketClose = (event: CloseEvent) => {
-      console.warn('WebSocket connection closed - real-time updates unavailable:', {
-        code: event.code,
-        reason: event.reason,
-        wasClean: event.wasClean
-      });
-      console.log('💡 Use manual refresh buttons if needed');
-      setWsConnected(false); // Update connection status immediately
-    };
-
-    // Dashboard update handler - handles real-time dashboard updates from backend
-    const handleDashboardUpdate = (update: any) => {
-      console.log('📊 Real-time dashboard update received:', update);
-      
-      // Handle different types of updates
-      if (update.type === 'system_metrics' && update.active_sessions_list) {
-        const newActiveCount = update.active_sessions_list.length;
-        const currentActiveCount = activeAlerts.length;
-        
-        // Only refresh if the number of active sessions changed
-        if (newActiveCount !== currentActiveCount) {
-          console.log(`🔄 Active sessions changed: ${currentActiveCount} → ${newActiveCount}, refreshing data`);
-          throttledRefresh();
-        } else {
-          console.log('📊 System metrics update - no session changes, skipping refresh');
-        }
-      } else if (update.type === 'session_status_change') {
-        // Session status changes affect the main dashboard
-        console.log('🔄 Session status change - refreshing dashboard data');
-        throttledRefresh();
-      } else if (update.type === 'llm_interaction' || update.type === 'mcp_communication' || update.type === 'mcp_tool_list') {
-        // Session-specific updates don't require dashboard refresh - these are for detail views
-        console.log('📊 Session-specific update - no dashboard refresh needed');
-      } else if (update.type === 'batched_session_updates') {
-        // Batched timeline updates are session-specific - no dashboard refresh needed
-        console.log('📊 Batched session updates - no dashboard refresh needed');
-      } else if (update.type === 'session_timeline_update') {
-        // Individual timeline updates are session-specific - no dashboard refresh needed
-        console.log('📊 Session timeline update - no dashboard refresh needed');
-      } else if (update.session_id && (update.type === 'llm' || update.type === 'mcp' || update.type === 'system')) {
-        // Timeline-specific updates with session_id - no dashboard refresh needed
-        console.log('📊 Timeline interaction update - no dashboard refresh needed');
-      } else if (update.session_started || update.session_ended) {
-        // Session lifecycle events - refresh dashboard
-        console.log('🔄 Session lifecycle event - refreshing dashboard data');
-        throttledRefresh();
-      } else if (!update.type && update.session_id) {
-        // Generic session update without specific type - might be status or timeline
-        // Check if it looks like a status change
-        if (update.status || update.completed_at_us || update.error_message) {
-          console.log('🔄 Detected session status update - refreshing dashboard data');
-          throttledRefresh();
-        } else {
-          // Likely a timeline update - no dashboard refresh needed
-          console.log('📊 Generic session update (likely timeline) - no dashboard refresh needed');
-        }
-      } else {
-        // For genuinely unknown updates, log more details and refresh cautiously
-        console.log('🔄 Unknown update type:', update.type, 'Keys:', Object.keys(update), '- refreshing dashboard data');
+    // Session update handler - refresh on lifecycle events
+    const handleSessionUpdate = (update: any) => {
+      // For session lifecycle events, refresh the dashboard from backend
+      if (update.type && update.type.startsWith('session.')) {
+        console.log('🔄 Session lifecycle event (' + update.type + ') - refreshing dashboard data');
         throttledRefresh();
       }
     };
@@ -410,21 +318,16 @@ function DashboardView() {
     };
 
     // Subscribe to WebSocket events
-    const unsubscribeUpdate = webSocketService.onSessionUpdate(handleSessionUpdate);
-    const unsubscribeCompleted = webSocketService.onSessionCompleted(handleSessionCompleted);
-    const unsubscribeFailed = webSocketService.onSessionFailed(handleSessionFailed);
-    const unsubscribeDashboard = webSocketService.onDashboardUpdate(handleDashboardUpdate);
-    const unsubscribeConnection = webSocketService.onConnectionChange(handleConnectionChange);
-    const unsubscribeError = webSocketService.onError(handleWebSocketError);
-    const unsubscribeClose = webSocketService.onClose(handleWebSocketClose);
+    const unsubscribeUpdate = websocketService.subscribeToChannel('sessions', handleSessionUpdate);
+    const unsubscribeConnection = websocketService.onConnectionChange(handleConnectionChange);
 
     // Connect to WebSocket with enhanced logging
     console.log('🔌 Connecting to WebSocket for real-time updates...');
     (async () => {
       try {
-        await webSocketService.connect();
+        await websocketService.connect();
         // Set initial connection status after connection attempt
-        setWsConnected(webSocketService.isConnected);
+        setWsConnected(websocketService.isConnected);
       } catch (error) {
         console.error('Failed to connect to WebSocket:', error);
       }
@@ -434,12 +337,7 @@ function DashboardView() {
     return () => {
       console.log('DashboardView cleaning up WebSocket subscriptions');
       unsubscribeUpdate();
-      unsubscribeCompleted();
-      unsubscribeFailed();
-      unsubscribeDashboard();
       unsubscribeConnection();
-      unsubscribeError();
-      unsubscribeClose();
     };
   }, []);
 
@@ -462,7 +360,7 @@ function DashboardView() {
   const handleWebSocketRetry = async () => {
     console.log('🔄 Manual WebSocket retry requested');
     try {
-      await webSocketService.retry();
+      await websocketService.connect();
     } catch (error) {
       console.error('Failed to retry WebSocket connection:', error);
     }

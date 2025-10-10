@@ -1,39 +1,34 @@
 """
 Unit tests for typed hook system.
 
-Tests the new typed hook infrastructure that provides type-safe
-interaction logging and dashboard updates.
+Tests the typed hook infrastructure that provides type-safe
+interaction logging to history service.
 """
 
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from tarsy.hooks.typed_context import BaseTypedHook
-from tarsy.hooks.typed_dashboard_hooks import (
-    TypedLLMDashboardHook,
-    TypedMCPDashboardHook,
-)
-from tarsy.hooks.typed_history_hooks import (
-    TypedLLMHistoryHook,
-    TypedMCPHistoryHook,
-    TypedStageExecutionHistoryHook,
+from tarsy.hooks.hook_context import BaseHook
+from tarsy.hooks.history_hooks import (
+    LLMHistoryHook,
+    MCPHistoryHook,
+    StageExecutionHistoryHook,
 )
 from tarsy.models.constants import StageStatus, MAX_LLM_MESSAGE_CONTENT_SIZE
 from tarsy.models.db_models import StageExecution
 from tarsy.models.unified_interactions import LLMInteraction, MCPInteraction, LLMConversation, LLMMessage, MessageRole
-from tarsy.services.dashboard_broadcaster import DashboardBroadcaster
 from tarsy.services.history_service import HistoryService
 
 
 @pytest.mark.unit
-class TestBaseTypedHook:
+class TestBaseHook:
     """Test the base typed hook functionality."""
     
     def test_base_typed_hook_initialization(self):
         """Test base hook can be initialized with name."""
         # Create a concrete implementation for testing
-        class TestHook(BaseTypedHook[LLMInteraction]):
+        class TestHook(BaseHook[LLMInteraction]):
             async def execute(self, interaction: LLMInteraction) -> None:
                 pass
         
@@ -41,13 +36,13 @@ class TestBaseTypedHook:
         assert hook.name == "test_hook"
     
     def test_base_typed_hook_is_abstract(self):
-        """Test that BaseTypedHook cannot be instantiated directly."""
+        """Test that BaseHook cannot be instantiated directly."""
         with pytest.raises(TypeError):
-            BaseTypedHook("test")
+            BaseHook("test")
 
 
 @pytest.mark.unit  
-class TestTypedLLMHistoryHook:
+class TestLLMHistoryHook:
     """Test typed LLM history hook."""
     
     @pytest.fixture
@@ -60,7 +55,7 @@ class TestTypedLLMHistoryHook:
     @pytest.fixture
     def llm_hook(self, mock_history_service):
         """Create LLM history hook."""
-        return TypedLLMHistoryHook(mock_history_service)
+        return LLMHistoryHook(mock_history_service)
     
     @pytest.fixture
     def sample_llm_interaction(self):
@@ -79,8 +74,8 @@ class TestTypedLLMHistoryHook:
     
     def test_hook_initialization(self, mock_history_service):
         """Test hook initializes correctly."""
-        hook = TypedLLMHistoryHook(mock_history_service)
-        assert hook.name == "typed_llm_history"
+        hook = LLMHistoryHook(mock_history_service)
+        assert hook.name == "llm_history"
         assert hook.history_service == mock_history_service
     
     @pytest.mark.asyncio
@@ -102,7 +97,7 @@ class TestTypedLLMHistoryHook:
     @pytest.mark.asyncio
     async def test_execute_applies_truncation(self, llm_hook, mock_history_service, sample_llm_interaction):
         """Test that execute applies content truncation before storing."""
-        with patch('tarsy.hooks.typed_history_hooks._apply_llm_interaction_truncation') as mock_truncate:
+        with patch('tarsy.hooks.history_hooks._apply_llm_interaction_truncation') as mock_truncate:
             # Configure mock to return a modified interaction
             truncated_interaction = sample_llm_interaction.model_copy()
             mock_truncate.return_value = truncated_interaction
@@ -149,7 +144,7 @@ class TestTypedLLMHistoryHook:
 
 
 @pytest.mark.unit
-class TestTypedMCPHistoryHook:
+class TestMCPHistoryHook:
     """Test typed MCP history hook."""
     
     @pytest.fixture
@@ -162,7 +157,7 @@ class TestTypedMCPHistoryHook:
     @pytest.fixture
     def mcp_hook(self, mock_history_service):
         """Create MCP history hook."""
-        return TypedMCPHistoryHook(mock_history_service)
+        return MCPHistoryHook(mock_history_service)
     
     @pytest.fixture
     def sample_mcp_interaction(self):
@@ -178,8 +173,8 @@ class TestTypedMCPHistoryHook:
     
     def test_hook_initialization(self, mock_history_service):
         """Test hook initializes correctly."""
-        hook = TypedMCPHistoryHook(mock_history_service)
-        assert hook.name == "typed_mcp_history"
+        hook = MCPHistoryHook(mock_history_service)
+        assert hook.name == "mcp_history"
         assert hook.history_service == mock_history_service
     
     @pytest.mark.asyncio
@@ -191,7 +186,7 @@ class TestTypedMCPHistoryHook:
 
 
 @pytest.mark.unit
-class TestTypedStageExecutionHistoryHook:
+class TestStageExecutionHistoryHook:
     """Test typed stage execution history hook - covers the bug fix for stage creation."""
     
     @pytest.fixture
@@ -205,7 +200,7 @@ class TestTypedStageExecutionHistoryHook:
     @pytest.fixture
     def stage_hook(self, mock_history_service):
         """Create stage execution history hook."""
-        return TypedStageExecutionHistoryHook(mock_history_service)
+        return StageExecutionHistoryHook(mock_history_service)
     
     @pytest.fixture
     def new_stage_execution(self):
@@ -235,8 +230,8 @@ class TestTypedStageExecutionHistoryHook:
     
     def test_hook_initialization(self, mock_history_service):
         """Test hook initializes correctly."""
-        hook = TypedStageExecutionHistoryHook(mock_history_service)
-        assert hook.name == "typed_stage_history"
+        hook = StageExecutionHistoryHook(mock_history_service)
+        assert hook.name == "stage_history"
         assert hook.history_service == mock_history_service
     
     @pytest.mark.asyncio
@@ -275,296 +270,130 @@ class TestTypedStageExecutionHistoryHook:
 
 
 @pytest.mark.unit
-class TestTypedLLMDashboardHook:
-    """Test typed LLM dashboard hook."""
+class TestStageExecutionEventHook:
+    """Test typed stage execution event hook for real-time event publishing."""
     
     @pytest.fixture
-    def mock_dashboard_broadcaster(self):
-        """Mock dashboard broadcaster."""
-        broadcaster = AsyncMock(spec=DashboardBroadcaster)
-        broadcaster.broadcast_interaction_update = AsyncMock(return_value=3)
-        return broadcaster
+    def event_hook(self):
+        """Create stage execution event hook."""
+        from tarsy.hooks.event_hooks import StageExecutionEventHook
+        return StageExecutionEventHook()
     
     @pytest.fixture
-    def dashboard_hook(self, mock_dashboard_broadcaster):
-        """Create LLM dashboard hook."""
-        return TypedLLMDashboardHook(mock_dashboard_broadcaster)
-    
-    @pytest.fixture
-    def sample_llm_interaction(self):
-        """Create sample LLM interaction."""
-        return LLMInteraction(
+    def active_stage_execution(self):
+        """Create active stage execution."""
+        return StageExecution(
+            execution_id="test-stage-execution-0",
             session_id="test-session",
-            model_name="gpt-4", 
-            step_description="Test LLM interaction",
-            conversation=LLMConversation(messages=[
-                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
-                LLMMessage(role=MessageRole.USER, content="test"),
-                LLMMessage(role=MessageRole.ASSISTANT, content="response")
-            ]),
-            duration_ms=1000
-        )
-    
-    def test_hook_initialization(self, mock_dashboard_broadcaster):
-        """Test hook initializes correctly."""
-        hook = TypedLLMDashboardHook(mock_dashboard_broadcaster)
-        assert hook.name == "typed_llm_dashboard"
-        assert hook.dashboard_broadcaster == mock_dashboard_broadcaster
-    
-    @pytest.mark.asyncio
-    async def test_execute_success(self, dashboard_hook, mock_dashboard_broadcaster, sample_llm_interaction):
-        """Test successful execution broadcasts update."""
-        await dashboard_hook.execute(sample_llm_interaction)
-        
-        # Verify broadcast was called
-        mock_dashboard_broadcaster.broadcast_interaction_update.assert_called_once()
-        
-        # Check the update data structure
-        call_args = mock_dashboard_broadcaster.broadcast_interaction_update.call_args
-        assert call_args[1]["session_id"] == "test-session"  # keyword args
-        update_data = call_args[1]["update_data"]
-        assert update_data["type"] == "llm_interaction"
-        assert update_data["session_id"] == "test-session"
-    
-    @pytest.mark.asyncio 
-    async def test_execute_handles_broadcast_error(self, dashboard_hook, mock_dashboard_broadcaster, sample_llm_interaction):
-        """Test execution handles broadcast errors gracefully."""
-        mock_dashboard_broadcaster.broadcast_interaction_update.side_effect = Exception("Broadcast error")
-        
-        # Should raise the exception (hook doesn't catch it)
-        with pytest.raises(Exception, match="Broadcast error"):
-            await dashboard_hook.execute(sample_llm_interaction)
-    
-    @pytest.mark.asyncio
-    async def test_execute_applies_truncation(self, dashboard_hook, mock_dashboard_broadcaster, sample_llm_interaction):
-        """Test that execute applies content truncation before broadcasting."""
-        with patch('tarsy.hooks.typed_dashboard_hooks._apply_llm_interaction_truncation') as mock_truncate:
-            # Configure mock to return a modified interaction
-            truncated_interaction = sample_llm_interaction.model_copy()
-            mock_truncate.return_value = truncated_interaction
-            
-            await dashboard_hook.execute(sample_llm_interaction)
-            
-            # Verify truncation function was called with original interaction
-            mock_truncate.assert_called_once_with(sample_llm_interaction)
-            
-            # Verify dashboard broadcaster was called
-            mock_dashboard_broadcaster.broadcast_interaction_update.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_execute_with_large_conversation(self, dashboard_hook, mock_dashboard_broadcaster):
-        """Test execution with large conversation that requires truncation."""
-        # Create interaction with large user message
-        large_content = "X" * (MAX_LLM_MESSAGE_CONTENT_SIZE + 1000)
-        large_conversation = LLMConversation(messages=[
-            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
-            LLMMessage(role=MessageRole.USER, content=large_content),
-            LLMMessage(role=MessageRole.ASSISTANT, content="I understand.")
-        ])
-        
-        interaction = LLMInteraction(
-            session_id="test-session",
-            model_name="gpt-4",
-            provider="openai",
-            success=True,
-            conversation=large_conversation
-        )
-        
-        await dashboard_hook.execute(interaction)
-        
-        # Verify dashboard broadcaster was called
-        mock_dashboard_broadcaster.broadcast_interaction_update.assert_called_once()
-        
-        # Get the actual update data that was broadcast
-        call_args = mock_dashboard_broadcaster.broadcast_interaction_update.call_args
-        update_data = call_args[1]["update_data"]
-        
-        # Verify the conversation in the update data was truncated
-        conversation_data = update_data["conversation"]
-        user_message_content = conversation_data["messages"][1]["content"]
-        assert len(user_message_content) <= MAX_LLM_MESSAGE_CONTENT_SIZE + 200  # Allow for metadata
-        assert "[HOOK TRUNCATED" in user_message_content
-
-
-@pytest.mark.unit
-class TestTypedMCPDashboardHook:
-    """Test typed MCP dashboard hook."""
-    
-    @pytest.fixture
-    def mock_dashboard_broadcaster(self):
-        """Mock dashboard broadcaster."""
-        broadcaster = AsyncMock(spec=DashboardBroadcaster)
-        broadcaster.broadcast_interaction_update = AsyncMock(return_value=3)
-        return broadcaster
-    
-    @pytest.fixture
-    def dashboard_hook(self, mock_dashboard_broadcaster):
-        """Create MCP dashboard hook."""
-        return TypedMCPDashboardHook(mock_dashboard_broadcaster)
-    
-    @pytest.fixture
-    def sample_mcp_interaction(self):
-        """Create sample MCP interaction."""
-        return MCPInteraction(
-            session_id="test-session",
-            server_name="test-server",
-            communication_type="tool_call",
-            tool_name="test_tool",
-            step_description="Test MCP interaction",
-            success=True
-        )
-    
-    def test_hook_initialization(self, mock_dashboard_broadcaster):
-        """Test hook initializes correctly."""
-        hook = TypedMCPDashboardHook(mock_dashboard_broadcaster)
-        assert hook.name == "typed_mcp_dashboard"
-        assert hook.dashboard_broadcaster == mock_dashboard_broadcaster
-    
-    @pytest.mark.asyncio
-    async def test_execute_success(self, dashboard_hook, mock_dashboard_broadcaster, sample_mcp_interaction):
-        """Test successful execution broadcasts update."""
-        await dashboard_hook.execute(sample_mcp_interaction)
-        
-        # Verify broadcast was called
-        mock_dashboard_broadcaster.broadcast_interaction_update.assert_called_once()
-        
-        # Check the update data structure
-        call_args = mock_dashboard_broadcaster.broadcast_interaction_update.call_args
-        assert call_args[1]["session_id"] == "test-session"  # keyword args
-        update_data = call_args[1]["update_data"]
-        assert update_data["type"] == "mcp_interaction"
-        assert update_data["session_id"] == "test-session"
-
-
-@pytest.mark.integration
-class TestTypedHooksIntegration:
-    """Integration tests for typed hooks."""
-    
-    @pytest.mark.asyncio
-    async def test_llm_hook_chain_execution(self):
-        """Test that LLM hooks can be chained and executed."""
-        # Create real services (but mocked externals)
-        mock_history_service = Mock(spec=HistoryService)
-        mock_history_service.store_llm_interaction = Mock(return_value=True)
-        
-        mock_broadcaster = AsyncMock(spec=DashboardBroadcaster)
-        mock_broadcaster.broadcast_interaction_update = AsyncMock(return_value=3)
-        
-        # Create hooks
-        history_hook = TypedLLMHistoryHook(mock_history_service)
-        dashboard_hook = TypedLLMDashboardHook(mock_broadcaster)
-        
-        # Create interaction
-        interaction = LLMInteraction(
-            session_id="integration-test",
-            model_name="gpt-4",
-            step_description="Integration test interaction", 
-            conversation=LLMConversation(messages=[
-                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
-                LLMMessage(role=MessageRole.USER, content="test"),
-                LLMMessage(role=MessageRole.ASSISTANT, content="response")
-            ]),
-            duration_ms=1500
-        )
-        
-        # Execute both hooks
-        await history_hook.execute(interaction)
-        await dashboard_hook.execute(interaction)
-        
-        # Verify both executed
-        mock_history_service.store_llm_interaction.assert_called_once_with(interaction)
-        mock_broadcaster.broadcast_interaction_update.assert_called_once()
-    
-    @pytest.mark.asyncio
-    async def test_stage_execution_integration(self):
-        """Integration test for stage execution hook - verifies the bug fix."""
-        # This test ensures stage execution records are properly created
-        # and covers the specific bug we fixed
-        
-        mock_history_service = Mock(spec=HistoryService)
-        mock_history_service.create_stage_execution = AsyncMock(return_value="stage-exec-integration")
-        
-        mock_broadcaster = AsyncMock(spec=DashboardBroadcaster)
-        mock_broadcaster.broadcast_session_update = AsyncMock(return_value=2)
-        
-        # Create hooks
-        from tarsy.hooks.typed_dashboard_hooks import TypedStageExecutionDashboardHook
-        from tarsy.hooks.typed_history_hooks import TypedStageExecutionHistoryHook
-        
-        history_hook = TypedStageExecutionHistoryHook(mock_history_service)
-        dashboard_hook = TypedStageExecutionDashboardHook(mock_broadcaster)
-        
-        # Create new stage execution (the key is started_at_us=None)
-        stage_execution = StageExecution(
-            session_id="integration-test-session",
-            stage_id="integration-stage-0", 
+            stage_id="test-stage-0",
             stage_index=0,
-            stage_name="Integration Test Stage",
+            stage_name="Test Stage",
             agent="KubernetesAgent",
-            status=StageStatus.PENDING.value
-            # started_at_us=None (default) - this was the key bug!
+            status=StageStatus.ACTIVE.value,
+            started_at_us=1640995200000000
         )
-        
-        # Execute both hooks
-        await history_hook.execute(stage_execution)
-        await dashboard_hook.execute(stage_execution)
-        
-        # Verify stage was created (not updated) - this is the bug fix
-        mock_history_service.create_stage_execution.assert_called_once_with(stage_execution)
-        mock_broadcaster.broadcast_session_update.assert_called_once()
+    
+    @pytest.fixture
+    def completed_stage_execution(self):
+        """Create completed stage execution."""
+        return StageExecution(
+            execution_id="test-stage-execution-0",
+            session_id="test-session",
+            stage_id="test-stage-0",
+            stage_index=0,
+            stage_name="Test Stage",
+            agent="KubernetesAgent",
+            status=StageStatus.COMPLETED.value,
+            started_at_us=1640995200000000
+        )
+    
+    @pytest.fixture
+    def failed_stage_execution(self):
+        """Create failed stage execution."""
+        return StageExecution(
+            execution_id="test-stage-execution-0",
+            session_id="test-session",
+            stage_id="test-stage-0",
+            stage_index=0,
+            stage_name="Test Stage",
+            agent="KubernetesAgent",
+            status=StageStatus.FAILED.value,
+            started_at_us=1640995200000000
+        )
+    
+    @pytest.fixture
+    def partial_stage_execution(self):
+        """Create partial stage execution."""
+        return StageExecution(
+            execution_id="test-stage-execution-0",
+            session_id="test-session",
+            stage_id="test-stage-0",
+            stage_index=0,
+            stage_name="Test Stage",
+            agent="KubernetesAgent",
+            status=StageStatus.PARTIAL.value,
+            started_at_us=1640995200000000
+        )
+    
+    def test_hook_initialization(self, event_hook):
+        """Test hook initializes correctly."""
+        assert event_hook.name == "stage_event"
     
     @pytest.mark.asyncio
-    async def test_llm_truncation_integration_end_to_end(self):
-        """Integration test for LLM interaction truncation across history and dashboard hooks."""
-        # Create real services (but mocked externals)
-        mock_history_service = Mock(spec=HistoryService)
-        mock_history_service.store_llm_interaction = Mock(return_value=True)
-        
-        mock_broadcaster = AsyncMock(spec=DashboardBroadcaster)
-        mock_broadcaster.broadcast_interaction_update = AsyncMock(return_value=3)
-        
-        # Create hooks
-        history_hook = TypedLLMHistoryHook(mock_history_service)
-        dashboard_hook = TypedLLMDashboardHook(mock_broadcaster)
-        
-        # Create interaction with large user message that requires truncation
-        large_content = "Z" * (MAX_LLM_MESSAGE_CONTENT_SIZE + 2000)
-        large_conversation = LLMConversation(messages=[
-            LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
-            LLMMessage(role=MessageRole.USER, content=large_content),
-            LLMMessage(role=MessageRole.ASSISTANT, content="I'll help you with that large request.")
-        ])
-        
-        interaction = LLMInteraction(
-            session_id="integration-truncation-test",
-            model_name="gpt-4",
-            provider="openai",
-            success=True,
-            conversation=large_conversation
-        )
-        
-        # Execute both hooks
-        await history_hook.execute(interaction)
-        await dashboard_hook.execute(interaction)
-        
-        # Verify both hooks executed
-        mock_history_service.store_llm_interaction.assert_called_once()
-        mock_broadcaster.broadcast_interaction_update.assert_called_once()
-        
-        # Verify history hook received truncated content
-        history_stored_interaction = mock_history_service.store_llm_interaction.call_args[0][0]
-        history_user_msg = history_stored_interaction.conversation.messages[1]
-        assert len(history_user_msg.content) <= MAX_LLM_MESSAGE_CONTENT_SIZE + 200
-        assert "[HOOK TRUNCATED" in history_user_msg.content
-        
-        # Verify dashboard hook received truncated content
-        dashboard_call_args = mock_broadcaster.broadcast_interaction_update.call_args
-        dashboard_conversation = dashboard_call_args[1]["update_data"]["conversation"]
-        dashboard_user_msg = dashboard_conversation["messages"][1]["content"]
-        assert len(dashboard_user_msg) <= MAX_LLM_MESSAGE_CONTENT_SIZE + 200
-        assert "[HOOK TRUNCATED" in dashboard_user_msg
-        
-        # Verify original interaction was not modified
-        original_user_msg = interaction.conversation.messages[1]
-        assert len(original_user_msg.content) > MAX_LLM_MESSAGE_CONTENT_SIZE
-        assert "[HOOK TRUNCATED" not in original_user_msg.content
+    async def test_execute_active_status_publishes_started(self, event_hook, active_stage_execution):
+        """Test that ACTIVE status publishes stage.started event."""
+        with patch("tarsy.services.events.event_helpers.publish_stage_started", new_callable=AsyncMock) as mock_started:
+            with patch("tarsy.services.events.event_helpers.publish_stage_completed", new_callable=AsyncMock) as mock_completed:
+                await event_hook.execute(active_stage_execution)
+                
+                mock_started.assert_called_once_with(
+                    session_id="test-session",
+                    stage_id="test-stage-execution-0",
+                    stage_name="Test Stage"
+                )
+                mock_completed.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_execute_completed_status_publishes_completed_with_string_value(self, event_hook, completed_stage_execution):
+        """Test that COMPLETED status publishes stage.completed event with string value."""
+        with patch("tarsy.services.events.event_helpers.publish_stage_started", new_callable=AsyncMock) as mock_started:
+            with patch("tarsy.services.events.event_helpers.publish_stage_completed", new_callable=AsyncMock) as mock_completed:
+                await event_hook.execute(completed_stage_execution)
+                
+                mock_started.assert_not_called()
+                mock_completed.assert_called_once_with(
+                    session_id="test-session",
+                    stage_id="test-stage-execution-0",
+                    stage_name="Test Stage",
+                    status="completed"  # Verify it's a string, not enum
+                )
+    
+    @pytest.mark.asyncio
+    async def test_execute_failed_status_publishes_completed_with_string_value(self, event_hook, failed_stage_execution):
+        """Test that FAILED status publishes stage.completed event with string value."""
+        with patch("tarsy.services.events.event_helpers.publish_stage_started", new_callable=AsyncMock) as mock_started:
+            with patch("tarsy.services.events.event_helpers.publish_stage_completed", new_callable=AsyncMock) as mock_completed:
+                await event_hook.execute(failed_stage_execution)
+                
+                mock_started.assert_not_called()
+                mock_completed.assert_called_once_with(
+                    session_id="test-session",
+                    stage_id="test-stage-execution-0",
+                    stage_name="Test Stage",
+                    status="failed"  # Verify it's a string, not enum
+                )
+    
+    @pytest.mark.asyncio
+    async def test_execute_partial_status_publishes_completed_with_string_value(self, event_hook, partial_stage_execution):
+        """Test that PARTIAL status publishes stage.completed event with string value."""
+        with patch("tarsy.services.events.event_helpers.publish_stage_started", new_callable=AsyncMock) as mock_started:
+            with patch("tarsy.services.events.event_helpers.publish_stage_completed", new_callable=AsyncMock) as mock_completed:
+                await event_hook.execute(partial_stage_execution)
+                
+                mock_started.assert_not_called()
+                mock_completed.assert_called_once_with(
+                    session_id="test-session",
+                    stage_id="test-stage-execution-0",
+                    stage_name="Test Stage",
+                    status="partial"  # Verify it's a string, not enum
+                )

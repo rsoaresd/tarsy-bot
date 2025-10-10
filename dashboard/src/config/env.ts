@@ -92,10 +92,14 @@ export const urls = {
   },
   
   // WebSocket endpoints
+  // IMPORTANT: WebSocket connections bypass Vite proxy in development
+  // WebSocket connections cannot be proxied through Vite's HTTP proxy
   websocket: {
-    // Simple rule: use Vite proxy in dev (same port as frontend), production URL in prod
-    base: config.isDevelopment ? `ws://${config.devServerHost}:${config.devServerPort}` : config.prodWsBaseUrl,
-    connect: '/ws',
+    // In development: connect directly to backend (localhost:8000, no auth)
+    // In production: connect to oauth2-proxy (which proxies WebSocket upgrades to backend)
+    // Note: Backend is never exposed directly in production - always behind oauth2-proxy
+    base: config.isDevelopment ? 'ws://localhost:8000' : config.prodWsBaseUrl,
+    connect: '/api/v1/ws',
   },
   
   // OAuth2 endpoints
@@ -126,7 +130,7 @@ export const validateConfig = (): void => {
       devServerHost: config.devServerHost,
       devServerPort: config.devServerPort,
       apiBase: urls.api.base || '(relative - using Vite proxy)',
-      wsBase: urls.websocket.base,
+      wsBase: urls.websocket.base + ' (direct to backend, bypasses Vite proxy)',
     }),
     
     // Production settings

@@ -12,12 +12,12 @@ import {
 import { Refresh, WifiOff, Wifi } from '@mui/icons-material';
 import ActiveAlertCard from './ActiveAlertCard';
 import ChainProgressCard from './ChainProgressCard';
-import { webSocketService } from '../services/websocket';
+import { websocketService } from '../services/websocketService';
 import type { ActiveAlertsPanelProps, SessionUpdate, ChainProgressUpdate, StageProgressUpdate } from '../types';
 
 /**
  * ActiveAlertsPanel component displays currently active/processing alerts
- * with real-time updates via WebSocket connection
+ * with real-time updates via WebSocket
  */
 const ActiveAlertsPanel: React.FC<ActiveAlertsPanelProps> = ({
   sessions = [],
@@ -109,22 +109,31 @@ const ActiveAlertsPanel: React.FC<ActiveAlertsPanelProps> = ({
       });
     };
 
-    // Subscribe to WebSocket events
-    const unsubscribeUpdate = webSocketService.onSessionUpdate(handleSessionUpdate);
-    const unsubscribeCompleted = webSocketService.onSessionCompleted(handleSessionCompleted);
-    const unsubscribeFailed = webSocketService.onSessionFailed(handleSessionFailed);
-    
-    // Subscribe to chain progress events (with fallback for services that don't support them yet)
-    const unsubscribeChainProgress = webSocketService.onChainProgress ? 
-      webSocketService.onChainProgress(handleChainProgress) : () => {};
-    const unsubscribeStageProgress = webSocketService.onStageProgress ? 
-      webSocketService.onStageProgress(handleStageProgress) : () => {};
+    // Combined handler for all session events
+    const handleAllSessionEvents = (update: any) => {
+      const eventType = update.type || '';
+      if (eventType.startsWith('session.')) {
+        handleSessionUpdate(update);
+        if (eventType === 'session.completed') {
+          handleSessionCompleted(update);
+        } else if (eventType === 'session.failed') {
+          handleSessionFailed(update);
+        }
+      } else if (eventType === 'chain.progress') {
+        handleChainProgress(update);
+      } else if (eventType.startsWith('stage.')) {
+        handleStageProgress(update);
+      }
+    };
+
+    // Subscribe to WebSocket events via sessions channel
+    const unsubscribe = websocketService.subscribeToChannel('sessions', handleAllSessionEvents);
 
     // Connect to WebSocket
     (async () => {
       try {
-        await webSocketService.connect();
-        setWsConnected(webSocketService.isConnected);
+        await websocketService.connect();
+        setWsConnected(websocketService.isConnected);
       } catch (error) {
         console.error('Failed to connect to WebSocket:', error);
       }
@@ -132,16 +141,12 @@ const ActiveAlertsPanel: React.FC<ActiveAlertsPanelProps> = ({
 
     // Check connection status periodically
     const connectionCheck = setInterval(() => {
-      setWsConnected(webSocketService.isConnected);
+      setWsConnected(websocketService.isConnected);
     }, 1000);
 
     // Cleanup
     return () => {
-      unsubscribeUpdate();
-      unsubscribeCompleted();
-      unsubscribeFailed();
-      unsubscribeChainProgress();
-      unsubscribeStageProgress();
+      unsubscribe();
       clearInterval(connectionCheck);
     };
   }, []);

@@ -23,7 +23,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 
 import type { ProcessingStatus, ProcessingStatusProps } from '../types';
-import { webSocketService } from '../services/websocket';
+import { websocketService } from '../services/websocketService';
 import { apiClient } from '../services/api';
 
 const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ alertId, onComplete }) => {
@@ -41,20 +41,25 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ alertId, onCom
   
   // Track if onComplete has been called for this alert to prevent duplicates
   const didCompleteRef = useRef(false);
+  
+  // Track terminal state immediately (not waiting for React state update)
+  const isTerminalRef = useRef(false);
 
   useEffect(() => {
     // Reset mount flag on (re)mount or alert change
     isMountedRef.current = true;
     // New alert -> allow onComplete again
     didCompleteRef.current = false;
+    // Reset terminal state for new alert
+    isTerminalRef.current = false;
     
     // Initialize WebSocket connection status
-    const initialConnectionStatus = webSocketService.isConnected;
+    const initialConnectionStatus = websocketService.isConnected;
     setWsConnected(initialConnectionStatus);
     if (!initialConnectionStatus) {
       setWsError('Connecting...');
       setTimeout(() => {
-        if (webSocketService.isConnected) {
+        if (websocketService.isConnected) {
           setWsError(null);
         }
       }, 1000);
@@ -77,14 +82,12 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ alertId, onCom
       
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          console.log(`🔄 Fetching session ID for alert (attempt ${attempt}/${maxAttempts}):`, alertId);
           const response = await apiClient.getSessionIdForAlert(alertId);
           
           if (response.session_id) {
             if (!isMountedRef.current) return; // Component unmounted, skip state updates
             
             setSessionId(response.session_id);
-            console.log('✅ Successfully fetched session ID:', alertId, '→', response.session_id);
             
             // Update status to reflect successful session initialization
             setStatus(prev => prev ? {
@@ -95,35 +98,29 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ alertId, onCom
             } : null);
             
             return;
-          } else {
-            console.log(`⏳ Session ID not yet available for alert ${alertId} (attempt ${attempt}/${maxAttempts})`);
           }
         } catch (error) {
-          console.log(`⚠️ Failed to fetch session ID (attempt ${attempt}/${maxAttempts}):`, error);
+          // Silently retry
         }
         
         // Wait before next attempt (exponential backoff)
         if (attempt < maxAttempts) {
           const delay = retryDelayMs * Math.pow(1.5, attempt - 1);
-          console.log(`⏱️ Waiting ${delay}ms before next attempt...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
-      
-      console.warn('⚠️ Could not fetch session ID after', maxAttempts, 'attempts. Will process all updates (no filtering).');
     };
 
     fetchSessionIdWithRetry();
 
     // Handle connection changes
     const handleConnectionChange = (connected: boolean) => {
-      console.log('🔗 WebSocket connection changed:', connected);
       setWsConnected(connected);
       setWsError(connected ? null : 'Connection lost');
     };
 
     // Set up basic connection monitoring
-    const unsubscribeConnection = webSocketService.onConnectionChange(handleConnectionChange);
+    const unsubscribeConnection = websocketService.onConnectionChange(handleConnectionChange);
     
     return () => {
       isMountedRef.current = false; // Mark component as unmounted
@@ -136,16 +133,11 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ alertId, onCom
     if (!sessionId) {
       return;
     }
-
-    console.log('🔌 Subscribing to session updates for:', sessionId);
     
     // Ensure WebSocket is connected before subscribing
     const setupSubscription = async () => {
       try {
-        await webSocketService.connect();
-        
-        // Subscribe to the session channel on the server
-        webSocketService.subscribeToSessionChannel(sessionId);
+        await websocketService.connect();
       } catch (error) {
         console.error('Failed to connect to WebSocket before subscription:', error);
       }
@@ -153,33 +145,65 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ alertId, onCom
     
     setupSubscription();
     
-    // Handle session-specific updates
+    // Handle session-specific updates using pattern matching for robustness
     const handleSessionUpdate = (update: any) => {
-      // Handle different types of updates
+      const eventType = update.type || '';
+      
+      // Prevent overwriting terminal states with intermediate events (catchup protection)
+      // Once completed or errored, ignore all processing/stage/interaction events
+      // Use ref to check immediately (React state updates are async)
+      if (isTerminalRef.current && !eventType.startsWith('session.')) {
+        return;
+      }
+      
       let updatedStatus: ProcessingStatus | null = null;
 
-      if (update.type === 'session_status_change') {
+      if (eventType.startsWith('session.')) {
+        // Session lifecycle events
+        const isCompleted = eventType === 'session.completed';
+        const isFailed = eventType === 'session.failed';
+        
         updatedStatus = {
           alert_id: alertId,
-          status: update.status === 'completed' ? 'completed' : 
-                 update.status === 'failed' ? 'error' : 'processing',
+          status: isCompleted ? 'completed' : isFailed ? 'error' : 'processing',
           progress: 0,
-          current_step: update.status === 'completed' ? 'Processing completed' : 
-                       update.status === 'failed' ? 'Processing failed' : 'Processing...',
+          current_step: isCompleted ? 'Processing completed' : 
+                       isFailed ? 'Processing failed' : 'Processing...',
           timestamp: new Date().toISOString(),
           error: update.error_message || undefined,
           result: update.final_analysis || undefined
         };
-      } else if (update.type === 'stage_progress') {
+        
+        // Fetch final analysis when session completes (real-time events don't include it)
+        if (isCompleted && sessionId && !update.final_analysis) {
+          (async () => {
+            try {
+              const sessionDetails = await apiClient.getSessionDetail(sessionId);
+              if (sessionDetails.final_analysis && isMountedRef.current) {
+                setStatus(prev => prev ? {
+                  ...prev,
+                  result: sessionDetails.final_analysis || undefined
+                } : prev);
+              }
+            } catch (error) {
+              console.error('Failed to fetch final analysis:', error);
+            }
+          })();
+        }
+      } 
+      else if (eventType.startsWith('stage.')) {
+        // Stage events - always keep status as 'processing'
+        // Terminal state is only determined by session.completed/session.failed
         updatedStatus = {
           alert_id: alertId,
-          status: update.status === 'completed' ? 'completed' : 
-                 update.status === 'failed' ? 'error' : 'processing',
+          status: 'processing',
           progress: 0,
           current_step: `Stage: ${update.stage_name || 'Processing'}`,
           timestamp: new Date().toISOString()
         };
-      } else if (update.type === 'llm_interaction') {
+      } 
+      else if (eventType.startsWith('llm.')) {
+        // LLM interaction events
         updatedStatus = {
           alert_id: alertId,
           status: 'processing',
@@ -187,7 +211,9 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ alertId, onCom
           current_step: 'Analyzing with AI...',
           timestamp: new Date().toISOString()
         };
-      } else if (update.type === 'mcp_interaction') {
+      } 
+      else if (eventType.startsWith('mcp.')) {
+        // MCP interaction events
         updatedStatus = {
           alert_id: alertId,
           status: 'processing',
@@ -198,12 +224,17 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ alertId, onCom
       }
 
       if (updatedStatus) {
+        // Mark terminal state immediately (before React state update) to prevent race conditions
+        // Only session.completed or session.failed should trigger terminal state
+        const isSessionTerminal = eventType === 'session.completed' || eventType === 'session.failed';
+        if (isSessionTerminal) {
+          isTerminalRef.current = true;
+        }
+        
         setStatus(updatedStatus);
         
-        // Call onComplete callback when processing is done (success or failure)
-        if ((updatedStatus.status === 'completed' || updatedStatus.status === 'error') && 
-            onCompleteRef.current && !didCompleteRef.current) {
-          console.log('✅ Alert processing complete. Status:', updatedStatus.status);
+        // Call onComplete callback only when session completes or fails (not on stage.failed)
+        if (isSessionTerminal && onCompleteRef.current && !didCompleteRef.current) {
           didCompleteRef.current = true; // Mark as completed to prevent duplicate calls
           setTimeout(() => {
             if (onCompleteRef.current) {
@@ -215,11 +246,10 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ alertId, onCom
     };
     
     // Set up the session-specific event handler
-    const sessionChannel = `session_${sessionId}`;
-    const unsubscribeSession = webSocketService.onSessionSpecificUpdate(sessionChannel, handleSessionUpdate);
+    const sessionChannel = `session:${sessionId}`;
+    const unsubscribeSession = websocketService.subscribeToChannel(sessionChannel, handleSessionUpdate);
 
     return () => {
-      webSocketService.unsubscribeFromSessionChannel(sessionId);
       unsubscribeSession();
     };
   }, [sessionId, alertId]); // Dependencies: sessionId and alertId

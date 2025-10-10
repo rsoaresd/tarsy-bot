@@ -7,11 +7,11 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, AsyncGenerator
+from typing import TYPE_CHECKING, Any, Dict, Optional, AsyncGenerator
 import base64
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Response
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from cryptography.hazmat.primitives import serialization
@@ -21,12 +21,21 @@ from cachetools import TTLCache
 from tarsy.config.settings import get_settings
 from tarsy.controllers.history_controller import router as history_router
 from tarsy.controllers.alert_controller import router as alert_router
-from tarsy.database.init_db import get_database_info, initialize_database
+from tarsy.controllers.websocket_controller import websocket_router
+from tarsy.database.init_db import (
+    get_database_info,
+    initialize_database,
+    initialize_async_database,
+    get_async_session_factory,
+    dispose_async_database
+)
 from tarsy.models.alert_processing import AlertKey
 from tarsy.models.processing_context import ChainContext
 from tarsy.services.alert_service import AlertService
-from tarsy.services.dashboard_connection_manager import DashboardConnectionManager
 from tarsy.utils.logger import get_module_logger, setup_logging
+
+if TYPE_CHECKING:
+    from tarsy.services.events.manager import EventSystemManager
 
 # Setup logger for this module
 logger = get_module_logger(__name__)
@@ -36,14 +45,14 @@ logger = get_module_logger(__name__)
 jwks_cache: TTLCache = TTLCache(maxsize=1, ttl=3600)  # Cache for 1 hour
 
 alert_service: Optional[AlertService] = None
-dashboard_manager: Optional[DashboardConnectionManager] = None
 alert_processing_semaphore: Optional[asyncio.Semaphore] = None
+event_system_manager: Optional["EventSystemManager"] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
-    global alert_service, dashboard_manager, alert_processing_semaphore
+    global alert_service, alert_processing_semaphore, event_system_manager
     
     # Initialize services
     settings = get_settings()
@@ -80,7 +89,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize AlertService - fail fast on critical configuration errors
     try:
         alert_service = AlertService(settings)
-        dashboard_manager = DashboardConnectionManager()
         
         # Startup
         await alert_service.initialize()
@@ -92,22 +100,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         import sys
         sys.exit(1)  # Exit with error code
     
-    # Initialize dashboard broadcaster
-    await dashboard_manager.initialize_broadcaster()
-    
     # Initialize typed hook system
-    from tarsy.hooks.hook_registry import get_typed_hook_registry
+    from tarsy.hooks.hook_registry import get_hook_registry
     from tarsy.services.history_service import get_history_service
-    typed_hook_registry = get_typed_hook_registry()
+    hook_registry = get_hook_registry()
     if settings.history_enabled and db_init_success:
         history_service = get_history_service()
-        await typed_hook_registry.initialize_hooks(
-            history_service=history_service,
-            dashboard_broadcaster=dashboard_manager.broadcaster
-        )
+        await hook_registry.initialize_hooks(history_service=history_service)
         logger.info("Typed hook system initialized successfully")
     else:
         logger.info("Typed hook system skipped - history service disabled")
+    
+    # Initialize event system (async database engine and event manager)
+    try:
+        from tarsy.services.events.manager import EventSystemManager, set_event_system
+        
+        # Initialize async database engine for event system
+        initialize_async_database(settings.database_url)
+        
+        # Create and start event system manager
+        event_system_manager = EventSystemManager(
+            database_url=settings.database_url,
+            db_session_factory=get_async_session_factory(),
+            event_retention_hours=settings.event_retention_hours,
+            event_cleanup_interval_hours=settings.event_cleanup_interval_hours
+        )
+        await event_system_manager.start()
+        set_event_system(event_system_manager)
+        logger.info("Event system started successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize event system: {e}", exc_info=True)
+        logger.warning("Application will continue without event system")
     
     logger.info("Tarsy started successfully!")
     
@@ -123,9 +146,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Shutdown
     logger.info("Tarsy shutting down...")
     
-    # Shutdown dashboard broadcaster
-    if dashboard_manager is not None:
-        await dashboard_manager.shutdown_broadcaster()
+    # Shutdown event system
+    if event_system_manager is not None:
+        try:
+            await event_system_manager.stop()
+            await dispose_async_database()
+            logger.info("Event system stopped")
+        except Exception as e:
+            logger.error(f"Error stopping event system: {e}", exc_info=True)
     
     if alert_service is not None:
         await alert_service.close()
@@ -153,6 +181,7 @@ app.add_middleware(
 # Register API routers
 app.include_router(history_router, tags=["history"])
 app.include_router(alert_router, tags=["alerts"])
+app.include_router(websocket_router, tags=["websocket"])
 
 from tarsy.controllers.system_controller import router as system_router
 app.include_router(system_router, prefix="/api/v1", tags=["system"])
@@ -185,9 +214,32 @@ async def health_check() -> Dict[str, Any]:
                 history_status = "unhealthy"
                 health_status["status"] = "degraded"  # Overall status degraded if history fails
         
+        # Add event system status
+        event_system_status = "unknown"
+        event_listener_type = "unknown"
+        try:
+            from tarsy.services.events.manager import get_event_system
+            event_system = get_event_system()
+            event_listener = event_system.get_listener() if event_system else None
+            if event_listener and event_listener.running:
+                event_system_status = "healthy"
+            else:
+                event_system_status = "degraded"
+                health_status["status"] = "degraded"
+            event_listener_type = event_listener.__class__.__name__ if event_listener else "unknown"
+        except RuntimeError:
+            event_system_status = "not_initialized"
+        except Exception as e:
+            logger.debug(f"Error getting event system status: {e}")
+            event_system_status = "error"
+        
         health_status["services"] = {
             "alert_processing": "healthy",
             "history_service": history_status,
+            "event_system": {
+                "status": event_system_status,
+                "type": event_listener_type
+            },
             "database": {
                 "enabled": db_info.get("enabled", False),
                 "connected": db_info.get("connection_test", False) if db_info.get("enabled") else None,
@@ -319,51 +371,6 @@ async def get_jwks(response: Response) -> JSONResponse:
                 "message": "Unable to generate JSON Web Key Set"
             }
         ) from e
-
-@app.websocket("/ws/dashboard/{user_id}")
-async def dashboard_websocket_endpoint(websocket: WebSocket, user_id: str) -> None:
-    """WebSocket endpoint for dashboard real-time updates."""
-    if dashboard_manager is None:
-        await websocket.close(code=1011, reason="Service not initialized")
-        return
-        
-    try:
-        logger.info(f"🔌 New WebSocket connection from user: {user_id}")
-        await dashboard_manager.connect(websocket, user_id)
-        
-        # Send initial connection confirmation
-        from tarsy.models.websocket_models import ConnectionEstablished
-        connection_msg = ConnectionEstablished(user_id=user_id)
-        await dashboard_manager.send_to_user(
-            user_id, 
-            connection_msg.model_dump()
-        )
-        
-        # Keep connection alive and handle messages
-        while True:
-            try:
-                # Wait for messages from client (subscription requests, etc.)
-                message_text = await websocket.receive_text()
-                try:
-                    message = json.loads(message_text)
-                    await dashboard_manager.handle_subscription_message(user_id, message)
-                except json.JSONDecodeError:
-                    # Send error response for invalid JSON
-                    from tarsy.models.websocket_models import ErrorMessage
-                    error_msg = ErrorMessage(message="Invalid JSON message format")
-                    await dashboard_manager.send_to_user(
-                        user_id, 
-                        error_msg.model_dump()
-                    )
-            except WebSocketDisconnect:
-                break
-                
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logger.exception(f"Dashboard WebSocket error for user {user_id}: {str(e)}")
-    finally:
-        dashboard_manager.disconnect(user_id)
 
 def mark_session_as_failed(alert: Optional[ChainContext], error_msg: str) -> None:
     """

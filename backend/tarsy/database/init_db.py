@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy import Engine
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, text
 
@@ -92,11 +93,27 @@ def create_database_engine(database_url: str, settings: Optional[Settings] = Non
                 connect_args=connect_args
             )
         else:
-            return create_engine(
+            engine = create_engine(
                 database_url,
                 echo=False,
                 connect_args=connect_args
             )
+            
+            # Enable WAL mode for better concurrent access (sync + async)
+            # This allows the sync history service and async event system to work together
+            try:
+                from sqlalchemy import event as sa_event
+                @sa_event.listens_for(engine, "connect")
+                def set_sqlite_pragma(dbapi_conn, connection_record):
+                    cursor = dbapi_conn.cursor()
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute("PRAGMA busy_timeout=5000")  # 5 second timeout for locks
+                    cursor.close()
+            except Exception:
+                # Skip if engine is mocked in tests
+                pass
+            
+            return engine
 
 
 def create_database_tables(database_url: str) -> bool:
@@ -232,4 +249,135 @@ def get_database_info() -> dict:
         return {
             "enabled": False,
             "error": str(e)
-        } 
+        }
+
+
+# Async database engine and session factory (for event system)
+_async_engine: Optional[AsyncEngine] = None
+_async_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+
+
+def create_async_database_engine(database_url: str, settings: Optional[Settings] = None) -> AsyncEngine:
+    """
+    Create async database engine for event system.
+    
+    Args:
+        database_url: Database connection string
+        settings: Settings instance (will get default if None)
+        
+    Returns:
+        SQLAlchemy async engine configured for the database type
+    """
+    if settings is None:
+        settings = get_settings()
+        
+    db_type = detect_database_type(database_url)
+    
+    if db_type == 'postgresql':
+        # PostgreSQL async URL
+        if not database_url.startswith('postgresql+asyncpg://'):
+            database_url = database_url.replace('postgresql://', 'postgresql+asyncpg://')
+        
+        # PostgreSQL-specific configuration with connection pooling
+        return create_async_engine(
+            database_url,
+            echo=False,
+            pool_size=settings.postgres_pool_size,
+            max_overflow=settings.postgres_max_overflow,
+            pool_timeout=settings.postgres_pool_timeout,
+            pool_recycle=settings.postgres_pool_recycle,
+            pool_pre_ping=settings.postgres_pool_pre_ping,
+            connect_args={
+                "server_settings": {"application_name": "tarsy-events"}
+            }
+        )
+    else:  # SQLite
+        # SQLite async URL
+        if not database_url.startswith('sqlite+aiosqlite://'):
+            # Handle both sqlite:// and sqlite:/// formats
+            if database_url.startswith('sqlite:///'):
+                database_url = database_url.replace('sqlite:///', 'sqlite+aiosqlite:///')
+            elif database_url.startswith('sqlite://'):
+                database_url = database_url.replace('sqlite://', 'sqlite+aiosqlite://')
+        
+        connect_args = {"check_same_thread": False}
+        
+        # Special handling for SQLite in-memory databases
+        if ':memory:' in database_url:
+            return create_async_engine(
+                database_url,
+                echo=False,
+                poolclass=StaticPool,
+                connect_args=connect_args
+            )
+        else:
+            engine = create_async_engine(
+                database_url,
+                echo=False,
+                connect_args=connect_args
+            )
+            
+            # Enable WAL mode for better concurrent access
+            try:
+                from sqlalchemy import event as sa_event
+                @sa_event.listens_for(engine.sync_engine, "connect")
+                def set_sqlite_pragma(dbapi_conn, connection_record):
+                    cursor = dbapi_conn.cursor()
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute("PRAGMA busy_timeout=5000")
+                    cursor.close()
+            except Exception:
+                # Skip if engine is mocked in tests
+                pass
+            
+            return engine
+
+
+def initialize_async_database(database_url: Optional[str] = None) -> None:
+    """
+    Initialize async database engine and session factory for event system.
+    
+    Args:
+        database_url: Optional database URL, uses settings if not provided
+    """
+    global _async_engine, _async_session_factory
+    
+    if database_url is None:
+        settings = get_settings()
+        database_url = settings.database_url
+    
+    _async_engine = create_async_database_engine(database_url)
+    _async_session_factory = async_sessionmaker(
+        _async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False
+    )
+    
+    logger.info(f"Async database engine initialized for: {database_url.split('/')[-1]}")
+
+
+def get_async_session_factory() -> async_sessionmaker[AsyncSession]:
+    """
+    Get async session factory for event system.
+    
+    Returns:
+        Async session factory
+        
+    Raises:
+        RuntimeError: If async database not initialized
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Async database not initialized. Call initialize_async_database() first.")
+    return _async_session_factory
+
+
+async def dispose_async_database() -> None:
+    """Dispose async database engine and cleanup resources."""
+    global _async_engine, _async_session_factory
+    
+    if _async_engine:
+        await _async_engine.dispose()
+        logger.info("Async database engine disposed")
+    
+    _async_engine = None
+    _async_session_factory = None 

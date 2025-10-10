@@ -17,7 +17,7 @@ import {
 } from '@mui/material';
 import { Psychology, BugReport } from '@mui/icons-material';
 import SharedHeader from './SharedHeader';
-import { webSocketService } from '../services/websocket';
+import { websocketService } from '../services/websocketService';
 import { useSession } from '../contexts/SessionContext';
 import type { DetailedSession } from '../types';
 import { useAdvancedAutoScroll } from '../hooks/useAdvancedAutoScroll';
@@ -99,9 +99,7 @@ function SessionDetailPageBase({
     error, 
     refetch, 
     refreshSessionSummary,
-    refreshSessionStages,
-    updateFinalAnalysis,
-    updateSessionStatus 
+    refreshSessionStages
   } = useSession(sessionId);
 
   // Auto-scroll settings
@@ -158,15 +156,7 @@ function SessionDetailPageBase({
     }
   };
 
-
-
-  // No need for manual setup - the hook handles everything automatically
-
-  // Helper functions are now provided by the SessionContext
-
-
-
-  // WebSocket setup for real-time updates
+  // WebSocket setup for real-time updates (catchup events handle race conditions)
   useEffect(() => {
     if (!sessionId) return;
 
@@ -174,8 +164,7 @@ function SessionDetailPageBase({
     
     (async () => {
       try {
-        await webSocketService.connect();
-        webSocketService.subscribeToSessionChannel(sessionId);
+        await websocketService.connect();
       } catch (error) {
         console.error('Failed to connect to WebSocket:', error);
       }
@@ -185,139 +174,84 @@ function SessionDetailPageBase({
     const handleSessionUpdate = (update: any) => {
       console.log(`📡 ${viewType} view received update:`, update.type);
       
-      // Handle different update types with granular updates for optimal performance
-      switch (update.type) {
-        case 'summary_update':
-          // Quick summary refresh - lightweight API call
-          console.log('🔄 Summary update, using lightweight summary refresh');
-          if (sessionId) {
-            refreshSessionSummary(sessionId);
-          }
-          break;
-          
-        case 'session_status_change':
-          // Update status immediately to prevent UI lag
-          updateSessionStatus(update.status, update.error_message);
-          
-          // For major status changes, also refresh stages and analysis
-          if (['completed', 'failed'].includes(update.status)) {
-            console.log('🔄 Major status change, refreshing stages');
-            throttledUpdate(() => {
-              if (sessionId) {
-                refreshSessionStages(sessionId);
-                
-                // Auto-scroll when session completes (MutationObserver will handle this automatically)
-                // tryAutoScroll is no longer needed here
-              }
-            }, 200);
-          }
-          
-          // Always update summary for accurate counts
-          if (sessionId) {
-            refreshSessionSummary(sessionId);
-          }
-          break;
-          
-        case 'llm_interaction':
-        case 'mcp_communication':
-        case 'mcp_interaction':
-          // For ongoing sessions, use lightweight updates
-          if (sessionRef.current?.status === 'in_progress') {
-            console.log('🔄 Activity update, using partial refresh');
-            
-            // Always update summary for real-time statistics (lightweight)
-            if (sessionId) {
-              refreshSessionSummary(sessionId);
-            }
-            
-            // Use throttled partial stage updates instead of full session refresh
-            const updateDelay = viewType === 'conversation' ? 800 : 500;
-            throttledUpdate(() => {
-              if (sessionId) {
-                refreshSessionStages(sessionId);
-                // MutationObserver will detect content changes and auto-scroll automatically
-              }
-            }, updateDelay);
-          }
-          break;
-          
-        case 'stage_update':
-        case 'stage_completed':
-        case 'stage_failed':
-          // Stage events use partial updates
-          console.log('🔄 Stage update, using partial refresh');
-          
-          // Update summary immediately
-          if (sessionId) {
-            refreshSessionSummary(sessionId);
-          }
-          
-          // Use throttled partial update for stage content
+      const eventType = update.type || '';
+      
+      // Use pattern matching for robust event handling
+      if (eventType.startsWith('session.')) {
+        // Session lifecycle events (session.created, session.started, session.completed, session.failed)
+        console.log('🔄 Session lifecycle event, refreshing data');
+        
+        // For major status changes (completed/failed), refresh everything
+        if (eventType === 'session.completed' || eventType === 'session.failed') {
+          console.log('🔄 Session completed/failed - full refresh');
           throttledUpdate(() => {
             if (sessionId) {
               refreshSessionStages(sessionId);
-              // MutationObserver will detect content changes and auto-scroll automatically
             }
-          }, 250);
-          break;
-          
-        case 'final_analysis_update':
-          // Final analysis updates - use direct update if data is available
-          console.log('🔄 Final analysis update');
-          
-          if (update.analysis) {
-            // Direct update if analysis is provided in update
-            updateFinalAnalysis(update.analysis);
-            
-            // MutationObserver will detect the analysis change and auto-scroll automatically
-          } else {
-            // Otherwise use partial refresh
-            throttledUpdate(() => {
-              if (sessionId) {
-                refreshSessionStages(sessionId);
-                
-                // MutationObserver will detect content changes and auto-scroll automatically
-              }
-            }, 150);
-          }
-          break;
-          
-        case 'stage_progress':
-          // Stage progress updates - these often coincide with final analysis
-          console.log('🔄 Stage progress update');
-          
+          }, 200);
+        }
+        
+        // Always update summary for session events
+        if (sessionId) {
+          refreshSessionSummary(sessionId);
+        }
+      }
+      else if (eventType.startsWith('stage.')) {
+        // Stage events (stage.started, stage.completed, stage.failed)
+        console.log('🔄 Stage event, using partial refresh');
+        
+        // Update summary immediately
+        if (sessionId) {
+          refreshSessionSummary(sessionId);
+        }
+        
+        // Use throttled partial update for stage content
+        throttledUpdate(() => {
           if (sessionId) {
-            refreshSessionSummary(sessionId);
-                          throttledUpdate(() => {
-                if (sessionId) {
-                  refreshSessionStages(sessionId);
-                  // MutationObserver will detect content changes and auto-scroll automatically
-                }
-              }, 300);
+            refreshSessionStages(sessionId);
           }
-          break;
-
-        default:
-          // Unknown update types - be conservative and update summary
-          console.log(`🔄 Unknown update type: ${update.type}, using partial refresh`);
+        }, 250);
+      }
+      else if (eventType.startsWith('llm.') || eventType.startsWith('mcp.')) {
+        // LLM/MCP interaction events (llm.interaction, mcp.tool_call, mcp.list_tools)
+        // Only update if session is in progress
+        if (sessionRef.current?.status === 'in_progress') {
+          console.log('🔄 Activity update, using partial refresh');
+          
+          // Always update summary for real-time statistics (lightweight)
           if (sessionId) {
             refreshSessionSummary(sessionId);
           }
           
-          // If it contains data that might affect content, use partial refresh
-          if (update.data || update.content) {
-            throttledUpdate(() => {
-              if (sessionId) {
-                refreshSessionStages(sessionId);
-                // MutationObserver will detect content changes and auto-scroll automatically
-              }
-            }, 800);
-          }
+          // Use throttled partial stage updates
+          const updateDelay = viewType === 'conversation' ? 800 : 500;
+          throttledUpdate(() => {
+            if (sessionId) {
+              refreshSessionStages(sessionId);
+            }
+          }, updateDelay);
+        }
+      }
+      else {
+        // Unknown event type or custom events - conservative update
+        console.log(`🔄 Unknown update type: ${eventType}, using partial refresh`);
+        if (sessionId) {
+          refreshSessionSummary(sessionId);
+        }
+        
+        // If it contains data that might affect content, use partial refresh
+        if (update.data || update.content || update.analysis) {
+          throttledUpdate(() => {
+            if (sessionId) {
+              refreshSessionStages(sessionId);
+            }
+          }, 800);
+        }
       }
     };
 
-    const unsubscribeUpdate = webSocketService.onSessionSpecificUpdate(
-      `session_${sessionId}`, 
+    const unsubscribeUpdate = websocketService.subscribeToChannel(
+      `session:${sessionId}`,
       handleSessionUpdate
     );
 
@@ -325,7 +259,6 @@ function SessionDetailPageBase({
     return () => {
       console.log(`🔌 Cleaning up ${viewType} view WebSocket`);
       unsubscribeUpdate();
-      webSocketService.unsubscribeFromSessionChannel(sessionId);
       
       // Clear any pending throttled updates
       if (updateThrottleRef.current) {
