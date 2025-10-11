@@ -48,24 +48,23 @@ class TestAlertProcessingE2E:
         
         # Convert Alert to dict for the new interface
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         assert isinstance(result, str)
         assert "analysis" in result.lower() or "error" in result.lower()
 
+    @pytest.mark.asyncio
     async def test_agent_selection_and_delegation(
         self, 
         alert_service_with_mocks, 
         sample_alert
     ):
         """Test that the correct agent is selected and instantiated."""
-        alert_service, mock_dependencies = alert_service_with_mocks
+        alert_service, _mock_dependencies = alert_service_with_mocks
         
         # Convert Alert to ChainContext for the new interface
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # New chain-based architecture processes alerts through chains
         # Verify processing completed successfully
@@ -75,6 +74,7 @@ class TestAlertProcessingE2E:
         else:
             assert isinstance(result, str)
 
+    @pytest.mark.asyncio
     async def test_mcp_tool_integration(
         self, 
         alert_service_with_mocks, 
@@ -85,8 +85,7 @@ class TestAlertProcessingE2E:
         
         # Convert Alert to ChainContext for the new interface
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - Verify MCP client interactions
         assert mock_dependencies['mcp_client'].list_tools.call_count >= 0  # May or may not be called depending on agent setup
@@ -95,6 +94,7 @@ class TestAlertProcessingE2E:
         assert result is not None
         assert isinstance(result, str)
 
+    @pytest.mark.asyncio
     async def test_runbook_integration(
         self, 
         alert_service_with_mocks, 
@@ -105,8 +105,7 @@ class TestAlertProcessingE2E:
         
         # Convert Alert to ChainContext for the new interface
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - Verify runbook service was called
         mock_dependencies['runbook'].download_runbook.assert_called_once_with(
@@ -117,6 +116,7 @@ class TestAlertProcessingE2E:
         assert result is not None
         assert isinstance(result, str)
 
+    @pytest.mark.asyncio
     async def test_llm_interactions(
         self,
         alert_service_with_mocks,
@@ -127,10 +127,9 @@ class TestAlertProcessingE2E:
         
         # Convert Alert to ChainContext for the new interface
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
         
         # Act
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - LLM should be available for processing
         mock_dependencies['llm_manager'].is_available.assert_called()
@@ -139,6 +138,7 @@ class TestAlertProcessingE2E:
         assert result is not None
         assert isinstance(result, str)
 
+    @pytest.mark.asyncio
     async def test_progress_tracking(
         self, 
         alert_service_with_mocks, 
@@ -149,13 +149,13 @@ class TestAlertProcessingE2E:
         
         # Convert Alert to ChainContext for the new interface
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Result should indicate processing occurred
         assert result is not None
         assert isinstance(result, str)
 
+    @pytest.mark.asyncio
     async def test_iterative_analysis_flow(
         self, 
         alert_service_with_mocks, 
@@ -166,8 +166,7 @@ class TestAlertProcessingE2E:
         
         # Convert Alert to ChainContext for the new interface
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - Should complete iterative flow
         assert result is not None
@@ -183,6 +182,7 @@ class TestAlertProcessingE2E:
 class TestErrorHandlingScenarios:
     """Test various error handling scenarios in alert processing."""
 
+    @pytest.mark.asyncio
     async def test_unknown_alert_type_error(
         self,
         alert_service
@@ -203,12 +203,11 @@ class TestErrorHandlingScenarios:
         
         # Convert Alert to dict for the new interface
         chain_context = alert_to_api_format(unknown_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
         
         # Mock chain registry to raise exception for unknown type
         with patch.object(alert_service.chain_registry, 'get_chain_for_alert_type', side_effect=ValueError("No chain found for alert type 'Unknown Alert Type'. Available: kubernetes")):
             # Act
-            result = await alert_service.process_alert(chain_context, alert_id)
+            result = await alert_service.process_alert(chain_context)
         
         # Assert - Should return error response
         assert result is not None
@@ -217,6 +216,7 @@ class TestErrorHandlingScenarios:
         assert "no chain found" in result.lower() or "unknown alert type" in result.lower()
         assert "Unknown Alert Type" in result
 
+    @pytest.mark.asyncio
     async def test_llm_unavailable_error(
         self,
         alert_service,
@@ -229,14 +229,14 @@ class TestErrorHandlingScenarios:
         
         # Act
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - Should return error response
         assert result is not None
         assert "error" in result.lower() or "Error" in result
         assert "llm" in result.lower()
 
+    @pytest.mark.asyncio
     async def test_agent_creation_error(
         self,
         alert_service,
@@ -248,8 +248,7 @@ class TestErrorHandlingScenarios:
         with patch.object(alert_service.agent_factory, 'get_agent', side_effect=ValueError("Agent not found")):
             # Act
             chain_context = alert_to_api_format(sample_alert)
-            alert_id = f"test-alert-{uuid.uuid4()}"
-            result = await alert_service.process_alert(chain_context, alert_id)
+            result = await alert_service.process_alert(chain_context)
         
         # Assert - Should return error response
         assert result is not None
@@ -257,6 +256,7 @@ class TestErrorHandlingScenarios:
         # Verify error message contains processing failure info (updated for chain architecture)  
         assert "chain processing fail" in result.lower() or "agent creation" in result.lower()
 
+    @pytest.mark.asyncio
     async def test_runbook_download_error(
         self,
         alert_service,
@@ -270,13 +270,13 @@ class TestErrorHandlingScenarios:
         
         # Act
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - Should return error response
         assert result is not None
         assert "error" in result.lower() or "Error" in result
 
+    @pytest.mark.asyncio
     async def test_mcp_tool_execution_error(
         self,
         alert_service,
@@ -290,14 +290,14 @@ class TestErrorHandlingScenarios:
         
         # Act - Should still complete processing even with tool failures
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - Should still return some form of analysis
         assert result is not None
         # May contain error information but should not be completely empty
         assert len(result) > 50
 
+    @pytest.mark.asyncio
     async def test_llm_response_parsing_error(
         self,
         alert_service,
@@ -312,8 +312,7 @@ class TestErrorHandlingScenarios:
         
         # Act - Should handle parsing errors gracefully
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - Should still return a response (may be error or fallback)
         assert result is not None
@@ -324,6 +323,7 @@ class TestErrorHandlingScenarios:
 class TestAgentSpecialization:
     """Test agent-specific behavior and specialization."""
 
+    @pytest.mark.asyncio
     async def test_kubernetes_agent_mcp_server_assignment(
         self,
         alert_service,
@@ -334,8 +334,7 @@ class TestAgentSpecialization:
         """Test that KubernetesAgent only accesses kubernetes-server."""
         # Act
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        await alert_service.process_alert(chain_context, alert_id)
+        await alert_service.process_alert(chain_context)
         
         # Assert - Verify only kubernetes-server tools are accessed
         list_tools_calls = mock_mcp_client.list_tools.call_args_list
@@ -344,6 +343,7 @@ class TestAgentSpecialization:
             if server_name:
                 assert server_name == "kubernetes-server"
 
+    @pytest.mark.asyncio
     async def test_kubernetes_agent_tool_selection(
         self,
         alert_service,
@@ -354,8 +354,7 @@ class TestAgentSpecialization:
         """Test that KubernetesAgent makes appropriate tool selections."""
         # Act
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        _result = await alert_service.process_alert(chain_context)
         
         # Assert - Verify appropriate Kubernetes tools were called
         tool_calls = mock_mcp_client.call_tool.call_args_list
@@ -365,6 +364,7 @@ class TestAgentSpecialization:
         kubernetes_tools = ["kubectl_get_namespace", "kubectl_get_pods", "kubectl_describe"]
         assert any(tool in called_tools for tool in kubernetes_tools)
 
+    @pytest.mark.asyncio
     async def test_agent_instruction_composition(
         self,
         alert_service,
@@ -374,8 +374,7 @@ class TestAgentSpecialization:
         """Test that agent instructions are properly composed (General + MCP + Custom)."""
         # Act
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        await alert_service.process_alert(chain_context, alert_id)
+        await alert_service.process_alert(chain_context)
         
         # Assert - Verify LLM was called with composed instructions
         mock_client = mock_llm_manager.get_client()
@@ -400,6 +399,7 @@ class TestAgentSpecialization:
 class TestConcurrencyAndPerformance:
     """Test concurrent processing and performance characteristics."""
 
+    @pytest.mark.asyncio
     async def test_concurrent_alert_processing(
         self,
         alert_service,
@@ -424,8 +424,7 @@ class TestConcurrencyAndPerformance:
         tasks = []
         for alert in alerts:
             chain_context = alert_to_api_format(alert)
-            alert_id = f"test-alert-{uuid.uuid4()}"
-            tasks.append(alert_service.process_alert(chain_context, alert_id))
+            tasks.append(alert_service.process_alert(chain_context))
         results = await asyncio.gather(*tasks)
         
         # Assert - All should complete successfully
@@ -434,6 +433,7 @@ class TestConcurrencyAndPerformance:
             assert result is not None
             assert len(result) > 100  # Should have substantial content
 
+    @pytest.mark.asyncio
     async def test_processing_timeout_resilience(
         self,
         alert_service,
@@ -453,9 +453,8 @@ class TestConcurrencyAndPerformance:
         # Act - Process with timeout
         start_time = datetime.now()
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
         result = await asyncio.wait_for(
-            alert_service.process_alert(chain_context, alert_id),
+            alert_service.process_alert(chain_context),
             timeout=5.0  # 5 second timeout
         )
         duration = (datetime.now() - start_time).total_seconds()
@@ -471,6 +470,7 @@ class TestConcurrencyAndPerformance:
 class TestDataFlowValidation:
     """Test data flow and validation throughout the processing pipeline."""
 
+    @pytest.mark.asyncio
     async def test_alert_data_preservation(
         self,
         alert_service,
@@ -480,8 +480,7 @@ class TestDataFlowValidation:
         """Test that alert data is preserved and passed correctly through pipeline."""
         # Act
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - Result should contain alert-specific information
         assert sample_alert.data.get('namespace', '') in result
@@ -489,6 +488,7 @@ class TestDataFlowValidation:
         # Severity is included in the header (mock uses default 'warning', not from alert)
         assert "Severity:" in result or "severity" in result.lower()
 
+    @pytest.mark.asyncio
     async def test_mcp_data_integration(
         self,
         alert_service,
@@ -498,12 +498,10 @@ class TestDataFlowValidation:
     ):
         """Test that MCP tool results are integrated into analysis."""
         # Arrange - Verify MCP client returns expected data
-        expected_namespace_output = "stuck-namespace  Terminating   45m"
         
         # Act
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - MCP tool should have been called and data integrated
         assert mock_mcp_client.call_tool.call_count >= 1
@@ -512,6 +510,7 @@ class TestDataFlowValidation:
         # (exact format depends on LLM response, but should be non-trivial)
         assert len(result) > 200  # Should be substantial analysis using MCP data
 
+    @pytest.mark.asyncio
     async def test_result_format_consistency(
         self,
         alert_service,
@@ -520,8 +519,7 @@ class TestDataFlowValidation:
         """Test that results follow expected format."""
         # Act
         chain_context = alert_to_api_format(sample_alert)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
         
         # Assert - Result should be well-formatted string
         assert isinstance(result, str)
@@ -693,8 +691,7 @@ data:
 
         # Convert to API format
         chain_context = flexible_alert_to_api_format(monitoring_alert_with_nested_data)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
 
         # Verify processing completed
         assert isinstance(result, str)
@@ -716,8 +713,7 @@ data:
 
         # Convert to API format
         chain_context = flexible_alert_to_api_format(database_alert_with_arrays)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
 
         # Verify processing completed
         assert isinstance(result, str)
@@ -736,8 +732,7 @@ data:
 
         # Convert to API format
         chain_context = flexible_alert_to_api_format(network_alert_minimal_data)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        result = await alert_service.process_alert(chain_context)
 
         # Verify processing completed despite minimal data
         assert isinstance(result, str)
@@ -780,8 +775,7 @@ data:
                 "data": {"test": "data"}
             }
             chain_context = flexible_alert_to_api_format(alert_dict)
-            alert_id = f"test-alert-{uuid.uuid4()}"
-            result = await alert_service.process_alert(chain_context, alert_id)
+            result = await alert_service.process_alert(chain_context)
             
             # Verify chain was selected correctly (updated for chain architecture)
             registry_mock.get_chain_for_alert_type.assert_called_with(alert_type)
@@ -825,8 +819,7 @@ data:
         
         # Convert to API format
         chain_context = flexible_alert_to_api_format(monitoring_alert_with_nested_data)
-        alert_id = f"test-alert-{uuid.uuid4()}"
-        result = await alert_service.process_alert(chain_context, alert_id)
+        _result = await alert_service.process_alert(chain_context)
         
         # Verify data preservation
         assert captured_data['alert_data'] is not None
@@ -841,139 +834,3 @@ data:
         
         # Verify session ID was passed
         assert captured_data['session_id'] is not None
-
-
-@pytest.mark.integration
-class TestAlertDuplicateDetection:
-    """Integration tests for alert duplicate detection in the API endpoint."""
-    
-    @pytest.fixture
-    def client(self):
-        """Create test client."""
-        # Initialize the semaphore that main.py expects
-        import asyncio
-
-        import tarsy.main
-        if tarsy.main.alert_processing_semaphore is None:
-            tarsy.main.alert_processing_semaphore = asyncio.Semaphore(5)
-        
-        # Mock alert service to prevent immediate completion
-        mock_alert_service = AsyncMock()
-        mock_alert_service.process_alert = AsyncMock()
-        
-        # Make process_alert hang for a bit to allow duplicate detection
-        async def slow_process_alert(*args, **kwargs):
-            await asyncio.sleep(0.1)  # Small delay to keep alert "in progress"
-            return "mocked result"
-        
-        mock_alert_service.process_alert.side_effect = slow_process_alert
-        tarsy.main.alert_service = mock_alert_service
-        
-        return TestClient(app)
-    
-    def test_duplicate_alert_detection_mechanism(self, client):
-        """Test that the duplicate detection mechanism is in place and working."""
-        # This is a more lenient test that verifies the mechanism exists
-        # rather than testing exact timing which can be fragile in test environments
-        
-        alert_data = {
-            "alert_type": "kubernetes",
-            "runbook": "https://github.com/test/runbooks/blob/master/test.md",
-            "data": {
-                "severity": "critical",
-                "environment": "production",
-                "namespace": "test-duplicate-detection",
-                "message": "Test duplicate detection functionality"
-            }
-        }
-        
-        # Send first alert
-        response1 = client.post("/api/v1/alerts", json=alert_data)
-        assert response1.status_code == 200
-        data1 = response1.json()
-        assert data1["status"] == "queued"
-        
-        # The key insight: verify that AlertKey generation works for identical data
-        from tarsy.models.alert_processing import AlertKey
-        from tarsy.models.alert import ProcessingAlert
-        from tarsy.utils.timestamp import now_us
-        
-        # Create identical chain contexts
-        normalized_data = alert_data["data"].copy()
-        
-        processing_alert1 = ProcessingAlert(
-            alert_type=alert_data["alert_type"],
-            severity="critical",
-            timestamp=now_us(),
-            environment="production",
-            alert_data=normalized_data
-        )
-        
-        processing_alert2 = ProcessingAlert(
-            alert_type=alert_data["alert_type"],
-            severity="critical",
-            timestamp=now_us(),
-            environment="production",
-            alert_data=normalized_data
-        )
-        
-        alert1 = ChainContext.from_processing_alert(
-            processing_alert=processing_alert1,
-            session_id="test-session-1",
-            current_stage_name="initial"
-        )
-        
-        alert2 = ChainContext.from_processing_alert(
-            processing_alert=processing_alert2,
-            session_id="test-session-2",
-            current_stage_name="initial"
-        )
-        
-        # Verify identical alerts generate identical keys (excluding timestamp)
-        key1 = AlertKey.from_chain_context(alert1)
-        key2 = AlertKey.from_chain_context(alert2)
-        assert str(key1) == str(key2), "Identical alerts should generate identical keys"
-        
-        # This test verifies the core mechanism works
-        # End-to-end timing behavior is better tested manually or in staging
-    
-    def test_different_alerts_not_duplicates(self, client):
-        """Test that different alerts are not detected as duplicates."""
-        # Send first alert
-        alert1_data = {
-            "alert_type": "kubernetes",
-            "runbook": "https://github.com/test/runbooks/blob/master/test.md",
-            "data": {
-                "severity": "critical",
-                "environment": "production",
-                "namespace": "namespace-1",
-                "message": "First alert"
-            }
-        }
-        
-        response1 = client.post("/api/v1/alerts", json=alert1_data)
-        assert response1.status_code == 200
-        data1 = response1.json()
-        assert data1["status"] == "queued"
-        first_alert_id = data1["alert_id"]
-        
-        # Send different alert (different namespace)
-        alert2_data = {
-            "alert_type": "kubernetes", 
-            "runbook": "https://github.com/test/runbooks/blob/master/test.md",
-            "data": {
-                "severity": "critical",
-                "environment": "production", 
-                "namespace": "namespace-2",  # Different namespace
-                "message": "First alert"
-            }
-        }
-        
-        response2 = client.post("/api/v1/alerts", json=alert2_data)
-        assert response2.status_code == 200
-        data2 = response2.json()
-        
-        # Should NOT be detected as duplicate
-        assert data2["status"] == "queued"
-        assert data2["alert_id"] != first_alert_id  # Different alert ID
-        assert "submitted for processing" in data2["message"]

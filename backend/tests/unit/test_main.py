@@ -19,10 +19,6 @@ from tarsy.main import (
     lifespan,
     process_alert_background,
 )
-from tarsy.controllers.alert_controller import (
-    alert_keys_lock,
-    processing_alert_keys,
-)
 from tarsy.models.processing_context import ChainContext
 
 
@@ -279,10 +275,11 @@ class TestMainEndpoints:
         assert data["message"] == "Tarsy is running"
         assert data["status"] == "healthy"
 
-    @pytest.mark.parametrize("db_status,expected_status,expected_services", [
+    @pytest.mark.parametrize("db_status,expected_status,expected_http_code,expected_services", [
         (
             {"enabled": True, "connection_test": True, "retention_days": 30},
             "healthy",
+            200,
             {
                 "alert_processing": "healthy",
                 "history_service": "healthy",
@@ -292,6 +289,7 @@ class TestMainEndpoints:
         (
             {"enabled": True, "connection_test": False, "retention_days": 30},
             "degraded",
+            503,
             {
                 "alert_processing": "healthy",
                 "history_service": "unhealthy",
@@ -301,6 +299,7 @@ class TestMainEndpoints:
         (
             {"enabled": False},
             "healthy",
+            200,
             {
                 "alert_processing": "healthy",
                 "history_service": "disabled",
@@ -310,6 +309,7 @@ class TestMainEndpoints:
         (
             Exception("Database error"),
             "unhealthy",
+            503,
             {
                 "alert_processing": "healthy",
                 "history_service": "unhealthy",
@@ -319,7 +319,7 @@ class TestMainEndpoints:
     ])
     @patch('tarsy.main.get_database_info')
     def test_health_endpoint_status(
-        self, mock_db_info, client, db_status, expected_status, expected_services
+        self, mock_db_info, client, db_status, expected_status, expected_http_code, expected_services
     ):
         """Test health endpoint with different database status scenarios."""
         if isinstance(db_status, Exception):
@@ -327,38 +327,46 @@ class TestMainEndpoints:
         else:
             mock_db_info.return_value = db_status
         
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Check basic response structure
-        assert data["status"] == expected_status
-        assert data["service"] == "tarsy"
-        
-        # Timestamp may not be present in unhealthy responses
-        if expected_status != "unhealthy":
-            assert "timestamp" in data
-        
-        # Check services status (only for healthy/degraded responses)
-        if expected_status != "unhealthy":
-            for service, expected_value in expected_services.items():
-                if isinstance(expected_value, dict):
-                    for key, value in expected_value.items():
-                        assert data["services"][service][key] == value, (
-                            f"Service {service}.{key} should be {value}, "
-                            f"got {data['services'][service][key]}"
+        # Mock event system as healthy for these tests
+        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+            mock_event_system = Mock()
+            mock_listener = Mock()
+            mock_listener.running = True
+            mock_event_system.get_listener.return_value = mock_listener
+            mock_get_event_system.return_value = mock_event_system
+            
+            response = client.get("/health")
+            assert response.status_code == expected_http_code
+            data = response.json()
+            
+            # Check basic response structure
+            assert data["status"] == expected_status
+            assert data["service"] == "tarsy"
+            
+            # Timestamp may not be present in unhealthy responses
+            if expected_status != "unhealthy":
+                assert "timestamp" in data
+            
+            # Check services status (only for healthy/degraded responses)
+            if expected_status != "unhealthy":
+                for service, expected_value in expected_services.items():
+                    if isinstance(expected_value, dict):
+                        for key, value in expected_value.items():
+                            assert data["services"][service][key] == value, (
+                                f"Service {service}.{key} should be {value}, "
+                                f"got {data['services'][service][key]}"
+                            )
+                    else:
+                        assert data["services"][service] == expected_value, (
+                            f"Service {service} should be {expected_value}, "
+                            f"got {data['services'][service]}"
                         )
-                else:
-                    assert data["services"][service] == expected_value, (
-                        f"Service {service} should be {expected_value}, "
-                        f"got {data['services'][service]}"
-                    )
-        
-        # Check for error message when unhealthy
-        if expected_status == "unhealthy":
-            assert "error" in data
-            if isinstance(db_status, Exception):
-                assert str(db_status) in data["error"]
+            
+            # Check for error message when unhealthy
+            if expected_status == "unhealthy":
+                assert "error" in data
+                if isinstance(db_status, Exception):
+                    assert str(db_status) in data["error"]
 
     @patch('tarsy.main.get_database_info')
     def test_health_endpoint_with_warnings(self, mock_db_info, client):
@@ -389,12 +397,20 @@ class TestMainEndpoints:
             "runbook_service", "Runbook service disabled"
         )
 
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.json()
+        # Mock event system as healthy for this test
+        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+            mock_event_system = Mock()
+            mock_listener = Mock()
+            mock_listener.running = True
+            mock_event_system.get_listener.return_value = mock_listener
+            mock_get_event_system.return_value = mock_event_system
+            
+            response = client.get("/health")
+            assert response.status_code == 200  # Warnings don't cause 503 - service is still healthy
+            data = response.json()
 
-        # Status should be degraded due to warnings
-        assert data["status"] == "degraded"
+        # Status should remain healthy despite warnings (warnings are non-critical)
+        assert data["status"] == "healthy"
 
         # Verify warnings are present
         assert "warnings" in data
@@ -428,9 +444,17 @@ class TestMainEndpoints:
             "retention_days": 30,
         }
 
-        response = client.get("/health")
-        assert response.status_code == 200
-        data = response.json()
+        # Mock event system as healthy for this test
+        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+            mock_event_system = Mock()
+            mock_listener = Mock()
+            mock_listener.running = True
+            mock_event_system.get_listener.return_value = mock_listener
+            mock_get_event_system.return_value = mock_event_system
+            
+            response = client.get("/health")
+            assert response.status_code == 200
+            data = response.json()
 
         # Status should be healthy
         assert data["status"] == "healthy"
@@ -472,8 +496,6 @@ class TestBackgroundProcessing:
         )
 
     @patch('tarsy.main.alert_service')
-    @patch('tarsy.controllers.alert_controller.processing_alert_keys', {})
-    @patch('tarsy.controllers.alert_controller.alert_keys_lock', asyncio.Lock())
     async def test_process_alert_background_success(
         self, mock_alert_service, mock_alert_data
     ):
@@ -482,43 +504,12 @@ class TestBackgroundProcessing:
         
         # Mock the semaphore to avoid issues
         with patch('tarsy.main.alert_processing_semaphore', asyncio.Semaphore(1)):
-            await process_alert_background("alert-123", mock_alert_data)
+            await process_alert_background("test-session-123", mock_alert_data)
         
-        mock_alert_service.process_alert.assert_called_once_with(
-            mock_alert_data, alert_id="alert-123"
-        )
+        mock_alert_service.process_alert.assert_called_once_with(mock_alert_data)
+
 
     @patch('tarsy.main.alert_service')
-    async def test_process_alert_background_cleanup(
-        self, mock_alert_service, mock_alert_data
-    ):
-        """Test background processing cleans up alert keys."""
-        mock_alert_service.process_alert = AsyncMock(return_value={"status": "success"})
-        
-        # Create a mock AlertKey instance
-        mock_alert_key = Mock()
-        mock_alert_key.__str__ = Mock(return_value="test-key")
-        mock_alert_key.__hash__ = Mock(return_value=12345)
-        
-        # Start with the key in the processing dict
-        with patch(
-            'tarsy.controllers.alert_controller.processing_alert_keys', {mock_alert_key: "alert-123"}
-        ) as mock_processing_keys, \
-             patch('tarsy.controllers.alert_controller.alert_keys_lock', asyncio.Lock()), \
-             patch('tarsy.main.AlertKey.from_chain_context') as mock_from_chain_context:
-            
-            # Mock the factory method to return our test key
-            mock_from_chain_context.return_value = mock_alert_key
-            
-            with patch('tarsy.main.alert_processing_semaphore', asyncio.Semaphore(1)):
-                await process_alert_background("alert-123", mock_alert_data)
-        
-        # Verify the alert key was cleaned up (dict should be empty now)
-        assert mock_alert_key not in mock_processing_keys
-
-    @patch('tarsy.main.alert_service')
-    @patch('tarsy.controllers.alert_controller.processing_alert_keys', {})
-    @patch('tarsy.controllers.alert_controller.alert_keys_lock', asyncio.Lock())
     async def test_process_alert_background_timeout(
         self, mock_alert_service, mock_alert_data
     ):
@@ -530,7 +521,7 @@ class TestBackgroundProcessing:
         with patch('tarsy.main.alert_processing_semaphore', asyncio.Semaphore(1)), \
              patch('tarsy.main.asyncio.wait_for', side_effect=asyncio.TimeoutError()):
             # Should not raise exception, should handle timeout gracefully
-            await process_alert_background("alert-123", mock_alert_data)
+            await process_alert_background("test-session-123", mock_alert_data)
         
         # Verify session was marked as failed
         mock_alert_service._update_session_error.assert_called_once()
@@ -539,8 +530,6 @@ class TestBackgroundProcessing:
         assert "timeout" in call_args[0][1].lower()
 
     @patch('tarsy.main.alert_service')
-    @patch('tarsy.controllers.alert_controller.processing_alert_keys', {})
-    @patch('tarsy.controllers.alert_controller.alert_keys_lock', asyncio.Lock())
     async def test_process_alert_background_invalid_alert(self, mock_alert_service):
         """Test background processing handles invalid alert data gracefully."""
         # Mock process_alert to track if it's called 
@@ -548,7 +537,7 @@ class TestBackgroundProcessing:
         
         with patch('tarsy.main.alert_processing_semaphore', asyncio.Semaphore(1)):
             # Test with None alert - should fail early during logging  
-            await process_alert_background("alert-123", None)
+            await process_alert_background("test-session-123", None)
             
             # Test with valid ChainContext but process_alert fails
             from tarsy.models.alert import ProcessingAlert
@@ -572,23 +561,14 @@ class TestBackgroundProcessing:
                 "Processing failed"
             )
             
-            # Need to mock AlertKey.from_chain_context for cleanup in finally block
-            with patch(
-                'tarsy.main.AlertKey.from_chain_context'
-            ) as mock_from_chain_context:
-                mock_key = Mock()
-                mock_key.__str__ = Mock(return_value="test-key")
-                mock_key.__hash__ = Mock(return_value=12345)
-                mock_from_chain_context.return_value = mock_key
-                await process_alert_background("alert-124", valid_alert)
+            # No alert key cleanup needed anymore - just run the processing
+            await process_alert_background("test-session-124", valid_alert)
         
         # The function should handle errors gracefully and not raise exceptions
         # Even with invalid data, it attempts processing and handles the failure
         assert mock_alert_service.process_alert.call_count >= 1
 
     @patch('tarsy.main.alert_service')
-    @patch('tarsy.controllers.alert_controller.processing_alert_keys', {})
-    @patch('tarsy.controllers.alert_controller.alert_keys_lock', asyncio.Lock())
     async def test_process_alert_background_processing_exception(
         self, mock_alert_service, mock_alert_data
     ):
@@ -600,7 +580,7 @@ class TestBackgroundProcessing:
         
         with patch('tarsy.main.alert_processing_semaphore', asyncio.Semaphore(1)):
             # Should not raise exception, should handle gracefully
-            await process_alert_background("alert-123", mock_alert_data)
+            await process_alert_background("test-session-123", mock_alert_data)
         
         mock_alert_service.process_alert.assert_called_once()
         
@@ -611,17 +591,6 @@ class TestBackgroundProcessing:
         assert "processing error" in call_args[0][1].lower()
 
 
-@pytest.mark.unit
-class TestGlobalState:
-    """Test global state management."""
-
-    def test_processing_alert_keys_initialization(self):
-        """Test processing alert keys dictionary is properly initialized."""
-        assert isinstance(processing_alert_keys, dict)
-
-    def test_alert_keys_lock_initialization(self):
-        """Test alert keys lock is properly initialized."""
-        assert isinstance(alert_keys_lock, asyncio.Lock)
 
 @pytest.mark.unit 
 class TestJWKSEndpoint:
@@ -1022,13 +991,38 @@ class TestCriticalCoverage:
         with patch('tarsy.main.get_database_info') as mock_db_info:
             mock_db_info.side_effect = Exception("Database connection failed")
             
-            # Health endpoint should handle database failures gracefully
+            # Health endpoint should handle database failures gracefully and return 503
             response = client.get("/health")
-            assert response.status_code == 200
+            assert response.status_code == 503  # Unhealthy status returns 503
             data = response.json()
             assert data["status"] == "unhealthy"
             assert "error" in data
 
+    @patch('tarsy.main.get_database_info')
+    def test_health_endpoint_event_system_not_initialized(self, mock_db_info, client):
+        """Test health endpoint marks status as degraded when event system fails to initialize."""
+        # Mock database as healthy
+        mock_db_info.return_value = {
+            "enabled": True,
+            "connection_test": True,
+            "retention_days": 30,
+        }
+        
+        # Mock get_event_system to raise RuntimeError (event system not initialized)
+        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+            mock_get_event_system.side_effect = RuntimeError("Event system not initialized")
+            
+            response = client.get("/health")
+            
+            # Should return 503 (degraded status)
+            assert response.status_code == 503
+            data = response.json()
+            
+            # Overall status should be degraded (critical for multi-replica support)
+            assert data["status"] == "degraded"
+            
+            # Event system status should be "not_initialized"
+            assert data["services"]["event_system"]["status"] == "not_initialized"
 
     def test_websocket_connection_stability(self, client):
         """Test WebSocket connection stability under various conditions."""

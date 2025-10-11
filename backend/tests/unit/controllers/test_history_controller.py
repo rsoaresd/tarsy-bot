@@ -57,7 +57,6 @@ class TestHistoryControllerEndpoints:
         now_us_time = now_us()
         session1 = SessionOverview(
             session_id="session-1",
-            alert_id="alert-1",
             alert_type="NamespaceTerminating",
             agent_type="KubernetesAgent", 
             status=AlertSessionStatus.COMPLETED,
@@ -72,7 +71,6 @@ class TestHistoryControllerEndpoints:
         
         session2 = SessionOverview(
             session_id="session-2", 
-            alert_id="alert-2",
             alert_type="HighCPU",
             agent_type="KubernetesAgent",
             status=AlertSessionStatus.IN_PROGRESS,
@@ -118,7 +116,6 @@ class TestHistoryControllerEndpoints:
         # Verify session data structure
         session = data["sessions"][0]
         assert "session_id" in session
-        assert "alert_id" in session
         assert "alert_type" in session
         assert "agent_type" in session
         assert "status" in session
@@ -244,12 +241,10 @@ class TestHistoryControllerEndpoints:
         mock_sessions = [
             SessionFactory.create_session_overview(
                 session_id="session-1",
-                alert_id="alert-session-1", 
                 status=AlertSessionStatus.COMPLETED
             ),
             SessionFactory.create_session_overview(
                 session_id="session-2",
-                alert_id="alert-session-2",
                 status=AlertSessionStatus.FAILED,
                 llm_interaction_count=0,
                 total_interactions=1
@@ -299,7 +294,6 @@ class TestHistoryControllerEndpoints:
         mock_sessions = [
             SessionFactory.create_session_overview(
                 session_id="session-1",
-                alert_id="alert-session-1",
                 status=AlertSessionStatus.PENDING,
                 completed_at_us=None,  # Still pending
                 llm_interaction_count=0,
@@ -308,7 +302,6 @@ class TestHistoryControllerEndpoints:
             ),
             SessionFactory.create_session_overview(
                 session_id="session-2",
-                alert_id="alert-session-2", 
                 status=AlertSessionStatus.IN_PROGRESS,
                 completed_at_us=None  # Still in progress
             )
@@ -763,7 +756,6 @@ class TestHistoryControllerEndpoints:
         # Create detailed session
         mock_timeline = DetailedSession(
             session_id="test-session-123",
-            alert_id="alert-456",
             alert_type="NamespaceTerminating",
             agent_type="KubernetesAgent",
             status=AlertSessionStatus.COMPLETED,
@@ -838,7 +830,6 @@ class TestHistoryControllerEndpoints:
         
         # The response should have these fields based on the DetailedSession model
         assert "session_id" in data
-        assert "alert_id" in data
         assert "chain_id" in data  # Chain fields are now at top level
         assert "chain_definition" in data
         assert "stages" in data
@@ -1282,7 +1273,6 @@ class TestHistoryControllerResponseFormat:
         
         mock_session = SessionFactory.create_session_overview(
             session_id="test-session",
-            alert_id="test-alert",
             alert_type="TestAlert",
             agent_type="TestAgent",
             llm_interaction_count=0,
@@ -1321,7 +1311,7 @@ class TestHistoryControllerResponseFormat:
         
         session = data["sessions"][0]
         required_fields = {
-            "session_id", "alert_id", "alert_type", "agent_type", 
+            "session_id", "alert_type", "agent_type", 
             "status", "started_at_us", "completed_at_us", "error_message"
         }
         # Allow additional fields that are actually returned (including chain-based fields)
@@ -1401,7 +1391,6 @@ class TestHistoryControllerResponseFormat:
         # Create detailed session
         mock_timeline = DetailedSession(
             session_id="test-session",
-            alert_id="test-alert",
             alert_type="TestAlert",
             agent_type="TestAgent",
             status=AlertSessionStatus.COMPLETED,
@@ -1481,7 +1470,7 @@ class TestHistoryControllerResponseFormat:
         
         # Validate top-level structure (DetailedSession fields)
         expected_fields = {
-            "session_id", "alert_id", "alert_type", "agent_type",
+            "session_id", "alert_type", "agent_type",
             "status", "started_at_us", "completed_at_us", "error_message",
             "chain_id", "chain_definition", "stages", "duration_ms", 
             "session_metadata", "alert_data", "final_analysis",
@@ -1705,7 +1694,6 @@ class TestDashboardEndpoints:
         # Create a proper mock session object with datetime handling
         mock_session = Mock()
         mock_session.session_id = "session_1"
-        mock_session.alert_id = "alert_1"
         mock_session.agent_type = "kubernetes"
         mock_session.alert_type = "PodCrashLooping"
         mock_session.status = "in_progress"
@@ -1741,7 +1729,6 @@ class TestDashboardEndpoints:
         from tarsy.models.db_models import AlertSession
         test_session = AlertSession(
             session_id="session_1",
-            alert_id="alert_1",
             agent_type="kubernetes",
             alert_type="PodCrashLooping",
             status="in_progress",
@@ -1765,7 +1752,6 @@ class TestDashboardEndpoints:
         data = response.json()
         assert len(data) == 1
         assert data[0]["session_id"] == "session_1"
-        assert data[0]["alert_id"] == "alert_1"
         assert data[0]["agent_type"] == "kubernetes"
         assert data[0]["alert_type"] == "PodCrashLooping"
         assert data[0]["status"] == "in_progress"
@@ -2136,7 +2122,6 @@ def create_mock_session(session_id: str, status: str) -> Mock:
     
     mock_session = Mock()
     mock_session.session_id = session_id
-    mock_session.alert_id = f"alert-{session_id}"
     mock_session.agent_type = "KubernetesAgent"
     mock_session.alert_type = "NamespaceTerminating"
     mock_session.status = status
