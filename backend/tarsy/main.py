@@ -35,6 +35,7 @@ from tarsy.utils.logger import get_module_logger, setup_logging
 
 if TYPE_CHECKING:
     from tarsy.services.events.manager import EventSystemManager
+    from tarsy.services.history_cleanup_service import HistoryCleanupService
 
 # Setup logger for this module
 logger = get_module_logger(__name__)
@@ -60,12 +61,14 @@ jwks_cache: TTLCache = TTLCache(maxsize=1, ttl=3600)  # Cache for 1 hour
 alert_service: Optional[AlertService] = None
 alert_processing_semaphore: Optional[asyncio.Semaphore] = None
 event_system_manager: Optional["EventSystemManager"] = None
+history_cleanup_service: Optional["HistoryCleanupService"] = None
+db_manager: Optional[Any] = None  # DatabaseManager for history cleanup service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
-    global alert_service, alert_processing_semaphore, event_system_manager
+    global alert_service, alert_processing_semaphore, event_system_manager, history_cleanup_service, db_manager
     
     # Initialize services
     settings = get_settings()
@@ -146,6 +149,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"Failed to initialize event system: {e}", exc_info=True)
         logger.warning("Application will continue without event system")
     
+    # Initialize history cleanup service
+    if settings.history_enabled and db_init_success:
+        try:
+            from tarsy.services.history_cleanup_service import HistoryCleanupService
+            from tarsy.repositories.base_repository import DatabaseManager
+            
+            # Create and initialize database manager for sync operations
+            # Stored at module level to allow cleanup during shutdown
+            db_manager = DatabaseManager(settings.database_url)
+            db_manager.initialize()
+            
+            # Create and start history cleanup service
+            history_cleanup_service = HistoryCleanupService(
+                db_session_factory=db_manager.get_session,
+                retention_days=settings.history_retention_days,
+                cleanup_interval_hours=settings.history_cleanup_interval_hours
+            )
+            await history_cleanup_service.start()
+            logger.info("History cleanup service started successfully")
+        except Exception as e:
+            logger.critical(
+                f"Failed to initialize history cleanup service: {e}. "
+                "This is a critical dependency - exiting to allow restart."
+            )
+            import sys
+            sys.exit(1)
+    
     # Set up app state with callback to avoid circular imports
     # The controller will access this callback instead of importing process_alert_background directly
     app.state.process_alert_callback = process_alert_background
@@ -174,6 +204,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.info(f"Graceful shutdown: marked {interrupted_count} sessions as interrupted for pod {pod_id}")
         except Exception as e:
             logger.error(f"Failed to mark sessions as interrupted during shutdown: {str(e)}")
+    
+    # Shutdown history cleanup service
+    if history_cleanup_service is not None:
+        try:
+            await history_cleanup_service.stop()
+            logger.info("History cleanup service stopped")
+        except Exception as e:
+            logger.error(f"Error stopping history cleanup service: {e}", exc_info=True)
+    
+    # Cleanup database manager for history cleanup service
+    if db_manager is not None:
+        try:
+            db_manager.close()
+            logger.info("History cleanup database manager closed")
+        except Exception as e:
+            logger.error(f"Error closing database manager: {e}", exc_info=True)
     
     # Shutdown event system
     if event_system_manager is not None:
@@ -296,7 +342,8 @@ async def health_check(response: Response) -> Dict[str, Any]:
             "database": {
                 "enabled": db_info.get("enabled", False),
                 "connected": db_info.get("connection_test", False) if db_info.get("enabled") else None,
-                "retention_days": db_info.get("retention_days") if db_info.get("enabled") else None
+                "retention_days": db_info.get("retention_days") if db_info.get("enabled") else None,
+                "migration_version": db_info.get("migration_version") if db_info.get("enabled") else None
             }
         }
         
