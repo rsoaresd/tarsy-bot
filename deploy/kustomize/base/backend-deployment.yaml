@@ -30,11 +30,11 @@ spec:
             # This ensures npm cache, logs, and other files go to a writable location
             - name: HOME
               value: /app/data
-            - name: DATABASE_PASSWORD
+            - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: database-secret
-                  key: password
+                  key: database-url
             - name: GOOGLE_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -46,6 +46,10 @@ spec:
                 secretKeyRef:
                   name: tarsy-secrets
                   key: github-token
+            - name: MCP_KUBECONFIG
+              value: /app/.kube/mcp-config
+            - name: JWT_PUBLIC_KEY_PATH
+              value: /app/.keys/jwt_public_key.pem
           envFrom:
             - configMapRef:
                 name: tarsy-config
@@ -60,6 +64,12 @@ spec:
             - name: llm-providers-config
               mountPath: /app/config/llm_providers.yaml
               subPath: llm_providers.yaml
+            - name: mcp-kubeconfig
+              mountPath: /app/.kube/mcp-config
+              subPath: config
+            - name: jwt-keys
+              mountPath: /app/.keys/jwt_public_key.pem
+              subPath: jwt_public_key.pem
           livenessProbe:
             httpGet:
               path: /health
@@ -149,3 +159,11 @@ spec:
         - name: oauth2-templates
           configMap:
             name: oauth2-templates
+        - name: mcp-kubeconfig
+          secret:
+            secretName: mcp-kubeconfig-secret
+            optional: true
+        - name: jwt-keys
+          configMap:
+            name: jwt-keys-config
+            optional: true
