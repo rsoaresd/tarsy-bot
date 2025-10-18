@@ -9,6 +9,7 @@ import LoginButton from './LoginButton';
 import UserMenu from './UserMenu';
 import { SystemWarningBanner } from './SystemWarningBanner';
 import VersionFooter from './VersionFooter';
+import FloatingSubmitAlertFab from './FloatingSubmitAlertFab';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient, handleAPIError } from '../services/api';
 import { websocketService } from '../services/websocketService';
@@ -398,6 +399,7 @@ function DashboardView() {
         <Toolbar>
           {/* Navigation Menu */}
           <IconButton
+            id="navigation-menu-button"
             size="large"
             edge="start"
             color="inherit"
@@ -645,6 +647,9 @@ function DashboardView() {
 
       {/* Version footer */}
       <VersionFooter />
+
+      {/* Floating Action Button for quick alert submission access */}
+      <FloatingSubmitAlertFab />
     </Container>
   );
 }

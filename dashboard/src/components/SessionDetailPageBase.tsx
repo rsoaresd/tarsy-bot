@@ -18,6 +18,7 @@ import {
 import { Psychology, BugReport } from '@mui/icons-material';
 import SharedHeader from './SharedHeader';
 import VersionFooter from './VersionFooter';
+import FloatingSubmitAlertFab from './FloatingSubmitAlertFab';
 import { websocketService } from '../services/websocketService';
 import { useSession } from '../contexts/SessionContext';
 import type { DetailedSession } from '../types';
@@ -506,6 +507,9 @@ function SessionDetailPageBase({
 
       {/* Version footer */}
       <VersionFooter />
+
+      {/* Floating Action Button for quick alert submission access */}
+      <FloatingSubmitAlertFab />
     </Container>
   );
 }
