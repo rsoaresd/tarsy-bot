@@ -14,6 +14,7 @@ import tempfile
 import uuid
 from contextlib import suppress
 from pathlib import Path
+from typing import Optional
 from unittest.mock import patch
 
 import pytest
@@ -398,3 +399,45 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "e2e: mark test as end-to-end test requiring full isolation"
     )
+
+
+# Shared test helpers for mocking LLM streaming responses
+
+
+class MockChunk:
+    """Mock chunk for streaming responses."""
+
+    def __init__(self, content: str = "", usage_metadata: Optional[dict] = None):
+        self.content = content
+        self.usage_metadata = usage_metadata
+
+    def __add__(self, other):
+        """Support chunk aggregation like LangChain does."""
+        if not isinstance(other, MockChunk):
+            return NotImplemented
+        # Aggregate content and usage_metadata
+        new_content = self.content + other.content
+        # For usage metadata, the last one wins (simulating LangChain behavior)
+        new_usage = other.usage_metadata or self.usage_metadata
+        return MockChunk(new_content, new_usage)
+
+    def __radd__(self, other):
+        """Support reverse addition."""
+        if other is None:
+            return self
+        return self.__add__(other)
+
+
+async def create_mock_stream(content: str, usage_metadata: Optional[dict] = None):
+    """
+    Create an async generator that yields mock chunks with usage metadata in final chunk.
+
+    Args:
+        content: The content to stream, yielded character by character
+        usage_metadata: Optional usage metadata to attach to the final chunk
+    """
+    # Yield content character by character
+    for i, char in enumerate(content):
+        # Add usage_metadata only to the final chunk
+        is_final = (i == len(content) - 1)
+        yield MockChunk(char, usage_metadata=usage_metadata if is_final else None)

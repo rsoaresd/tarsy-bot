@@ -69,7 +69,8 @@ make setup
 
 # 2. Configure API keys and OAuth (REQUIRED)
 # Edit backend/.env and set your API keys + OAuth configuration
-# - See [OAuth2-proxy setup docs](docs/oauth2-proxy-setup.md) for GitHub OAuth setup
+# - See config/README.md for OAuth2 proxy customization (client IDs, secrets, org/team)
+# - See docs/oauth2-proxy-setup.md for detailed GitHub OAuth setup guide
 # - Configure LLM providers in backend/.env (GOOGLE_API_KEY, etc.)
 
 # 3. Deploy complete containerized stack
@@ -110,7 +111,7 @@ This deployment is designed for development and testing environments, serving as
 - **🔧 Flexible Alert Processing**: Accept arbitrary JSON payloads from any monitoring system  
 - **🧠 Chain-Based Agent Architecture**: Specialized agents with domain-specific tools and AI reasoning working in coordinated stages
 - **📊 Comprehensive Audit Trail**: Complete visibility into chain processing workflows with stage-level timeline reconstruction
-- **🖥️ SRE Dashboard**: Real-time monitoring and historical analysis with interactive chain timeline visualization
+- **🖥️ SRE Dashboard**: Real-time monitoring with live LLM streaming and interactive chain timeline visualization
 - **🔒 Data Masking**: Automatic protection of sensitive data in logs and responses
 
 ## Architecture

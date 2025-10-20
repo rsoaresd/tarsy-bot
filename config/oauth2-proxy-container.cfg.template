@@ -1,24 +1,50 @@
-## OAuth2 Proxy Config File - Container Version
+## OAuth2 Proxy Config File - Container Version (TEMPLATE)
 ## https://github.com/oauth2-proxy/oauth2-proxy
+##
+## NOTE: This is a TEMPLATE file with placeholders for sensitive values.
+## The actual config (oauth2-proxy-container.cfg) is generated from this template by the Makefile.
+##
+## ⚠️  SECURITY: This template is tracked in git - DO NOT add real secrets here!
+##
+## Template variables (replaced from environment variables during deployment):
+##   - {{ROUTE_HOST}}           = Set via make (default: localhost:8080)
+##   - {{COOKIE_SECURE}}        = Set via make (default: false)
+##   - {{OAUTH2_CLIENT_ID}}     = REQUIRED: export OAUTH2_CLIENT_ID="your-id"
+##   - {{OAUTH2_CLIENT_SECRET}} = REQUIRED: export OAUTH2_CLIENT_SECRET="your-secret"
+##   - {{GITHUB_ORG}}           = OPTIONAL: export GITHUB_ORG="your-org"
+##   - {{GITHUB_TEAM}}          = OPTIONAL: export GITHUB_TEAM="your-team"
+##
+## Setup instructions:
+## 1. Create a GitHub OAuth App at https://github.com/settings/developers
+## 2. Export the credentials: export OAUTH2_CLIENT_ID="..." OAUTH2_CLIENT_SECRET="..."
+## 3. Run: make containers-deploy
+##
+## See config/README.md for detailed setup instructions.
 
 ## <addr>:<port> to listen on for HTTP/HTTPS clients  
 http_address = "0.0.0.0:4180"
 # https_address = ":443"
 
 ## Are we running behind a reverse proxy? Will not accept headers like X-Real-Ip unless this is set.
-reverse_proxy = true
+# reverse_proxy = true
 
 ## TLS Settings
 # tls_cert_file = ""
 # tls_key_file = ""
 
 ## the OAuth Redirect URL.
-# redirect_url = "https://{{ROUTE_HOST}}/oauth2/callback"  # OpenShift deployment: make openshift-deploy
-redirect_url = "http://localhost:8080/oauth2/callback"     # Local containers: make containers-deploy
+# defaults to the "https://" + requested host header + "/oauth2/callback"
+# redirect_url = "https://internalapp.yourcompany.com/oauth2/callback"
+# NOTE: {{ROUTE_HOST}} is automatically replaced during deployment:
+#   - Local containers: localhost:8080 (HTTP)
+#   - OpenShift: <route-hostname> (HTTPS)
+redirect_url = "http://{{ROUTE_HOST}}/oauth2/callback"
 
 ## the http url(s) of the upstream endpoint. If multiple, routing is based on path
-# upstreams = ["http://localhost:8000"]  # OpenShift deployment (sidecar container)
-upstreams = ["http://backend:8000"]      # Local containers (podman-compose)
+upstreams = [
+    "http://backend:8000" # podman-compose
+    # "http://localhost:8000" # openshift - sidecar container communication
+]
 
 # Protect Existing Endpoints
 # - **Main.py endpoints**
@@ -33,7 +59,9 @@ upstreams = ["http://backend:8000"]      # Local containers (podman-compose)
 #   - `GET /api/v1/history/active-sessions` (active sessions)
 #   - `GET /api/v1/history/filter-options` (filter options)
 # - **Unprotected endpoints**
-#   - `GET /health` (main service health check for Kubernetes probes)
+#   - `GET /` (root health check)
+#   - `GET /health` (main service health check)
+#   - `GET /api/v1/history/health` (history service health check)
 
 ## Logging configuration
 #logging_filename = ""
@@ -67,9 +95,9 @@ set_authorization_header = true
 ## For now, ensure OPTIONS requests are allowed
 # Note: CORS headers need to be handled by the backend or a reverse proxy
 
-## Allow redirects
-# whitelist_domains = ["{{ROUTE_HOST}}"]           # OpenShift deployment
-whitelist_domains = ["localhost:8080", "localhost"] # Local containers
+## Allow redirects to route host
+# NOTE: {{ROUTE_HOST}} is replaced by Makefile (localhost:8080 for local, route hostname for OpenShift)
+whitelist_domains = ["{{ROUTE_HOST}}"]
 
 ## Email Domains to allow authentication for (this authorizes any email on this domain)
 ## for more granular authorization use `authenticated_emails_file`
@@ -90,18 +118,31 @@ skip_oidc_discovery = true
 extra_jwt_issuers = ["http://tarsy-backend:8000=tarsy-api"]
 
 provider = "github"
+
 ## The OAuth Client ID, Secret
-## Create GitHub OAuth App at: https://github.com/settings/developers
-## Local: Homepage=http://localhost:8080, Callback=http://localhost:8080/oauth2/callback
-## OpenShift: Homepage=https://{{ROUTE_HOST}}, Callback=https://{{ROUTE_HOST}}/oauth2/callback
-client_id = "YOUR_GITHUB_OAUTH_CLIENT_ID"
-client_secret = "YOUR_GITHUB_OAUTH_CLIENT_SECRET"
+## These values are replaced from environment variables during deployment:
+##   {{OAUTH2_CLIENT_ID}}     - Set via: export OAUTH2_CLIENT_ID="your-client-id"
+##   {{OAUTH2_CLIENT_SECRET}} - Set via: export OAUTH2_CLIENT_SECRET="your-secret"
+##
+## To create a GitHub OAuth App:
+## 1. Go to https://github.com/settings/developers
+## 2. Click "New OAuth App"
+## 3. Set Authorization callback URL to: http://localhost:8080/oauth2/callback (or your ROUTE_HOST)
+## 4. Export the credentials as environment variables (DO NOT commit them!)
+client_id = "{{OAUTH2_CLIENT_ID}}"
+client_secret = "{{OAUTH2_CLIENT_SECRET}}"
 
-## Optional: Restrict to specific GitHub org/team (comment out to allow any GitHub user)
-# github_org = "your-github-org"
-# github_team = "your-team"
+## GitHub organization and team restrictions
+## Only users in this GitHub org/team will be allowed access
+## These can be customized in the template or via environment variables:
+##   {{GITHUB_ORG}}  - Set via: export GITHUB_ORG="your-org"
+##   {{GITHUB_TEAM}} - Set via: export GITHUB_TEAM="your-team"
+github_org = "{{GITHUB_ORG}}"
+github_team = "{{GITHUB_TEAM}}"
 
-## Scopes Added to the request (needed if using github_org/github_team restriction)
+## Scopes Added to the request
+## It has the same behavior as the --scope flag
+## Added read:org to allow reading GitHub organization membership
 scope = "user:email read:org"
 
 ## Pass OAuth Access token to upstream via "X-Forwarded-Access-Token"
@@ -156,17 +197,13 @@ custom_sign_in_logo = "/templates/tarsy-logo.png"
 ## Secure   - secure cookies are only sent by the browser of a HTTPS connection (recommended)
 ## HttpOnly - httponly cookies are not readable by javascript (recommended)
 cookie_name = "_oauth2_proxy"
-cookie_secret = "REPLACE_WITH_BASE64_32_BYTE_SECRET"  # Generate with: openssl rand -base64 32
-# cookie_domains = ["{{ROUTE_HOST}}"]  # OpenShift deployment
-cookie_domains = ["localhost"]         # Local containers
+## CUSTOMIZE for production: Generate a new secret with: python -c 'import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())'
+cookie_secret = "test-secret-123456789012345678901234567890-" # IMPORTANT: This is the default test/dev secret! Do not use it in production!!!
+# NOTE: Template variables replaced by Makefile during deployment:
+#   {{ROUTE_HOST}}     -> localhost:8080 (local) or route hostname (OpenShift)
+#   {{COOKIE_SECURE}}  -> false (local HTTP) or true (OpenShift HTTPS)
+cookie_domains = ["{{ROUTE_HOST}}"]
 cookie_expire = "168h"
 cookie_refresh = "0"
-# cookie_secure = true   # OpenShift deployment (HTTPS)
-cookie_secure = false    # Local containers (HTTP)
+cookie_secure = {{COOKIE_SECURE}}
 cookie_httponly = true
-cookie_samesite = "lax"  # Required for modern browsers; use "lax" for OAuth flows
-
-## Session storage configuration
-## Store full session in cookie to avoid GitHub API validation on every request
-## This reduces GitHub API calls and improves performance
-session_cookie_minimal = false

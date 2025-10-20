@@ -1,12 +1,102 @@
 import { Box, Typography, Divider, Chip } from '@mui/material';
 import { Flag } from '@mui/icons-material';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import ToolCallBox from './ToolCallBox';
 import type { ChatFlowItemData } from '../utils/chatFlowParser';
 
 interface ChatFlowItemProps {
   item: ChatFlowItemData;
 }
+
+/**
+ * Memoized markdown components for final answer rendering
+ * Defined outside component to prevent recreation on every render (which causes visual glitches)
+ */
+const finalAnswerMarkdownComponents = {
+  h1: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, mt: 1.5, fontSize: '1.1rem' }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  h2: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 0.75, mt: 1.25, fontSize: '1rem' }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  h3: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5, mt: 1, fontSize: '0.95rem' }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  p: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography variant="body2" sx={{ mb: 1, lineHeight: 1.7, fontSize: '0.95rem' }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  ul: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Box component="ul" sx={{ mb: 1, pl: 2.5 }} {...safeProps}>
+        {children}
+      </Box>
+    );
+  },
+  ol: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Box component="ol" sx={{ mb: 1, pl: 2.5 }} {...safeProps}>
+        {children}
+      </Box>
+    );
+  },
+  li: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography component="li" variant="body2" sx={{ mb: 0.5, lineHeight: 1.6, fontSize: '0.95rem' }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  code: (props: any) => {
+    const { node, inline, children, ...safeProps } = props;
+    return (
+      <Box
+        component="code"
+        sx={{
+          bgcolor: 'grey.100',
+          px: 0.75,
+          py: 0.25,
+          borderRadius: 0.5,
+          fontFamily: 'monospace',
+          fontSize: '0.85rem'
+        }}
+        {...safeProps}
+      >
+        {children}
+      </Box>
+    );
+  },
+  strong: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Box component="strong" sx={{ fontWeight: 700 }} {...safeProps}>
+        {children}
+      </Box>
+    );
+  }
+};
 
 /**
  * ChatFlowItem Component
@@ -108,63 +198,8 @@ function ChatFlowItem({ item }: ChatFlowItemProps) {
         </Box>
         <Box sx={{ pl: 3.5 }}>
           <ReactMarkdown
-            components={{
-              h1: ({ children }) => (
-                <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, mt: 1.5, fontSize: '1.1rem' }}>
-                  {children}
-                </Typography>
-              ),
-              h2: ({ children }) => (
-                <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 0.75, mt: 1.25, fontSize: '1rem' }}>
-                  {children}
-                </Typography>
-              ),
-              h3: ({ children }) => (
-                <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5, mt: 1, fontSize: '0.95rem' }}>
-                  {children}
-                </Typography>
-              ),
-              p: ({ children }) => (
-                <Typography variant="body2" sx={{ mb: 1, lineHeight: 1.7, fontSize: '0.95rem' }}>
-                  {children}
-                </Typography>
-              ),
-              ul: ({ children }) => (
-                <Box component="ul" sx={{ mb: 1, pl: 2.5 }}>
-                  {children}
-                </Box>
-              ),
-              ol: ({ children }) => (
-                <Box component="ol" sx={{ mb: 1, pl: 2.5 }}>
-                  {children}
-                </Box>
-              ),
-              li: ({ children }) => (
-                <Typography component="li" variant="body2" sx={{ mb: 0.5, lineHeight: 1.6, fontSize: '0.95rem' }}>
-                  {children}
-                </Typography>
-              ),
-              code: ({ children }) => (
-                <Box
-                  component="code"
-                  sx={{
-                    bgcolor: 'grey.100',
-                    px: 0.75,
-                    py: 0.25,
-                    borderRadius: 0.5,
-                    fontFamily: 'monospace',
-                    fontSize: '0.85rem'
-                  }}
-                >
-                  {children}
-                </Box>
-              ),
-              strong: ({ children }) => (
-                <Box component="strong" sx={{ fontWeight: 700 }}>
-                  {children}
-                </Box>
-              )
-            }}
+            urlTransform={defaultUrlTransform}
+            components={finalAnswerMarkdownComponents}
           >
             {item.content || ''}
           </ReactMarkdown>

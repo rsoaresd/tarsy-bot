@@ -11,7 +11,7 @@ import {
   ExpandLess,
   Error as ErrorIcon
 } from '@mui/icons-material';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import type { ConversationStepData } from '../utils/conversationParser';
 import CopyButton from './CopyButton';
 import JsonDisplay from './JsonDisplay';
@@ -217,68 +217,96 @@ function ConversationStep({
                 <Collapse in={isAnalysisExpanded}>
                   <Box sx={{ mt: 1 }}>
                     <ReactMarkdown
+                      urlTransform={defaultUrlTransform}
                       components={{
                         // Custom styling for markdown elements
-                        h1: ({ children }) => (
-                          <Typography variant="h5" gutterBottom sx={{ color: style.color, fontWeight: 'bold' }}>
-                            {children}
-                          </Typography>
-                        ),
-                        h2: ({ children }) => (
-                          <Typography variant="h6" gutterBottom sx={{ color: style.color, fontWeight: 'bold', mt: 2 }}>
-                            {children}
-                          </Typography>
-                        ),
-                        h3: ({ children }) => (
-                          <Typography variant="subtitle1" gutterBottom sx={{ color: style.color, fontWeight: 'bold', mt: 1.5 }}>
-                            {children}
-                          </Typography>
-                        ),
-                        p: ({ children }) => (
-                          <Typography 
-                            variant="body1" 
-                            sx={{ 
-                              lineHeight: 1.6,
-                              fontSize: '0.95rem',
-                              color: style.color,
-                              mb: 1
-                            }}
-                          >
-                            {children}
-                          </Typography>
-                        ),
-                        ul: ({ children }) => (
-                          <Box component="ul" sx={{ pl: 2, mb: 1, color: style.color }}>
-                            {children}
-                          </Box>
-                        ),
-                        li: ({ children }) => (
-                          <Typography component="li" variant="body1" sx={{ fontSize: '0.95rem', lineHeight: 1.6, mb: 0.5 }}>
-                            {children}
-                          </Typography>
-                        ),
-                        code: ({ children, className }) => (
-                          <Typography
-                            component={className?.includes('language-') ? 'pre' : 'code'}
-                            sx={{
-                              fontFamily: 'monospace',
-                              fontSize: '0.85rem',
-                              backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                              padding: className?.includes('language-') ? 1 : 0.5,
-                              borderRadius: 1,
-                              display: className?.includes('language-') ? 'block' : 'inline',
-                              whiteSpace: className?.includes('language-') ? 'pre' : 'pre-wrap',
-                              overflow: 'auto'
-                            }}
-                          >
-                            {children}
-                          </Typography>
-                        ),
-                        strong: ({ children }) => (
-                          <Typography component="strong" sx={{ fontWeight: 'bold', color: style.color }}>
-                            {children}
-                          </Typography>
-                        )
+                        h1: (props) => {
+                          const { node, children, ...safeProps } = props;
+                          return (
+                            <Typography variant="h5" gutterBottom sx={{ color: style.color, fontWeight: 'bold' }} {...safeProps}>
+                              {children}
+                            </Typography>
+                          );
+                        },
+                        h2: (props) => {
+                          const { node, children, ...safeProps } = props;
+                          return (
+                            <Typography variant="h6" gutterBottom sx={{ color: style.color, fontWeight: 'bold', mt: 2 }} {...safeProps}>
+                              {children}
+                            </Typography>
+                          );
+                        },
+                        h3: (props) => {
+                          const { node, children, ...safeProps } = props;
+                          return (
+                            <Typography variant="subtitle1" gutterBottom sx={{ color: style.color, fontWeight: 'bold', mt: 1.5 }} {...safeProps}>
+                              {children}
+                            </Typography>
+                          );
+                        },
+                        p: (props) => {
+                          const { node, children, ...safeProps } = props;
+                          return (
+                            <Typography 
+                              variant="body1" 
+                              sx={{ 
+                                lineHeight: 1.6,
+                                fontSize: '0.95rem',
+                                color: style.color,
+                                mb: 1
+                              }}
+                              {...safeProps}
+                            >
+                              {children}
+                            </Typography>
+                          );
+                        },
+                        ul: (props) => {
+                          const { node, children, ...safeProps } = props;
+                          return (
+                            <Box component="ul" sx={{ pl: 2, mb: 1, color: style.color }} {...safeProps}>
+                              {children}
+                            </Box>
+                          );
+                        },
+                        li: (props) => {
+                          const { node, children, ...safeProps } = props;
+                          return (
+                            <Typography component="li" variant="body1" sx={{ fontSize: '0.95rem', lineHeight: 1.6, mb: 0.5 }} {...safeProps}>
+                              {children}
+                            </Typography>
+                          );
+                        },
+                        code: (props: any) => {
+                          const { node, inline, children, className, ...safeProps } = props;
+                          return (
+                            <Typography
+                              component={className?.includes('language-') ? 'pre' : 'code'}
+                              className={className}
+                              sx={{
+                                fontFamily: 'monospace',
+                                fontSize: '0.85rem',
+                                backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                                padding: className?.includes('language-') ? 1 : 0.5,
+                                borderRadius: 1,
+                                display: className?.includes('language-') ? 'block' : 'inline',
+                                whiteSpace: className?.includes('language-') ? 'pre' : 'pre-wrap',
+                                overflow: 'auto'
+                              }}
+                              {...safeProps}
+                            >
+                              {children}
+                            </Typography>
+                          );
+                        },
+                        strong: (props) => {
+                          const { node, children, ...safeProps } = props;
+                          return (
+                            <Typography component="strong" sx={{ fontWeight: 'bold', color: style.color }} {...safeProps}>
+                              {children}
+                            </Typography>
+                          );
+                        }
                       }}
                     >
                       {step.content}
@@ -320,67 +348,95 @@ function ConversationStep({
                   <Box sx={{ mt: 1 }}>
                 <Box>
                   <ReactMarkdown
+                    urlTransform={defaultUrlTransform}
                     components={{
-                      h1: ({ children }) => (
-                        <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, color: style.color }}>
-                          {children}
-                        </Typography>
-                      ),
-                      h2: ({ children }) => (
-                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, color: style.color }}>
-                          {children}
-                        </Typography>
-                      ),
-                      h3: ({ children }) => (
-                        <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5, color: style.color }}>
-                          {children}
-                        </Typography>
-                      ),
-                      p: ({ children }) => (
-                        <Typography 
-                          variant="body1" 
-                          sx={{ 
-                            lineHeight: 1.6,
-                            fontSize: '0.9rem',
-                            color: style.color,
-                            mb: 1
-                          }}
-                        >
-                          {children}
-                        </Typography>
-                      ),
-                      ul: ({ children }) => (
-                        <Box component="ul" sx={{ pl: 2, mb: 1, color: style.color }}>
-                          {children}
-                        </Box>
-                      ),
-                      li: ({ children }) => (
-                        <Typography component="li" variant="body1" sx={{ fontSize: '0.9rem', lineHeight: 1.6, mb: 0.5 }}>
-                          {children}
-                        </Typography>
-                      ),
-                      code: ({ children, className }) => (
-                        <Typography
-                          component={className?.includes('language-') ? 'pre' : 'code'}
-                          sx={{
-                            fontFamily: 'monospace',
-                            fontSize: '0.8rem',
-                            backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                            padding: className?.includes('language-') ? 1 : 0.5,
-                            borderRadius: 1,
-                            display: className?.includes('language-') ? 'block' : 'inline',
-                            whiteSpace: className?.includes('language-') ? 'pre' : 'pre-wrap',
-                            overflow: 'auto'
-                          }}
-                        >
-                          {children}
-                        </Typography>
-                      ),
-                      strong: ({ children }) => (
-                        <Typography component="strong" sx={{ fontWeight: 'bold', color: style.color }}>
-                          {children}
-                        </Typography>
-                      )
+                      h1: (props) => {
+                        const { node, children, ...safeProps } = props;
+                        return (
+                          <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, color: style.color }} {...safeProps}>
+                            {children}
+                          </Typography>
+                        );
+                      },
+                      h2: (props) => {
+                        const { node, children, ...safeProps } = props;
+                        return (
+                          <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1, color: style.color }} {...safeProps}>
+                            {children}
+                          </Typography>
+                        );
+                      },
+                      h3: (props) => {
+                        const { node, children, ...safeProps } = props;
+                        return (
+                          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5, color: style.color }} {...safeProps}>
+                            {children}
+                          </Typography>
+                        );
+                      },
+                      p: (props) => {
+                        const { node, children, ...safeProps } = props;
+                        return (
+                          <Typography 
+                            variant="body1" 
+                            sx={{ 
+                              lineHeight: 1.6,
+                              fontSize: '0.9rem',
+                              color: style.color,
+                              mb: 1
+                            }}
+                            {...safeProps}
+                          >
+                            {children}
+                          </Typography>
+                        );
+                      },
+                      ul: (props) => {
+                        const { node, children, ...safeProps } = props;
+                        return (
+                          <Box component="ul" sx={{ pl: 2, mb: 1, color: style.color }} {...safeProps}>
+                            {children}
+                          </Box>
+                        );
+                      },
+                      li: (props) => {
+                        const { node, children, ...safeProps } = props;
+                        return (
+                          <Typography component="li" variant="body1" sx={{ fontSize: '0.9rem', lineHeight: 1.6, mb: 0.5 }} {...safeProps}>
+                            {children}
+                          </Typography>
+                        );
+                      },
+                      code: (props: any) => {
+                        const { node, inline, children, className, ...safeProps } = props;
+                        return (
+                          <Typography
+                            component={className?.includes('language-') ? 'pre' : 'code'}
+                            className={className}
+                            sx={{
+                              fontFamily: 'monospace',
+                              fontSize: '0.8rem',
+                              backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                              padding: className?.includes('language-') ? 1 : 0.5,
+                              borderRadius: 1,
+                              display: className?.includes('language-') ? 'block' : 'inline',
+                              whiteSpace: className?.includes('language-') ? 'pre' : 'pre-wrap',
+                              overflow: 'auto'
+                            }}
+                            {...safeProps}
+                          >
+                            {children}
+                          </Typography>
+                        );
+                      },
+                      strong: (props) => {
+                        const { node, children, ...safeProps } = props;
+                        return (
+                          <Typography component="strong" sx={{ fontWeight: 'bold', color: style.color }} {...safeProps}>
+                            {children}
+                          </Typography>
+                        );
+                      }
                     }}
                   >
                     {step.content}

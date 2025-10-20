@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, memo } from 'react';
 import { 
   Box,
   Typography,
@@ -7,11 +7,13 @@ import {
   Chip,
   Alert
 } from '@mui/material';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import { parseSessionChatFlow, getChatFlowStats } from '../utils/chatFlowParser';
 import type { ChatFlowItemData } from '../utils/chatFlowParser';
 import type { DetailedSession } from '../types';
 import ChatFlowItem from './ChatFlowItem';
 import CopyButton from './CopyButton';
+import { websocketService } from '../services/websocketService';
 // Auto-scroll is now handled by the centralized system in SessionDetailPageBase
 
 interface ProcessingIndicatorProps {
@@ -79,6 +81,180 @@ interface ConversationTimelineProps {
   autoScroll?: boolean;
 }
 
+interface StreamingItem {
+  type: 'thought' | 'final_answer';
+  content: string;
+  stage_execution_id?: string;
+  waitingForDb?: boolean; // True when stream completed, waiting for DB confirmation
+}
+
+/**
+ * Memoized markdown components for final answer rendering
+ * Defined outside component to prevent recreation on every render (which causes visual glitches)
+ */
+const finalAnswerMarkdownComponents = {
+  h1: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 1, mt: 1.5, fontSize: '1.1rem' }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  h2: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 0.75, mt: 1.25, fontSize: '1rem' }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  h3: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5, mt: 1, fontSize: '0.95rem' }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  p: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography variant="body2" sx={{ mb: 1, lineHeight: 1.7, fontSize: '0.95rem' }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  ul: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Box component="ul" sx={{ pl: 2, mb: 1 }} {...safeProps}>
+        {children}
+      </Box>
+    );
+  },
+  ol: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Box component="ol" sx={{ pl: 2, mb: 1 }} {...safeProps}>
+        {children}
+      </Box>
+    );
+  },
+  li: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Typography component="li" variant="body2" sx={{ fontSize: '0.95rem', lineHeight: 1.7, mb: 0.5 }} {...safeProps}>
+        {children}
+      </Typography>
+    );
+  },
+  code: (props: any) => {
+    const { node, inline, children, ...safeProps } = props;
+    return (
+      <Box
+        component="code"
+        sx={{
+          bgcolor: '#f5f5f5',
+          px: 0.5,
+          py: 0.25,
+          borderRadius: 0.5,
+          fontSize: '0.9em',
+          fontFamily: 'monospace'
+        }}
+        {...safeProps}
+      >
+        {children}
+      </Box>
+    );
+  },
+  strong: (props: any) => {
+    const { node, children, ...safeProps } = props;
+    return (
+      <Box component="strong" sx={{ fontWeight: 600 }} {...safeProps}>
+        {children}
+      </Box>
+    );
+  }
+};
+
+/**
+ * StreamingItemRenderer Component
+ * Renders streaming items with proper formatting (Markdown for final answers, plain text for thoughts)
+ * Memoized to prevent unnecessary re-renders during rapid streaming updates
+ */
+const StreamingItemRenderer = memo(({ item }: { item: StreamingItem }) => {
+  if (item.type === 'thought') {
+    // Render thought as plain text (matching DB rendering)
+    return (
+      <Box sx={{ mb: 1.5, display: 'flex', gap: 1.5 }}>
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            fontSize: '1.1rem', 
+            lineHeight: 1,
+            flexShrink: 0,
+            mt: 0.25
+          }}
+        >
+          💭
+        </Typography>
+        <Typography 
+          variant="body1" 
+          sx={{ 
+            whiteSpace: 'pre-wrap', 
+            wordBreak: 'break-word',
+            lineHeight: 1.7,
+            fontSize: '1rem',
+            color: 'text.primary'
+          }}
+        >
+          {item.content}
+        </Typography>
+      </Box>
+    );
+  }
+  
+  // Render final answer with Markdown (matching DB rendering)
+  return (
+    <Box sx={{ mb: 2, mt: 3 }}>
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 1 }}>
+        <Typography
+          variant="body2"
+          sx={{
+            fontSize: '1.1rem',
+            lineHeight: 1,
+            flexShrink: 0
+          }}
+        >
+          🎯
+        </Typography>
+        <Typography
+          variant="caption"
+          sx={{
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+            fontSize: '0.75rem',
+            color: '#2e7d32',
+            mt: 0.25
+          }}
+        >
+          Final Answer
+        </Typography>
+      </Box>
+      <Box sx={{ pl: 3.5 }}>
+        <ReactMarkdown
+          urlTransform={defaultUrlTransform}
+          components={finalAnswerMarkdownComponents}
+        >
+          {item.content}
+        </ReactMarkdown>
+      </Box>
+    </Box>
+  );
+});
+
 /**
  * Conversation Timeline Component
  * Renders session as a continuous chat-like flow with thoughts, tool calls, and final answers
@@ -90,6 +266,9 @@ function ConversationTimeline({
 }: ConversationTimelineProps) {
   const [chatFlow, setChatFlow] = useState<ChatFlowItemData[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [streamingItems, setStreamingItems] = useState<Map<string, StreamingItem>>(new Map());
+  // Track which chatFlow items have been "claimed" by deduplication (prevents double-matching)
+  const [claimedChatFlowItems, setClaimedChatFlowItems] = useState<Set<string>>(new Set());
   
   // Memoize chat flow stats to prevent recalculation on every render
   const chatStats = useMemo(() => {
@@ -170,6 +349,124 @@ function ConversationTimeline({
       }
     }
   }, [session]);
+
+  // Subscribe to streaming events
+  useEffect(() => {
+    if (!session.session_id) return;
+    
+    const handleStreamEvent = (event: any) => {
+      if (event.type === 'llm.stream.chunk') {
+        console.log('🌊 Received streaming chunk:', event.stream_type, event.is_complete);
+        
+        setStreamingItems(prev => {
+          const updated = new Map(prev);
+          // Use composite key to keep thought and final_answer separate in the same interaction
+          const key = `${event.stage_execution_id || 'default'}-${event.stream_type}`;
+          
+          if (event.is_complete) {
+            // Stream completed - mark as waiting for DB update
+            // Don't set timeout - let content-based deduplication handle it
+            const existing = prev.get(key);
+            if (existing) {
+              updated.set(key, {
+                ...existing,
+                content: event.chunk, // Final content update
+                waitingForDb: true // Mark as waiting for DB confirmation
+              });
+              console.log('✅ Stream completed, waiting for DB update to deduplicate');
+            } else {
+              // Seed a new entry for completion event with no prior partial entry
+              updated.set(key, {
+                type: event.stream_type as 'thought' | 'final_answer',
+                content: event.chunk,
+                stage_execution_id: event.stage_execution_id,
+                waitingForDb: true
+              });
+              console.log('✅ Stream completed (no prior chunks), waiting for DB update to deduplicate');
+            }
+          } else {
+            // Still streaming - update content
+            updated.set(key, {
+              type: event.stream_type as 'thought' | 'final_answer',
+              content: event.chunk,
+              stage_execution_id: event.stage_execution_id,
+              waitingForDb: false
+            });
+          }
+          
+          return updated;
+        });
+      }
+    };
+    
+    const unsubscribe = websocketService.subscribeToChannel(
+      `session:${session.session_id}`,
+      handleStreamEvent
+    );
+    
+    return () => unsubscribe();
+  }, [session.session_id]);
+
+  // Clear streaming items when their content appears in DB data (smart deduplication with claimed-item tracking)
+  // ONLY runs when chatFlow changes (DB update), NOT when streaming chunks arrive
+  useEffect(() => {
+    setStreamingItems(prev => {
+      // Early exit if nothing to deduplicate
+      if (prev.size === 0 || chatFlow.length === 0) {
+        return prev;
+      }
+      
+      const updated = new Map(prev);
+      const newlyClaimed = new Set(claimedChatFlowItems);
+      let itemsCleared = 0;
+      
+      // For each streaming item (in insertion order = chronological), find its matching unclaimed DB item
+      for (const [key, streamingItem] of prev.entries()) {
+        // Search from OLDEST to NEWEST (last 20 items for performance)
+        // This ensures chronological matching: 1st stream → 1st unclaimed DB item
+        const searchStart = Math.max(0, chatFlow.length - 20);
+        const searchEnd = chatFlow.length;
+        
+        for (let i = searchStart; i < searchEnd; i++) {
+          const dbItem = chatFlow[i];
+          
+          // Create unique key for this DB item (timestamp + type + content hash)
+          const itemKey = `${dbItem.timestamp_us}-${dbItem.type}-${dbItem.content?.substring(0, 50)}`;
+          
+          // Check if: matching type + content, AND not already claimed
+          if (dbItem.type === streamingItem.type && 
+              dbItem.content?.trim() === streamingItem.content?.trim() &&
+              !newlyClaimed.has(itemKey)) {
+            
+            // Found unclaimed match!
+            updated.delete(key); // Clear streaming item
+            newlyClaimed.add(itemKey); // Mark DB item as claimed
+            itemsCleared++;
+            console.log(`🎯 Matched streaming item to unclaimed DB item (ts: ${dbItem.timestamp_us})`);
+            break; // Stop searching for this streaming item
+          }
+        }
+      }
+      
+      // Update claimed items tracking if we claimed new items
+      if (newlyClaimed.size > claimedChatFlowItems.size) {
+        setClaimedChatFlowItems(newlyClaimed);
+      }
+      
+      if (itemsCleared > 0) {
+        console.log(`🧹 Cleared ${itemsCleared} streaming items via claimed-item matching`);
+        return updated; // Return new Map only if we made changes
+      }
+      
+      return prev; // Return same reference to avoid unnecessary re-renders
+    });
+  }, [chatFlow, claimedChatFlowItems]); // Depend on both chatFlow and claimed items
+
+  // Clear claimed items tracking when session changes (cleanup)
+  useEffect(() => {
+    console.log('🔄 Session changed, resetting claimed items tracking');
+    setClaimedChatFlowItems(new Set());
+  }, [session.session_id]);
 
   // Calculate stage stats
   const stageCount = session.stages?.length || 0;
@@ -293,7 +590,22 @@ function ConversationTimeline({
           minHeight: 200
         }}
       >
-        {chatFlow.length === 0 ? (
+        {chatFlow.length === 0 && streamingItems.size > 0 ? (
+          // Show streaming items even before DB has data
+          <Box>
+            {Array.from(streamingItems.entries())
+              // Sort by type to ensure thoughts appear before final answers
+              .sort(([_keyA, itemA], [_keyB, itemB]) => {
+                const priorityA = itemA.type === 'thought' ? 0 : 1;
+                const priorityB = itemB.type === 'thought' ? 0 : 1;
+                return priorityA - priorityB;
+              })
+              .map(([entryKey, entryValue]) => (
+                <StreamingItemRenderer key={entryKey} item={entryValue} />
+              ))}
+            <ProcessingIndicator />
+          </Box>
+        ) : chatFlow.length === 0 ? (
           // Empty/Loading state - show appropriate message based on session status
           <Box>
             {session.status === 'in_progress' ? (
@@ -314,6 +626,21 @@ function ConversationTimeline({
             {chatFlow.map((item) => (
               <ChatFlowItem key={`${item.type}-${item.timestamp_us}`} item={item} />
             ))}
+            
+            {/* Show streaming items at the end (will be cleared by deduplication when DB data arrives) */}
+            {streamingItems.size > 0 && (
+              Array.from(streamingItems.entries())
+                // Sort by type to ensure thoughts appear before final answers (prevents visual glitches)
+                .sort(([_keyA, itemA], [_keyB, itemB]) => {
+                  // Type priority: thought = 0, final_answer = 1
+                  const priorityA = itemA.type === 'thought' ? 0 : 1;
+                  const priorityB = itemB.type === 'thought' ? 0 : 1;
+                  return priorityA - priorityB;
+                })
+                .map(([entryKey, entryValue]) => (
+                  <StreamingItemRenderer key={entryKey} item={entryValue} />
+                ))
+            )}
 
             {/* Processing indicator at bottom when session is still in progress */}
             {session.status === 'in_progress' && <ProcessingIndicator />}

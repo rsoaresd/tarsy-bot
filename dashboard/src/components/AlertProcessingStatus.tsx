@@ -24,7 +24,7 @@ import {
   OpenInNew as OpenInNewIcon,
   Visibility as VisibilityIcon,
 } from '@mui/icons-material';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 
 import type { ProcessingStatus, ProcessingStatusProps } from '../types';
 import { websocketService } from '../services/websocketService';
@@ -375,81 +375,109 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
                 }}
               >
                 <ReactMarkdown
+                  urlTransform={defaultUrlTransform}
                   components={{
                     // Custom styling for markdown elements
-                    h1: ({ children }) => (
-                      <Typography variant="h5" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold' }}>
-                        {children}
-                      </Typography>
-                    ),
-                    h2: ({ children }) => (
-                      <Typography variant="h6" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold', mt: 2 }}>
-                        {children}
-                      </Typography>
-                    ),
-                    h3: ({ children }) => (
-                      <Typography variant="subtitle1" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold', mt: 1.5 }}>
-                        {children}
-                      </Typography>
-                    ),
-                    p: ({ children }) => (
-                      <Typography 
-                        variant="body1" 
-                        sx={{ 
-                          lineHeight: 1.6,
-                          fontSize: '0.95rem',
-                          mb: 1
-                        }}
-                      >
-                        {children}
-                      </Typography>
-                    ),
-                    ul: ({ children }) => (
-                      <Box component="ul" sx={{ pl: 2, mb: 1 }}>
-                        {children}
-                      </Box>
-                    ),
-                    li: ({ children }) => (
-                      <Typography component="li" variant="body1" sx={{ fontSize: '0.95rem', lineHeight: 1.6, mb: 0.5 }}>
-                        {children}
-                      </Typography>
-                    ),
-                    code: ({ children, className }) => (
-                      <Typography
-                        component={className ? "pre" : "code"}
-                        variant="body2"
-                        sx={{
-                          fontFamily: 'monospace',
-                          fontSize: '0.85rem',
-                          bgcolor: className ? 'grey.100' : 'grey.200',
-                          p: className ? 1 : 0.5,
-                          borderRadius: 1,
-                          display: className ? 'block' : 'inline',
-                          whiteSpace: className ? 'pre-wrap' : 'pre',
-                          wordBreak: 'break-word',
-                          border: `1px solid`,
-                          borderColor: 'divider'
-                        }}
-                      >
-                        {children}
-                      </Typography>
-                    ),
-                    blockquote: ({ children }) => (
-                      <Box
-                        component="blockquote"
-                        sx={{
-                          borderLeft: '4px solid',
-                          borderColor: 'primary.main',
-                          pl: 2,
-                          py: 1,
-                          bgcolor: 'grey.50',
-                          fontStyle: 'italic',
-                          mb: 1
-                        }}
-                      >
-                        {children}
-                      </Box>
-                    ),
+                    h1: (props) => {
+                      const { node, children, ...rest } = props;
+                      return (
+                        <Typography variant="h5" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold' }} {...rest}>
+                          {children}
+                        </Typography>
+                      );
+                    },
+                    h2: (props) => {
+                      const { node, children, ...rest } = props;
+                      return (
+                        <Typography variant="h6" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold', mt: 2 }} {...rest}>
+                          {children}
+                        </Typography>
+                      );
+                    },
+                    h3: (props) => {
+                      const { node, children, ...rest } = props;
+                      return (
+                        <Typography variant="subtitle1" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold', mt: 1.5 }} {...rest}>
+                          {children}
+                        </Typography>
+                      );
+                    },
+                    p: (props) => {
+                      const { node, children, ...rest } = props;
+                      return (
+                        <Typography 
+                          variant="body1" 
+                          sx={{ 
+                            lineHeight: 1.6,
+                            fontSize: '0.95rem',
+                            mb: 1
+                          }}
+                          {...rest}
+                        >
+                          {children}
+                        </Typography>
+                      );
+                    },
+                    ul: (props) => {
+                      const { node, children, ...rest } = props;
+                      return (
+                        <Box component="ul" sx={{ pl: 2, mb: 1 }} {...rest}>
+                          {children}
+                        </Box>
+                      );
+                    },
+                    li: (props) => {
+                      const { node, children, ...rest } = props;
+                      return (
+                        <Typography component="li" variant="body1" sx={{ fontSize: '0.95rem', lineHeight: 1.6, mb: 0.5 }} {...rest}>
+                          {children}
+                        </Typography>
+                      );
+                    },
+                    code: (props: any) => {
+                      const { node, inline, children, className, ...rest } = props;
+                      return (
+                        <Typography
+                          component={className ? "pre" : "code"}
+                          variant="body2"
+                          sx={{
+                            fontFamily: 'monospace',
+                            fontSize: '0.85rem',
+                            bgcolor: className ? 'grey.100' : 'grey.200',
+                            p: className ? 1 : 0.5,
+                            borderRadius: 1,
+                            display: className ? 'block' : 'inline',
+                            whiteSpace: className ? 'pre-wrap' : 'pre',
+                            wordBreak: 'break-word',
+                            border: `1px solid`,
+                            borderColor: 'divider'
+                          }}
+                          {...rest}
+                        >
+                          {children}
+                        </Typography>
+                      );
+                    },
+                    blockquote: (props) => {
+                      const { node, children, ...rest } = props;
+                      return (
+                        <Box
+                          component="blockquote"
+                          sx={{
+                            borderLeft: '4px solid',
+                            borderColor: 'primary.main',
+                            pl: 2,
+                            py: 1,
+                            bgcolor: 'grey.50',
+                            fontStyle: 'italic',
+                            mb: 1
+                          }}
+                          {...rest}
+                        >
+                          {children}
+                        </Box>
+                      );
+                    },
                   }}
                 >
                   {status.result}

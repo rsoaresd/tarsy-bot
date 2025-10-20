@@ -14,7 +14,7 @@ import {
   ExpandMore, 
   ExpandLess 
 } from '@mui/icons-material';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import type { FinalAnalysisCardProps } from '../types';
 import CopyButton from './CopyButton';
 
@@ -189,46 +189,67 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage }: FinalAnaly
               }}
             >
               <ReactMarkdown
+                urlTransform={defaultUrlTransform}
                 components={{
                   // Custom styling for markdown elements
-                  h1: ({ children }) => (
-                    <Typography variant="h5" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold' }}>
-                      {children}
-                    </Typography>
-                  ),
-                  h2: ({ children }) => (
-                    <Typography variant="h6" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold', mt: 2 }}>
-                      {children}
-                    </Typography>
-                  ),
-                  h3: ({ children }) => (
-                    <Typography variant="subtitle1" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold', mt: 1.5 }}>
-                      {children}
-                    </Typography>
-                  ),
-                  p: ({ children }) => (
-                    <Typography 
-                      variant="body1" 
-                      sx={{ 
-                        lineHeight: 1.6,
-                        fontSize: '0.95rem',
-                        mb: 1
-                      }}
-                    >
-                      {children}
-                    </Typography>
-                  ),
-                  ul: ({ children }) => (
-                    <Box component="ul" sx={{ pl: 2, mb: 1 }}>
-                      {children}
-                    </Box>
-                  ),
-                  li: ({ children }) => (
-                    <Typography component="li" variant="body1" sx={{ fontSize: '0.95rem', lineHeight: 1.6, mb: 0.5 }}>
-                      {children}
-                    </Typography>
-                  ),
-                  code: ({ children, className }) => {
+                  h1: (props) => {
+                    const { node, children, ...safeProps } = props;
+                    return (
+                      <Typography variant="h5" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold' }} {...safeProps}>
+                        {children}
+                      </Typography>
+                    );
+                  },
+                  h2: (props) => {
+                    const { node, children, ...safeProps } = props;
+                    return (
+                      <Typography variant="h6" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold', mt: 2 }} {...safeProps}>
+                        {children}
+                      </Typography>
+                    );
+                  },
+                  h3: (props) => {
+                    const { node, children, ...safeProps } = props;
+                    return (
+                      <Typography variant="subtitle1" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold', mt: 1.5 }} {...safeProps}>
+                        {children}
+                      </Typography>
+                    );
+                  },
+                  p: (props) => {
+                    const { node, children, ...safeProps } = props;
+                    return (
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          lineHeight: 1.6,
+                          fontSize: '0.95rem',
+                          mb: 1
+                        }}
+                        {...safeProps}
+                      >
+                        {children}
+                      </Typography>
+                    );
+                  },
+                  ul: (props) => {
+                    const { node, children, ...safeProps } = props;
+                    return (
+                      <Box component="ul" sx={{ pl: 2, mb: 1 }} {...safeProps}>
+                        {children}
+                      </Box>
+                    );
+                  },
+                  li: (props) => {
+                    const { node, children, ...safeProps } = props;
+                    return (
+                      <Typography component="li" variant="body1" sx={{ fontSize: '0.95rem', lineHeight: 1.6, mb: 0.5 }} {...safeProps}>
+                        {children}
+                      </Typography>
+                    );
+                  },
+                  code: (props: any) => {
+                    const { node, inline, children, className, ...safeProps } = props;
                     const isCodeBlock = className?.includes('language-');
                     const codeContent = String(children).replace(/\n$/, '');
                     
@@ -273,6 +294,7 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage }: FinalAnaly
                           {/* Code content */}
                           <Typography
                             component="pre"
+                            className={className}
                             sx={{
                               fontFamily: 'monospace',
                               fontSize: '0.875rem',
@@ -283,6 +305,7 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage }: FinalAnaly
                               lineHeight: 1.4,
                               color: 'text.primary'
                             }}
+                            {...safeProps}
                           >
                             {codeContent}
                           </Typography>
@@ -293,6 +316,7 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage }: FinalAnaly
                       return (
                         <Typography
                           component="code"
+                          className={className}
                           sx={{
                             fontFamily: 'monospace',
                             fontSize: '0.85rem',
@@ -303,30 +327,41 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage }: FinalAnaly
                             border: '1px solid',
                             borderColor: 'rgba(0, 0, 0, 0.12)'
                           }}
+                          {...safeProps}
                         >
                           {children}
                         </Typography>
                       );
                     }
                   },
-                  strong: ({ children }) => (
-                    <Typography component="strong" sx={{ fontWeight: 'bold' }}>
-                      {children}
-                    </Typography>
-                  ),
-                  blockquote: ({ children }) => (
-                    <Box sx={{
-                      borderLeft: '4px solid',
-                      borderColor: 'primary.main',
-                      pl: 2,
-                      ml: 0,
-                      fontStyle: 'italic',
-                      color: 'text.secondary',
-                      mb: 1
-                    }}>
-                      {children}
-                    </Box>
-                  )
+                  strong: (props) => {
+                    const { node, children, ...safeProps } = props;
+                    return (
+                      <Typography component="strong" sx={{ fontWeight: 'bold' }} {...safeProps}>
+                        {children}
+                      </Typography>
+                    );
+                  },
+                  blockquote: (props) => {
+                    const { node, children, ...safeProps } = props;
+                    return (
+                      <Box 
+                        component="blockquote"
+                        sx={{
+                          borderLeft: '4px solid',
+                          borderColor: 'primary.main',
+                          pl: 2,
+                          ml: 0,
+                          fontStyle: 'italic',
+                          color: 'text.secondary',
+                          mb: 1
+                        }} 
+                        {...safeProps}
+                      >
+                        {children}
+                      </Box>
+                    );
+                  }
                 }}
               >
                 {analysis}

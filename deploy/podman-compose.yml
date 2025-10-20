@@ -40,8 +40,8 @@ services:
     volumes:
       - ../config:/config:ro                        # Mount configuration files to expected path
     depends_on:
-      database:
-        condition: service_healthy
+      - database
+    restart: on-failure:5
     
   dashboard:
     build:
