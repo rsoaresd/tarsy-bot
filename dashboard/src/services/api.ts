@@ -9,6 +9,10 @@ import { urls } from '../config/env';
 
 const API_BASE_URL = urls.api.base;
 
+// Retry configuration constants - exported for testing
+export const INITIAL_RETRY_DELAY = 500; // ms
+export const MAX_RETRY_DELAY = 5000; // ms - cap at 5 seconds
+
 class APIClient {
   private client: AxiosInstance;
 
@@ -60,6 +64,65 @@ class APIClient {
   }
 
   /**
+   * Retry wrapper for temporary errors with exponential backoff (capped)
+   * Used during backend restarts to automatically retry failed requests
+   * Retries indefinitely until success or non-retryable error
+   */
+  private async retryOnTemporaryError<T>(
+    operation: () => Promise<T>,
+    operationName: string = 'API call'
+  ): Promise<T> {
+    let attempt = 0;
+    
+    while (true) {
+      try {
+        return await operation();
+      } catch (error) {
+        // Determine if this is a retryable error
+        let isRetryable = false;
+        
+        if (error && typeof error === 'object' && 'isAxiosError' in error) {
+          const axiosError = error as AxiosError;
+          
+          // Retry on network errors (no response from server - backend down/restarting)
+          if (axiosError.request && !axiosError.response) {
+            isRetryable = true;
+          }
+          
+          // Retry on 502 Bad Gateway (proxy/routing issues during restart)
+          // Retry on 503 Service Unavailable (backend starting up)
+          // Retry on 504 Gateway Timeout (proxy timeout during heavy load or slow startup)
+          if (axiosError.response?.status === 502 || 
+              axiosError.response?.status === 503 || 
+              axiosError.response?.status === 504) {
+            isRetryable = true;
+          }
+          
+          // Retry on axios timeout errors (ECONNABORTED or similar timeout codes)
+          // These occur when the request exceeds the configured timeout (10s)
+          if (axiosError.code === 'ECONNABORTED' || axiosError.code === 'ETIMEDOUT') {
+            isRetryable = true;
+          }
+        }
+        
+        // If not retryable, fail immediately
+        if (!isRetryable) {
+          throw error;
+        }
+        
+        // Calculate exponential backoff delay with cap at MAX_RETRY_DELAY
+        const exponentialDelay = INITIAL_RETRY_DELAY * Math.pow(2, attempt);
+        const delay = Math.min(exponentialDelay, MAX_RETRY_DELAY);
+        console.log(`🔄 ${operationName} failed, retrying in ${delay}ms... (attempt ${attempt + 1})`);
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, delay));
+        attempt++;
+      }
+    }
+  }
+
+  /**
    * Fetch all sessions (newest first) - Phase 1 method
    * For Phase 1, we fetch all sessions without pagination
    */
@@ -102,6 +165,42 @@ class APIClient {
       console.error('Failed to fetch active sessions:', error);
       throw error;
     }
+  }
+
+  /**
+   * Fetch active sessions with automatic retry on temporary errors
+   * Used during reconnection to handle backend startup delays
+   * Retries indefinitely on network/502/503 errors until backend is ready
+   */
+  async getActiveSessionsWithRetry(): Promise<{ active_sessions: Session[], total_count: number }> {
+    return this.retryOnTemporaryError(
+      () => this.getActiveSessions(),
+      'Get active sessions'
+    );
+  }
+
+  /**
+   * Fetch historical sessions with automatic retry on temporary errors
+   * Used during reconnection to handle backend startup delays
+   * Retries indefinitely on network/502/503/504 errors until backend is ready
+   */
+  async getHistoricalSessionsWithRetry(page: number = 1, pageSize: number = 25): Promise<SessionsResponse> {
+    return this.retryOnTemporaryError(
+      () => this.getHistoricalSessions(page, pageSize),
+      'Get historical sessions'
+    );
+  }
+
+  /**
+   * Fetch filtered sessions with automatic retry on temporary errors
+   * Used during reconnection with active filters to handle backend startup delays
+   * Retries indefinitely on network/502/503/504 errors until backend is ready
+   */
+  async getFilteredSessionsWithRetry(filters: SessionFilter, page: number = 1, pageSize: number = 25): Promise<SessionsResponse> {
+    return this.retryOnTemporaryError(
+      () => this.getFilteredSessions(filters, page, pageSize),
+      'Get filtered sessions'
+    );
   }
 
   /**
@@ -434,7 +533,7 @@ export const handleAPIError = (error: unknown): string => {
     
     // Network error
     if (axiosError.request && !axiosError.response) {
-      return 'Network error. Please check your connection and ensure the backend is running';
+      return 'Unable to connect to backend. The service may be restarting. Please wait or try refreshing.';
     }
     
     // Other axios errors
