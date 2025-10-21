@@ -222,7 +222,8 @@ class AlertService:
     
     async def process_alert(
         self, 
-        chain_context: ChainContext
+        chain_context: ChainContext,
+        send_slack_notification: bool
     ) -> str:
         """
         Process an alert by delegating to the appropriate specialized agent.
@@ -332,6 +333,16 @@ class AlertService:
                 # Publish session.completed event
                 from tarsy.services.events.event_helpers import publish_session_completed
                 await publish_session_completed(chain_context.session_id)
+
+
+                if send_slack_notification:
+                    print(f"Sending slack notification for completed alert {chain_context.alert_type}")
+                    await self.slack_service.send_alert_notification(
+                        alert_type=chain_context.alert_type,
+                        status=AlertSessionStatus.COMPLETED.value,
+                        analysis=final_result,
+                        session_id=chain_context.session_id
+                    )
                 
                 return final_result
             else:
@@ -345,6 +356,15 @@ class AlertService:
                 # Publish session.failed event
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(chain_context.session_id)
+
+                if send_slack_notification:
+                    print(f"Sending slack notification for failed alert {chain_context.alert_type}")
+                    await self.slack_service.send_alert_notification(
+                        alert_type=chain_context.alert_type,
+                        status=AlertSessionStatus.FAILED.value,
+                        error=error_msg,
+                        session_id=chain_context.session_id
+                    )
                 
                 return self._format_error_response(chain_context, error_msg)
                 
@@ -358,6 +378,15 @@ class AlertService:
             # Publish session.failed event
             from tarsy.services.events.event_helpers import publish_session_failed
             await publish_session_failed(chain_context.session_id)
+
+            if send_slack_notification:
+                    print(f"Sending slack notification for failed alert {chain_context.alert_type}")
+                    await self.slack_service.send_alert_notification(
+                        alert_type=chain_context.alert_type,
+                        status=AlertSessionStatus.FAILED.value,
+                        error=error_msg,
+                        session_id=chain_context.session_id
+                    )
             
             return self._format_error_response(chain_context, error_msg)
 

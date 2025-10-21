@@ -189,6 +189,24 @@ class Settings(BaseSettings):
         default_factory=lambda: os.path.expanduser("~/.kube/config"),
         description="Default kubeconfig path for Kubernetes MCP server (tilde expanded)"
     )
+
+    # Slack Configuration
+    slack_webhook_url: str = Field(
+        default="",
+        description="Slack webhook URL for sending notifications"
+    )
+    slack_channel: str = Field(
+        default="#test-tarsy-bot",
+        description="Slack channel for sending notifications"
+    )
+    slack_username: str = Field(
+        default="Tarsy-Bot",
+        description="Slack username for sending notifications"
+    )
+    slack_icon_emoji: str = Field(
+        default=":robot_face:",
+        description="Slack icon emoji for sending notifications"
+    )
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

@@ -511,7 +511,7 @@ async def process_alert_background(session_id: str, alert: ChainContext) -> None
                 # Use configurable timeout for alert processing
                 timeout_seconds = settings.alert_processing_timeout
                 await asyncio.wait_for(
-                    alert_service.process_alert(alert),
+                    alert_service.process_alert(alert, True),
                     timeout=timeout_seconds
                 )
             except asyncio.TimeoutError:
