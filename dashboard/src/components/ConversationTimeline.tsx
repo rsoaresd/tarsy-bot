@@ -82,9 +82,10 @@ interface ConversationTimelineProps {
 }
 
 interface StreamingItem {
-  type: 'thought' | 'final_answer';
+  type: 'thought' | 'final_answer' | 'summarization';
   content: string;
   stage_execution_id?: string;
+  mcp_event_id?: string; // For summarization - links to tool call
   waitingForDb?: boolean; // True when stream completed, waiting for DB confirmation
 }
 
@@ -180,7 +181,7 @@ const finalAnswerMarkdownComponents = {
 
 /**
  * StreamingItemRenderer Component
- * Renders streaming items with proper formatting (Markdown for final answers, plain text for thoughts)
+ * Renders streaming items with proper formatting (Markdown for final answers, plain text for thoughts/summarizations)
  * Memoized to prevent unnecessary re-renders during rapid streaming updates
  */
 const StreamingItemRenderer = memo(({ item }: { item: StreamingItem }) => {
@@ -211,6 +212,64 @@ const StreamingItemRenderer = memo(({ item }: { item: StreamingItem }) => {
         >
           {item.content}
         </Typography>
+      </Box>
+    );
+  }
+  
+  if (item.type === 'summarization') {
+    // Render summarization with amber header, subtle left border, and dimmed text (matching DB rendering)
+    return (
+      <Box sx={{ mb: 1.5 }}>
+        {/* Header with amber styling */}
+        <Box sx={{ display: 'flex', gap: 1.5, mb: 0.5 }}>
+          <Typography
+            variant="body2"
+            sx={{
+              fontSize: '1.1rem',
+              lineHeight: 1,
+              flexShrink: 0
+            }}
+          >
+            📋
+          </Typography>
+          <Typography
+            variant="caption"
+            sx={{
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: 0.5,
+              fontSize: '0.75rem',
+              color: 'rgba(237, 108, 2, 0.9)',
+              mt: 0.25
+            }}
+          >
+            Tool Result Summary
+          </Typography>
+        </Box>
+        {/* Content with subtle left border and dimmed text */}
+        <Box 
+          sx={{ 
+            display: 'flex', 
+            gap: 1.5, 
+            pl: 3.5,
+            ml: 3.5,
+            py: 0.5,
+            borderLeft: '2px solid rgba(237, 108, 2, 0.2)' // Subtle amber left border
+          }}
+        >
+          <Typography
+            variant="body1"
+            sx={{
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              lineHeight: 1.7,
+              fontSize: '1rem',
+              color: 'text.secondary' // Slightly dimmed to differentiate from thoughts
+            }}
+          >
+            {item.content}
+          </Typography>
+        </Box>
       </Box>
     );
   }
@@ -301,6 +360,8 @@ function ConversationTimeline({
           content += `   Error: ${item.errorMessage}\n`;
         }
         content += '\n';
+      } else if (item.type === 'summarization') {
+        content += `📋 Tool Result Summary${item.mcp_event_id ? ` (MCP: ${item.mcp_event_id})` : ''}:\n${item.content}\n\n`;
       } else if (item.type === 'final_answer') {
         content += `🎯 Final Answer:\n${item.content}\n\n`;
       }
@@ -356,12 +417,15 @@ function ConversationTimeline({
     
     const handleStreamEvent = (event: any) => {
       if (event.type === 'llm.stream.chunk') {
-        console.log('🌊 Received streaming chunk:', event.stream_type, event.is_complete);
+        console.log('🌊 Received streaming chunk:', event.stream_type, event.is_complete, event.mcp_event_id);
         
         setStreamingItems(prev => {
           const updated = new Map(prev);
-          // Use composite key to keep thought and final_answer separate in the same interaction
-          const key = `${event.stage_execution_id || 'default'}-${event.stream_type}`;
+          // Use composite key based on stream type
+          // For summarization, use mcp_event_id to link to specific tool call
+          const key = event.stream_type === 'summarization' && event.mcp_event_id
+            ? `${event.mcp_event_id}-summarization`
+            : `${event.stage_execution_id || 'default'}-${event.stream_type}`;
           
           if (event.is_complete) {
             // Stream completed - mark as waiting for DB update
@@ -377,9 +441,10 @@ function ConversationTimeline({
             } else {
               // Seed a new entry for completion event with no prior partial entry
               updated.set(key, {
-                type: event.stream_type as 'thought' | 'final_answer',
+                type: event.stream_type as 'thought' | 'final_answer' | 'summarization',
                 content: event.chunk,
                 stage_execution_id: event.stage_execution_id,
+                mcp_event_id: event.mcp_event_id,
                 waitingForDb: true
               });
               console.log('✅ Stream completed (no prior chunks), waiting for DB update to deduplicate');
@@ -387,9 +452,10 @@ function ConversationTimeline({
           } else {
             // Still streaming - update content
             updated.set(key, {
-              type: event.stream_type as 'thought' | 'final_answer',
+              type: event.stream_type as 'thought' | 'final_answer' | 'summarization',
               content: event.chunk,
               stage_execution_id: event.stage_execution_id,
+              mcp_event_id: event.mcp_event_id,
               waitingForDb: false
             });
           }
@@ -433,16 +499,19 @@ function ConversationTimeline({
           // Create unique key for this DB item (timestamp + type + content hash)
           const itemKey = `${dbItem.timestamp_us}-${dbItem.type}-${dbItem.content?.substring(0, 50)}`;
           
-          // Check if: matching type + content, AND not already claimed
-          if (dbItem.type === streamingItem.type && 
-              dbItem.content?.trim() === streamingItem.content?.trim() &&
-              !newlyClaimed.has(itemKey)) {
-            
+          // Check if: matching type + content (+ mcp_event_id for summarizations), AND not already claimed
+          const typesMatch = dbItem.type === streamingItem.type;
+          const contentsMatch = dbItem.content?.trim() === streamingItem.content?.trim();
+          const mcpEventMatches = streamingItem.type === 'summarization' 
+            ? dbItem.mcp_event_id === streamingItem.mcp_event_id 
+            : true; // For non-summarization, ignore mcp_event_id
+          
+          if (typesMatch && contentsMatch && mcpEventMatches && !newlyClaimed.has(itemKey)) {
             // Found unclaimed match!
             updated.delete(key); // Clear streaming item
             newlyClaimed.add(itemKey); // Mark DB item as claimed
             itemsCleared++;
-            console.log(`🎯 Matched streaming item to unclaimed DB item (ts: ${dbItem.timestamp_us})`);
+            console.log(`🎯 Matched streaming item to unclaimed DB item (ts: ${dbItem.timestamp_us}, type: ${dbItem.type})`);
             break; // Stop searching for this streaming item
           }
         }
