@@ -145,8 +145,10 @@ async def submit_alert(request: Request) -> AlertResponse:
                 """Basic input sanitization to prevent XSS and injection attacks."""
                 if not isinstance(value, str):
                     return value
-                # Remove potentially dangerous characters
-                sanitized = re.sub(r'[<>"\'\x00-\x1f\x7f-\x9f]', '', value)
+                # Remove potentially dangerous characters while preserving newlines, tabs, and carriage returns
+                # Keep: \t (0x09), \n (0x0A), \r (0x0D)
+                # Remove: other control chars (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F-0x9F) and dangerous chars
+                sanitized = re.sub(r'[<>"\'\x00-\x08\x0B\x0C\x0E-\x1f\x7f-\x9f]', '', value)
                 # Limit string length
                 return sanitized[:10000]  # 10KB limit per string field
             
@@ -238,6 +240,19 @@ async def submit_alert(request: Request) -> AlertResponse:
         # Generate session_id BEFORE starting background processing
         session_id = str(uuid.uuid4())
         
+        # Extract author from oauth2-proxy headers
+        # oauth2-proxy injects X-Forwarded-User and X-Forwarded-Email headers when pass_user_headers=true (OAuth flow)
+        # For JWT-authenticated API clients, oauth2-proxy validates but doesn't inject user headers
+        author = request.headers.get("X-Forwarded-User") or request.headers.get("X-Forwarded-Email")
+        
+        # Strip whitespace and check if empty
+        if author:
+            author = author.strip()
+        
+        # If no user headers present or empty after stripping, this is likely a JWT-authenticated API client
+        if not author:
+            author = "api-client"
+        
         # Create ChainContext for processing  
         from tarsy.models.processing_context import ChainContext
         
@@ -245,7 +260,8 @@ async def submit_alert(request: Request) -> AlertResponse:
         alert_context = ChainContext.from_processing_alert(
             processing_alert=processing_alert,
             session_id=session_id,
-            current_stage_name="initializing"  # Will be updated to actual stage names from config during execution
+            current_stage_name="initializing",  # Will be updated to actual stage names from config during execution
+            author=author  # Pass author to context
         )
         
         # Start background processing using callback from app state
