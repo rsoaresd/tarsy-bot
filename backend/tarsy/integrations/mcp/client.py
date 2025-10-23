@@ -51,7 +51,7 @@ class MCPClient:
         self._initialized = False
         self.failed_servers: Dict[str, str] = {}  # server_id -> error_message
     
-    async def initialize(self):
+    async def initialize(self) -> None:
         """Initialize MCP servers based on registry configuration."""
         if self._initialized:
             return
@@ -76,11 +76,26 @@ class MCPClient:
                 env_keys = sorted(env.keys()) if env else []
                 logger.debug("  Env keys: %s", env_keys)
 
-                # Create and initialize session using shared helper
-                session = await self._create_session(server_id, server_config)
-                self.sessions[server_id] = session
-                logger.info(f"Successfully initialized MCP server: {server_id}")
+                # Create and initialize session using shared helper with timeout
+                # Use a reasonable timeout to prevent hanging during startup
+                try:
+                    session = await asyncio.wait_for(
+                        self._create_session(server_id, server_config),
+                        timeout=30.0  # 30 second timeout for initialization
+                    )
+                    self.sessions[server_id] = session
+                    logger.info(f"Successfully initialized MCP server: {server_id}")
+                except asyncio.TimeoutError:
+                    raise Exception("Server initialization timed out after 30 seconds") from None
 
+            except asyncio.CancelledError:
+                # Handle cancellation during initialization (e.g., timeout or shutdown)
+                error_msg = "Server initialization was cancelled (timeout or connection failure)"
+                logger.warning(f"MCP server {server_id} initialization cancelled: {error_msg}")
+                self.failed_servers[server_id] = error_msg
+                # Ensure we don't leave partial state in sessions dict
+                if server_id in self.sessions:
+                    del self.sessions[server_id]
             except Exception as e:
                 error_details = extract_error_details(e)
                 logger.error(f"Failed to initialize MCP server {server_id}: {error_details}", exc_info=True)
@@ -114,6 +129,7 @@ class MCPClient:
         Raises:
             Exception: If session creation fails
         """
+        transport = None
         try:
             # Get already-parsed transport configuration
             transport_config = server_config.transport
@@ -125,11 +141,24 @@ class MCPClient:
                 self.exit_stack if transport_config.type == TRANSPORT_STDIO else None
             )
             
-            # Store transport for lifecycle management
-            self.transports[server_id] = transport
-            
             # Create session via transport
             session = await transport.create_session()
+            
+            # Close old transport before replacement (only for non-stdio to avoid shared resource conflicts)
+            # This prevents resource leaks when recovering/replacing failed sessions
+            if server_id in self.transports:
+                old_transport = self.transports[server_id]
+                if transport_config.type != TRANSPORT_STDIO:
+                    # HTTP/SSE transports have their own exit_stack and can be closed independently
+                    try:
+                        await old_transport.close()
+                        logger.debug(f"Closed old {transport_config.type} transport for {server_id} before replacement")
+                    except Exception as close_error:
+                        # Log but don't fail - we still want to store the new transport
+                        logger.warning(f"Error closing old transport during replacement for {server_id}: {extract_error_details(close_error)}")
+            
+            # Store transport for lifecycle management ONLY after successful session creation
+            self.transports[server_id] = transport
             
             logger.info(f"Created {transport_config.type} session for server: {server_id}")
             return session
@@ -137,6 +166,22 @@ class MCPClient:
         except Exception as e:
             error_details = extract_error_details(e)
             logger.error(f"Failed to create session for {server_id}: {error_details}", exc_info=True)
+            
+            # Clean up transport resources on failure, but only for non-stdio transports
+            # Stdio transports use a shared exit_stack that must not be closed prematurely
+            if transport is not None:
+                transport_config = server_config.transport
+                if transport_config.type != TRANSPORT_STDIO:
+                    # HTTP/SSE transports have their own exit_stack - clean it up to prevent leaks
+                    # We can't use transport.close() because _connected=False, so close exit_stack directly
+                    try:
+                        if hasattr(transport, 'exit_stack'):
+                            await transport.exit_stack.aclose()
+                            logger.debug(f"Cleaned up {transport_config.type} transport resources for {server_id}")
+                    except Exception as cleanup_error:
+                        # Log but don't re-raise - original error is more important
+                        logger.warning(f"Error cleaning up transport for {server_id}: {extract_error_details(cleanup_error)}")
+            
             raise
     
     async def list_tools(
@@ -308,6 +353,83 @@ class MCPClient:
             await ctx.complete_success({})
             
             return all_tools
+    
+    async def ping(self, server_id: str) -> bool:
+        """
+        Check if an MCP server is healthy and responsive.
+        
+        Uses list_tools() as a lightweight health check. Does not modify
+        session state - the client handles automatic recovery on failures.
+        
+        Args:
+            server_id: ID of the server to ping
+            
+        Returns:
+            True if server is healthy and responsive, False otherwise
+        """
+        try:
+            if server_id not in self.sessions:
+                return False
+            
+            # Use list_tools as health check with short timeout
+            # 5 seconds is enough for local servers; connection refused is immediate
+            session = self.sessions[server_id]
+            await asyncio.wait_for(
+                session.list_tools(),
+                timeout=5.0  # Fast failure detection for crashes
+            )
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Ping failed for {server_id}: {extract_error_details(e)}")
+            return False
+    
+    async def try_initialize_server(self, server_id: str) -> bool:
+        """
+        Attempt to initialize a server that failed during startup.
+        
+        Used by health monitor to recover misconfigured servers that
+        become available after startup. Also replaces dead sessions if
+        a session exists but is unresponsive.
+        
+        Args:
+            server_id: ID of the server to initialize
+            
+        Returns:
+            True if initialization succeeded, False otherwise
+        """
+        try:
+            server_config = self.mcp_registry.get_server_config_safe(server_id)
+            if not server_config or not server_config.enabled:
+                logger.debug(f"Cannot initialize {server_id}: no config or disabled")
+                return False
+            
+            # Create session with timeout (health monitor shouldn't wait forever)
+            # Note: MCP library may log asyncio errors for connection failures - these are harmless
+            try:
+                session = await asyncio.wait_for(
+                    self._create_session(server_id, server_config),
+                    timeout=10.0  # Quick timeout for health monitor
+                )
+                self.sessions[server_id] = session
+                
+                # Remove from failed servers tracking
+                if server_id in self.failed_servers:
+                    del self.failed_servers[server_id]
+                
+                logger.debug(f"✓ Successfully initialized previously failed server: {server_id}")
+                return True
+                
+            except asyncio.TimeoutError:
+                logger.debug(f"✗ Timeout initializing {server_id} (10s)")
+                return False
+            except asyncio.CancelledError:
+                logger.debug(f"✗ Initialization cancelled for {server_id}")
+                return False
+            
+        except Exception as e:
+            logger.debug(f"✗ Failed to initialize {server_id}: {extract_error_details(e)}")
+            return False
     
     async def _maybe_summarize_result(
         self, 
@@ -569,16 +691,24 @@ class MCPClient:
             logger.error(f"Failed to recover session for {server_name}: {extract_error_details(e)}")
             raise Exception(f"Session recovery failed for {server_name}: {str(e)}") from e
     
-    def _log_mcp_request(self, server_name: str, tool_name: str, parameters: Dict[str, Any], request_id: str):
-        """Log the outgoing MCP tool call request."""
+    def _log_mcp_request(self, server_name: str, tool_name: str, parameters: Dict[str, Any], request_id: str) -> None:
+        """Log the outgoing MCP tool call request with sensitive data masked."""
+        # Apply data masking to parameters before logging to prevent credential/PII exposure
+        try:
+            masked_parameters = self.data_masking_service.mask_response(parameters, server_name)
+        except Exception as e:
+            logger.warning(f"Failed to mask request parameters for logging: {e}. Using parameter keys only.")
+            # Fallback: log only parameter keys, not values
+            masked_parameters = {k: "***MASKED***" for k in parameters.keys()}
+        
         mcp_comm_logger.info(f"=== MCP REQUEST [{server_name}] [ID: {request_id}] ===")
         mcp_comm_logger.info(f"Request ID: {request_id}")
         mcp_comm_logger.info(f"Server: {server_name}")
         mcp_comm_logger.info(f"Tool: {tool_name}")
-        mcp_comm_logger.info(f"Parameters: {json.dumps(parameters, indent=2, default=str)}")
+        mcp_comm_logger.info(f"Parameters: {json.dumps(masked_parameters, indent=2, default=str)}")
         mcp_comm_logger.info(f"=== END REQUEST [ID: {request_id}] ===")
     
-    def _log_mcp_response(self, server_name: str, tool_name: str, response: Dict[str, Any], request_id: str):
+    def _log_mcp_response(self, server_name: str, tool_name: str, response: Dict[str, Any], request_id: str) -> None:
         """Log the MCP tool call response."""
         response_content = response.get("result", str(response))
         mcp_comm_logger.info(f"=== MCP RESPONSE [{server_name}] [ID: {request_id}] ===")
@@ -590,7 +720,7 @@ class MCPClient:
         mcp_comm_logger.info(response_content)
         mcp_comm_logger.info(f"=== END RESPONSE [ID: {request_id}] ===")
     
-    def _log_mcp_error(self, server_name: str, tool_name: str, error_message: str, request_id: str):
+    def _log_mcp_error(self, server_name: str, tool_name: str, error_message: str, request_id: str) -> None:
         """Log MCP tool call errors."""
         mcp_comm_logger.error(f"=== MCP ERROR [{server_name}] [ID: {request_id}] ===")
         mcp_comm_logger.error(f"Request ID: {request_id}")
@@ -599,7 +729,7 @@ class MCPClient:
         mcp_comm_logger.error(f"Error: {error_message}")
         mcp_comm_logger.error(f"=== END ERROR [ID: {request_id}] ===")
     
-    def _log_mcp_list_tools_request(self, server_name: Optional[str], request_id: str):
+    def _log_mcp_list_tools_request(self, server_name: Optional[str], request_id: str) -> None:
         """Log the MCP list tools request."""
         target = server_name if server_name else "ALL_SERVERS"
         mcp_comm_logger.info(f"=== MCP LIST TOOLS REQUEST [{target}] [ID: {request_id}] ===")
@@ -607,7 +737,7 @@ class MCPClient:
         mcp_comm_logger.info(f"Target: {target}")
         mcp_comm_logger.info(f"=== END LIST TOOLS REQUEST [ID: {request_id}] ===")
     
-    def _log_mcp_list_tools_response(self, server_name: str, tools: List[Tool], request_id: str):
+    def _log_mcp_list_tools_response(self, server_name: str, tools: List[Tool], request_id: str) -> None:
         """Log the MCP list tools response."""
         mcp_comm_logger.info(f"=== MCP LIST TOOLS RESPONSE [{server_name}] [ID: {request_id}] ===")
         mcp_comm_logger.info(f"Request ID: {request_id}")
@@ -620,7 +750,7 @@ class MCPClient:
             mcp_comm_logger.info(f"  Schema: {json.dumps(tool.inputSchema or {}, indent=2, default=str)}")
         mcp_comm_logger.info(f"=== END LIST TOOLS RESPONSE [ID: {request_id}] ===")
     
-    def _log_mcp_list_tools_error(self, server_name: str, error_message: str, request_id: str):
+    def _log_mcp_list_tools_error(self, server_name: str, error_message: str, request_id: str) -> None:
         """Log MCP list tools errors."""
         mcp_comm_logger.error(f"=== MCP LIST TOOLS ERROR [{server_name}] [ID: {request_id}] ===")
         mcp_comm_logger.error(f"Request ID: {request_id}")
@@ -628,7 +758,7 @@ class MCPClient:
         mcp_comm_logger.error(f"Error: {error_message}")
         mcp_comm_logger.error(f"=== END LIST TOOLS ERROR [ID: {request_id}] ===")
 
-    async def close(self):
+    async def close(self) -> None:
         """Close all MCP client connections and transports."""
         # Close all transports
         for server_id, transport in self.transports.items():
