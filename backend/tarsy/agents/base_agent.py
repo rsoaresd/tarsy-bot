@@ -8,7 +8,7 @@ It implements common processing logic and defines abstract methods for agent-spe
 import asyncio
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING, assert_never
 
 from tarsy.config.settings import get_settings
 from tarsy.integrations.llm.client import LLMClient
@@ -110,7 +110,7 @@ class BaseAgent(ABC):
             from .iteration_controllers.react_final_analysis_controller import ReactFinalAnalysisController
             return ReactFinalAnalysisController(self.llm_client, self._prompt_builder)
         else:
-            raise ValueError(f"Unknown iteration strategy: {strategy}")
+            assert_never(strategy)
     
     @property
     def iteration_strategy(self) -> IterationStrategy:
@@ -159,7 +159,7 @@ class BaseAgent(ABC):
         Process alert.
         
         Args:
-            chain_context: ChainContext containing all processing data
+            context: ChainContext containing all processing data
         
         Returns:
             Structured AgentExecutionResult with rich investigation summary

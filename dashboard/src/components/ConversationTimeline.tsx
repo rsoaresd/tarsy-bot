@@ -442,7 +442,13 @@ function ConversationTimeline({
     }
   }, [session]);
 
-  // Clear streaming items when session completes or fails
+  // Clear streaming items when switching sessions (prevents stale data from previous session)
+  useEffect(() => {
+    console.log('🔄 Session changed, clearing all streaming items');
+    setStreamingItems(new Map());
+  }, [session.session_id]);
+
+  // Clear streaming items when session completes or fails (with logging)
   useEffect(() => {
     if (session.status === 'completed' || session.status === 'failed') {
       console.log('✅ Session ended, clearing all streaming items');
@@ -451,8 +457,15 @@ function ConversationTimeline({
   }, [session.status]);
 
   // Subscribe to streaming events
+  // Don't subscribe if session is already completed/failed
   useEffect(() => {
     if (!session.session_id) return;
+    
+    // Don't subscribe to streaming events for completed/failed sessions
+    if (session.status === 'completed' || session.status === 'failed') {
+      console.log('⏭️ Skipping streaming subscription for completed/failed session');
+      return;
+    }
     
     const handleStreamEvent = (event: any) => {
       if (event.type === 'mcp.tool_call.started') {

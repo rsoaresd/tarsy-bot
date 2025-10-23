@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from ...models.unified_interactions import MessageRole
+from ..parsers.react_parser import ReActParser
 
 if TYPE_CHECKING:
     from ...models.processing_context import StageContext
@@ -97,75 +98,31 @@ class IterationController(ABC):
         
         return analysis_result
 
-    def _extract_react_final_analysis(
-        self, 
-        analysis_result: str, 
-        completion_patterns: list[str], 
-        incomplete_patterns: list[str],
-        fallback_message: str,
-        context: 'StageContext'
-    ) -> str:
+    def _extract_react_final_analysis(self, analysis_result: str) -> str:
         """
-        Shared utility for extracting final analysis from ReAct conversations.
+        Extract final analysis from the last assistant message.
         
         Args:
-            analysis_result: Full ReAct conversation history
-            completion_patterns: List of patterns to look for completion messages
-            incomplete_patterns: List of patterns for incomplete messages
-            fallback_message: Default message if no analysis found
-            context: StageContext containing all stage processing data
+            analysis_result: Last assistant message containing the Final Answer
             
         Returns:
-            Extracted final analysis
+            Extracted final analysis, or the entire message if parsing fails
         """
         if not analysis_result:
-            return fallback_message
+            return "No analysis generated"
         
-        lines = analysis_result.split('\n')
+        # Use ReActParser to extract the Final Answer section
+        sections = ReActParser._extract_sections(analysis_result)
         
-        # Look for final answer first (universal across all ReAct controllers)
-        final_answer_content = []
-        collecting_final_answer = False
+        # If Final Answer was found, return it
+        if sections.get('final_answer'):
+            final_answer = sections['final_answer'].strip()
+            if final_answer:
+                return final_answer
         
-        for i, line in enumerate(lines):
-            if line.startswith("Final Answer:"):
-                collecting_final_answer = True
-                # Add content from the same line if any
-                content = line.replace("Final Answer:", "").strip()
-                if content:
-                    final_answer_content.append(content)
-                continue
-            
-            if collecting_final_answer:
-                # Stop collecting if we hit another ReAct section
-                if (line.startswith("Thought:") or 
-                    line.startswith("Action:") or 
-                    line.startswith("Observation:")):
-                    break
-                
-                # Add all content lines (including empty ones within the final answer)
-                final_answer_content.append(line)
-        
-        if final_answer_content:
-            # Clean up trailing empty lines but preserve internal structure
-            while final_answer_content and final_answer_content[-1].strip() == "":
-                final_answer_content.pop()
-            return '\n'.join(final_answer_content)
-        
-        # Look for stage-specific completion patterns
-        for line in lines:
-            for pattern in completion_patterns:
-                if pattern in line and ":" in line:
-                    summary_start = line.find(':') + 1
-                    return line[summary_start:].strip()
-        
-        # Look for incomplete patterns
-        for line in lines:
-            for pattern in incomplete_patterns:
-                if line.startswith(pattern):
-                    return f"{pattern.rstrip(':')} due to iteration limits"
-        
-        return fallback_message
+        # Fallback: Return the entire last assistant message
+        # This ensures we always show something even if parsing fails
+        return analysis_result
 
 
 class ReactController(IterationController):
@@ -182,9 +139,7 @@ class ReactController(IterationController):
         self.prompt_builder = prompt_builder
         # Import here to avoid circular imports during class definition
         from tarsy.utils.logger import get_module_logger
-        from tarsy.agents.parsers.react_parser import ReActParser
         self.logger = get_module_logger(__name__)
-        self.parser = ReActParser
         
     def needs_mcp_tools(self) -> bool:
         """All ReAct controllers use tools."""
@@ -237,7 +192,7 @@ class ReactController(IterationController):
                     response = assistant_message.content
                     self.logger.debug(f"LLM Response (first 500 chars): {response[:500]}")
                     
-                    parsed_response = self.parser.parse_response(response)
+                    parsed_response = ReActParser.parse_response(response)
                     
                     # Mark this interaction as successful
                     last_interaction_failed = False
@@ -257,7 +212,7 @@ class ReactController(IterationController):
                             mcp_data = await agent.execute_mcp_tools([parsed_response.tool_call.model_dump()], context.session_id, conversation_result)
                             
                             # Format observation
-                            observation = self.parser.format_observation(mcp_data)
+                            observation = ReActParser.format_observation(mcp_data)
                             conversation_result.append_observation(f"Observation: {observation}")
                             
                             self.logger.debug(f"ReAct Observation: {observation[:150]}...")
@@ -286,7 +241,7 @@ class ReactController(IterationController):
                             self.logger.debug("Removed malformed assistant message from conversation")
                         
                         # Add brief format correction reminder as user message
-                        format_reminder = self.parser.get_format_correction_reminder()
+                        format_reminder = ReActParser.get_format_correction_reminder()
                         conversation_result.append_observation(format_reminder)
                     
                     return conversation_result
@@ -338,7 +293,7 @@ class ReactController(IterationController):
                     self.logger.debug("Removed malformed assistant message after exception")
                 
                 # Add format correction instead of generic error message
-                format_reminder = self.parser.get_format_correction_reminder()
+                format_reminder = ReActParser.get_format_correction_reminder()
                 conversation.append_observation(format_reminder)
                 continue
                 
@@ -368,38 +323,19 @@ class ReactController(IterationController):
         
     def _build_final_result(self, conversation, final_answer: str) -> str:
         """
-        Build complete ReAct conversation history for progressive conversation format.
+        Return the last assistant message containing the final analysis.
         
-        This returns the complete conversation history with all Thought/Action/Observation
-        sequences plus the final answer, which is what subsequent stages need to see
-        according to progressive conversation format.
+        Subsequent stages only need the conclusion/final answer, not the detailed
+        investigation steps (Thought/Action/Observation sequences).
         """
         if not hasattr(conversation, 'messages') or not conversation.messages:
             return final_answer
         
-        # Extract the complete conversation history from the LLMConversation
-        conversation_parts = []
-        
-        # Skip the system message and initial user message, focus on the ReAct interactions
-        for message in conversation.messages[2:]:  # Skip system and initial user message
+        # Get the last assistant message (which contains the Final Answer)
+        for message in reversed(conversation.messages):
             if message.role == MessageRole.ASSISTANT:
-                # Assistant messages contain Thought/Action sequences
-                conversation_parts.append(message.content)
-            elif message.role == MessageRole.USER and message.content.startswith("Observation:"):
-                # User messages with observations.
-                # Skip user messages that are not observations (e.g. error-continuation messages)
-                conversation_parts.append(message.content)
+                return message.content
         
-        # Join all the conversation parts
-        complete_conversation = "\n".join(conversation_parts)
-        
-        # If we only have a single "Final Answer:" response with no ReAct interactions,
-        # return just the final answer content for cleaner API consumption
-        if (len(conversation_parts) == 1 and 
-            conversation_parts[0].startswith("Final Answer:") and 
-            "Thought:" not in conversation_parts[0] and 
-            "Action:" not in conversation_parts[0]):
-            return conversation_parts[0].replace("Final Answer:", "").strip()
-        
-        return complete_conversation
+        # Fallback if no assistant message found
+        return final_answer
     

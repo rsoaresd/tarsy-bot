@@ -20,13 +20,6 @@ from tarsy.models.constants import IterationStrategy
 from tarsy.models.processing_context import AvailableTools, ChainContext, StageContext
 from tarsy.models.unified_interactions import LLMConversation, MessageRole
 
-# TestIterationContext removed - IterationContext class no longer exists
-# It was replaced by StageContext in the EP-0012 context architecture redesign
-
-
-# Removed TestRegularIterationController - REGULAR strategy no longer supported
-
-
 @pytest.mark.unit
 class TestSimpleReActController:
     """Test SimpleReActController implementation."""
@@ -116,8 +109,8 @@ class TestSimpleReActController:
         """Test successful ReAct analysis loop with final answer."""
         result = await controller.execute_analysis_loop(sample_context)
         
-        # Should return final answer
-        assert result == "Analysis complete"
+        # Should return last assistant message containing final answer
+        assert result == "Final Answer: Analysis complete"
         
         # Verify LLM was called
         mock_llm_client.generate_response.assert_called()
@@ -179,11 +172,8 @@ class TestSimpleReActController:
         
         result = await controller.execute_analysis_loop(sample_context)
         
-        # Should return full ReAct history including actions and final answer
-        assert "Thought: Need to get more info" in result
-        assert "Action: test-server.test-tool" in result
-        assert "Observation: test-server.test-tool: success" in result 
-        assert "Final Answer: Complete analysis" in result
+        # Should return last assistant message containing final answer
+        assert result == "Thought: Now I have enough info\nFinal Answer: Complete analysis"
         
         # Verify tool was executed
         mock_agent.execute_mcp_tools.assert_called_once()
@@ -261,11 +251,8 @@ class TestSimpleReActController:
         
         result = await controller.execute_analysis_loop(sample_context)
         
-        # Should return full ReAct history including error handling and final answer
-        assert "Thought: Need to use tool" in result
-        assert "Action: test-server.test-tool" in result
-        assert "Observation: Error executing action: Tool execution failed" in result
-        assert "Final Answer: Analysis with error" in result
+        # Should return last assistant message containing final answer
+        assert result == "Thought: Tool failed but continuing\nFinal Answer: Analysis with error"
         
         # Verify tool execution was attempted
         mock_agent.execute_mcp_tools.assert_called_once()
@@ -612,11 +599,8 @@ class TestReactStageController:
         
         result = await controller.execute_analysis_loop(sample_context)
         
-        # Should return full ReAct history with tool execution for partial analysis
-        assert "Thought: Need to analyze with tools" in result
-        assert "Action: test-server.analysis-tool" in result
-        assert "Observation: analysis-server.analysis-tool: analysis data" in result
-        assert "Final Answer: Comprehensive partial analysis" in result
+        # Should return last assistant message containing final answer
+        assert result == "Thought: Analysis completed successfully\nFinal Answer: Comprehensive partial analysis"
         
         # Verify tool was executed
         mock_agent.execute_mcp_tools.assert_called_once()
@@ -729,7 +713,7 @@ class TestIterationControllerFactory:
             assert agent.iteration_strategy == IterationStrategy.REACT
     
     def test_create_unknown_iteration_strategy_fails(self, mock_llm_client, mock_prompt_builder):
-        """Test that unknown iteration strategy raises ValueError."""
+        """Test that unknown iteration strategy raises AssertionError via assert_never."""
         from tarsy.agents.base_agent import BaseAgent
         
         class TestAgent(BaseAgent):
@@ -739,7 +723,7 @@ class TestIterationControllerFactory:
                 return "test"
         
         with patch('tarsy.agents.base_agent.get_prompt_builder', return_value=mock_prompt_builder):
-            with pytest.raises(ValueError, match="Unknown iteration strategy"):
+            with pytest.raises(AssertionError, match="Expected code to be unreachable"):
                 TestAgent(
                     llm_client=mock_llm_client,
                     mcp_client=Mock(),
@@ -799,101 +783,131 @@ class TestIterationControllerIntegration:
 
 @pytest.mark.unit
 class TestFinalAnswerExtraction:
-    """Test final answer extraction from ReAct responses."""
+    """
+    Test controller-level final answer extraction functionality.
     
-    def test_multiline_final_answer_extraction(self):
-        """Test extraction of multi-line Final Answer content."""
-        # Create controller for testing (using SimpleReActController which has _extract_react_final_analysis)
-        controller = SimpleReActController(Mock(), Mock())
-        
-        # Test response with multi-line Final Answer
-        test_response = """Thought: I have gathered sufficient information.
-
-Final Answer: ### Analysis Report: Test Alert
-
-#### 1. Root Cause Analysis
-The issue is caused by a stuck finalizer.
-
-#### 2. Current System State  
-- Namespace: test-namespace
-- Status: Terminating
-
-#### 3. Remediation Steps
-1. Check operator status
-2. Remove finalizer if safe
-
-#### 4. Prevention Recommendations
-- Monitor operator health
-- Implement cleanup policies"""
-        
-        # Mock StageContext for testing
-        mock_context = Mock(spec=StageContext)
-        
-        result = controller._extract_react_final_analysis(
-            analysis_result=test_response,
-            completion_patterns=["Analysis completed"],
-            incomplete_patterns=["Analysis incomplete:"],
-
-            fallback_message="No analysis found",
-            context=mock_context
-        )
-        
-        # Verify the full content was extracted
-        assert "### Analysis Report: Test Alert" in result
-        assert "#### 1. Root Cause Analysis" in result
-        assert "The issue is caused by a stuck finalizer." in result
-        assert "#### 2. Current System State" in result
-        assert "#### 3. Remediation Steps" in result
-        assert "#### 4. Prevention Recommendations" in result
-        assert "- Monitor operator health" in result
-        
-        # Verify proper structure preservation
-        lines = result.split('\n')
-        assert len(lines) >= 10  # Should have multiple lines
-        
-    def test_single_line_final_answer_extraction(self):
-        """Test extraction of single-line Final Answer content."""
+    Note: Detailed ReAct parsing edge cases are tested in test_react_parser.py.
+    These tests focus on the controller's integration with ReActParser and fallback behavior.
+    """
+    
+    def test_extract_simple_final_answer(self):
+        """Test extraction of simple single-line Final Answer."""
         controller = SimpleReActController(Mock(), Mock())
         
         test_response = """Thought: Analysis complete.
-Final Answer: Simple analysis result."""
-        
-        # Mock StageContext for testing
-        mock_context = Mock(spec=StageContext)
-        
-        result = controller._extract_react_final_analysis(
-            analysis_result=test_response,
-            completion_patterns=["Analysis completed"],
-            incomplete_patterns=["Analysis incomplete:"],
 
-            fallback_message="No analysis found",
-            context=mock_context
-        )
+Final Answer: The system is operating normally."""
         
-        assert result == "Simple analysis result."
+        result = controller._extract_react_final_analysis(test_response)
         
-    def test_final_answer_with_subsequent_sections(self):
-        """Test that extraction stops at next ReAct section."""
+        assert result == "The system is operating normally."
+    
+    def test_extract_midline_final_answer(self):
+        """Test extraction of Final Answer appearing mid-line (bug fix regression test).
+        
+        This was the original bug: "Final Answer:" appearing after a sentence boundary
+        without a newline (e.g., "...action.Final Answer:") was not being extracted.
+        """
         controller = SimpleReActController(Mock(), Mock())
         
-        test_response = """Final Answer: This is the analysis result.
-This continues the analysis.
+        test_response = """Thought
+Analysis shows critical issues identified.
 
-Thought: This should not be included.
-Action: some-action"""
-        
-        # Mock StageContext for testing
-        mock_context = Mock(spec=StageContext)
-        
-        result = controller._extract_react_final_analysis(
-            analysis_result=test_response,
-            completion_patterns=["Analysis completed"],
-            incomplete_patterns=["Analysis incomplete:"],
+Ready to provide final analysis.Final Answer:
+**Impact**: HIGH
 
-            fallback_message="No analysis found",
-            context=mock_context
-        )
+Recommended Actions:
+Increase memory limit to 1Gi"""
         
-        assert result == "This is the analysis result.\nThis continues the analysis."
-        assert "This should not be included" not in result
-        assert "Action: some-action" not in result
+        result = controller._extract_react_final_analysis(test_response)
+        
+        expected_result = """**Impact**: HIGH
+
+Recommended Actions:
+Increase memory limit to 1Gi"""
+        
+        assert result == expected_result
+    
+    def test_extract_complex_multi_section_final_answer(self):
+        """Test extraction of complex multi-section Final Answer."""
+        controller = SimpleReActController(Mock(), Mock())
+        
+        test_response = """Thought: Comprehensive analysis complete.
+
+Final Answer:
+## Summary
+The system is experiencing high latency.
+
+## Root Cause
+Database queries are not optimized.
+
+## Recommendations
+1. Add indexes to frequently queried columns
+2. Implement query caching
+3. Monitor query performance
+
+## Impact Assessment
+- Current: 2000ms average response time
+- Expected after fix: 200ms average response time"""
+        
+        result = controller._extract_react_final_analysis(test_response)
+        
+        expected_result = """## Summary
+The system is experiencing high latency.
+
+## Root Cause
+Database queries are not optimized.
+
+## Recommendations
+1. Add indexes to frequently queried columns
+2. Implement query caching
+3. Monitor query performance
+
+## Impact Assessment
+- Current: 2000ms average response time
+- Expected after fix: 200ms average response time"""
+        
+        assert result == expected_result
+    
+    def test_returns_entire_message_when_no_final_answer(self):
+        """Test fallback: returns entire message when no Final Answer exists.
+        
+        When the last assistant message doesn't contain "Final Answer:",
+        the method returns the entire message as-is so the user sees
+        what the LLM generated (partial progress, incomplete analysis, etc).
+        """
+        controller = SimpleReActController(Mock(), Mock())
+        
+        # Various messages without Final Answer
+        test_cases = [
+            # Case 1: Thought and Action only
+            """Thought: Starting work.
+Action: do_something
+Action Input: param=value""",
+            
+            # Case 2: Incomplete analysis message
+            """Thought: Need more investigation.
+Action: check_status
+Analysis incomplete: Maximum iterations reached""",
+            
+            # Case 3: Message with observations (shouldn't happen with new _build_final_result, but test anyway)
+            """Thought: Starting investigation.
+Action: check_logs
+Action Input: pod_name=test-pod"""
+        ]
+        
+        for test_response in test_cases:
+            result = controller._extract_react_final_analysis(test_response)
+            assert result == test_response, f"Failed for: {test_response[:50]}..."
+    
+    def test_extract_with_empty_input(self):
+        """Test extraction with empty/None input (edge case)."""
+        controller = SimpleReActController(Mock(), Mock())
+        
+        # Empty string
+        result = controller._extract_react_final_analysis("")
+        assert result == "No analysis generated"
+        
+        # None should be handled gracefully
+        result = controller._extract_react_final_analysis(None)
+        assert result == "No analysis generated"
