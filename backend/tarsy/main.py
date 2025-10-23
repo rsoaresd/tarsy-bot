@@ -121,12 +121,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         sys.exit(1)  # Exit with error code
     
     # Start MCP health monitoring (after AlertService is ready)
+    # Uses dedicated health_check_mcp_client to avoid interfering with alert sessions
     try:
         from tarsy.services.mcp_health_monitor import MCPHealthMonitor
         from tarsy.services.system_warnings_service import get_warnings_service
         
         mcp_health_monitor = MCPHealthMonitor(
-            mcp_client=alert_service.mcp_client,
+            mcp_client=alert_service.health_check_mcp_client,
             warnings_service=get_warnings_service(),
             check_interval=15.0  # Check every 15 seconds
         )
@@ -537,12 +538,33 @@ async def process_alert_background(session_id: str, alert: ChainContext) -> None
             try:
                 # Use configurable timeout for alert processing
                 timeout_seconds = settings.alert_processing_timeout
-                await asyncio.wait_for(
-                    alert_service.process_alert(alert),
-                    timeout=timeout_seconds
+                logger.info(f"Processing session {session_id} with {timeout_seconds}s timeout")
+                
+                # Create task explicitly so we can cancel it if needed
+                task = asyncio.create_task(alert_service.process_alert(alert))
+                try:
+                    await asyncio.wait_for(task, timeout=timeout_seconds)
+                except asyncio.TimeoutError:
+                    # Timeout occurred - try to cancel the task
+                    logger.warning(f"Session {session_id} exceeded {timeout_seconds}s timeout, attempting to cancel task")
+                    task.cancel()
+                    try:
+                        await task  # Wait for cancellation to complete
+                    except asyncio.CancelledError:
+                        logger.info(f"Session {session_id} task cancelled successfully")
+                    except Exception as e:
+                        logger.error(f"Error while cancelling session {session_id}: {e}")
+                    raise TimeoutError(f"Alert processing exceeded timeout limit of {timeout_seconds}s") from None
+            except asyncio.CancelledError as e:
+                # Task was cancelled - but distinguish between deliberate timeout cancellation 
+                # and spurious cancellations from cleanup/recovery operations
+                # Only raise TimeoutError if this is genuinely from the timeout handler above
+                # Otherwise, let the cancellation propagate to reveal the real issue
+                logger.error(
+                    f"Session {session_id} was cancelled unexpectedly (not from timeout). "
+                    f"This may indicate a bug in cleanup/recovery logic. Original cancellation: {e}"
                 )
-            except asyncio.TimeoutError:
-                raise TimeoutError(f"Alert processing exceeded timeout limit of {timeout_seconds}s") from None
+                raise  # Re-raise to preserve the original CancelledError for debugging
             
             # Calculate processing duration
             duration = (datetime.now() - start_time).total_seconds()

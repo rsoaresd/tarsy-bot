@@ -95,13 +95,21 @@ class HTTPTransport(MCPTransport):
         return self.session
     
     async def close(self):
-        """Close HTTP transport (handled automatically by exit_stack)."""
+        """Close HTTP transport (handled automatically by exit_stack).
+        
+        Note: Due to MCP SDK cancel scope issues, cleanup may fail when called
+        from a different async task context. This is acceptable - we suppress
+        all errors to prevent them from cancelling parent tasks.
+        """
         if self._connected:
             logger.info(f"Closing HTTP transport for server: {self.server_id}")
             try:
                 await self.exit_stack.aclose()
-            except Exception as e:
-                logger.error(f"Error closing HTTP transport for {self.server_id}: {e}")
+            except BaseException as e:
+                # Suppress ALL errors including CancelledError, KeyboardInterrupt, etc.
+                # Cancel scope errors from MCP SDK MUST NOT propagate to parent tasks
+                # This is critical for session recovery to work without killing the parent
+                logger.debug(f"HTTP transport cleanup error for {self.server_id} (suppressed): {type(e).__name__}")
             finally:
                 self._connected = False
                 self.session = None

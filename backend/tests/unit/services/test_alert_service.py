@@ -46,6 +46,7 @@ class TestAlertServiceInitialization:
              patch('tarsy.services.alert_service.ChainRegistry') as mock_chain_registry, \
              patch('tarsy.services.alert_service.MCPServerRegistry') as mock_mcp_registry, \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
+             patch('tarsy.services.mcp_client_factory.MCPClientFactory') as mock_mcp_factory, \
              patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager:
             
             service = AlertService(mock_settings)
@@ -55,7 +56,8 @@ class TestAlertServiceInitialization:
             assert service.history_service == mock_history.return_value
             assert service.chain_registry == mock_chain_registry.return_value
             assert service.mcp_server_registry == mock_mcp_registry.return_value
-            assert service.mcp_client == mock_mcp_client.return_value
+            assert service.health_check_mcp_client == mock_mcp_client.return_value
+            assert service.mcp_client_factory == mock_mcp_factory.return_value
             assert service.llm_manager == mock_llm_manager.return_value
             assert service.agent_factory is None  # Not initialized yet
     
@@ -66,6 +68,7 @@ class TestAlertServiceInitialization:
              patch('tarsy.services.alert_service.ChainRegistry') as mock_chain_registry, \
              patch('tarsy.services.alert_service.MCPServerRegistry') as mock_mcp_registry, \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
+             patch('tarsy.services.mcp_client_factory.MCPClientFactory') as mock_mcp_factory, \
              patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager:
             
             service = AlertService(mock_settings)
@@ -73,8 +76,13 @@ class TestAlertServiceInitialization:
             # Verify RunbookService created with settings and None for http_client
             mock_runbook.assert_called_once_with(mock_settings, None)
             
-            # Verify MCP client created with settings and registry
+            # Verify health check MCP client created with settings and registry
             mock_mcp_client.assert_called_once_with(
+                mock_settings, mock_mcp_registry.return_value
+            )
+            
+            # Verify MCP client factory created with settings and registry
+            mock_mcp_factory.assert_called_once_with(
                 mock_settings, mock_mcp_registry.return_value
             )
             
@@ -98,14 +106,16 @@ class TestAlertServiceAsyncInitialization:
              patch('tarsy.services.alert_service.ChainRegistry'), \
              patch('tarsy.services.alert_service.MCPServerRegistry'), \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
+             patch('tarsy.services.mcp_client_factory.MCPClientFactory') as mock_mcp_factory, \
              patch('tarsy.services.alert_service.LLMManager') as mock_llm_manager, \
              patch('tarsy.services.alert_service.AgentFactory') as mock_agent_factory:
             
             service = AlertService(mock_settings)
             
             # Setup mocks for initialize()
-            service.mcp_client = AsyncMock()
-            service.mcp_client.get_failed_servers = Mock(return_value={})  # No failed servers by default
+            service.health_check_mcp_client = AsyncMock()
+            service.health_check_mcp_client.get_failed_servers = Mock(return_value={})  # No failed servers by default
+            service.health_check_mcp_client.initialize = AsyncMock()
             service.llm_manager = Mock()
             service.llm_manager.is_available.return_value = True
             service.llm_manager.list_available_providers.return_value = ["test-provider"]
@@ -120,16 +130,15 @@ class TestAlertServiceAsyncInitialization:
         with patch('tarsy.services.alert_service.AgentFactory') as mock_factory:
             await alert_service.initialize()
             
-            # Verify MCP client initialization
-            alert_service.mcp_client.initialize.assert_called_once()
+            # Verify health check MCP client initialization (renamed from mcp_client)
+            alert_service.health_check_mcp_client.initialize.assert_called_once()
             
             # Verify LLM availability check
             alert_service.llm_manager.is_available.assert_called_once()
             
-            # Verify agent factory creation
+            # Verify agent factory creation (no longer receives mcp_client in constructor)
             mock_factory.assert_called_once_with(
                 llm_client=alert_service.llm_manager,
-                mcp_client=alert_service.mcp_client,
                 mcp_registry=alert_service.mcp_server_registry,
                 agent_configs={}  # Empty dict when no config path is provided
             )
@@ -157,7 +166,7 @@ class TestAlertServiceAsyncInitialization:
         SystemWarningsService._instance = None
 
         # Simulate two MCP servers failing
-        alert_service.mcp_client.get_failed_servers.return_value = {
+        alert_service.health_check_mcp_client.get_failed_servers.return_value = {
             "argocd-server": "Type=FileNotFoundError | Message=[Errno 2] No such file or directory",
             "github-server": "Type=ConnectionError | Message=Connection refused"
         }
@@ -724,11 +733,12 @@ class TestCleanup:
              patch('tarsy.services.alert_service.ChainRegistry'), \
              patch('tarsy.services.alert_service.MCPServerRegistry'), \
              patch('tarsy.services.alert_service.MCPClient') as mock_mcp_client, \
+             patch('tarsy.services.mcp_client_factory.MCPClientFactory'), \
              patch('tarsy.services.alert_service.LLMManager'):
             
             service = AlertService(mock_settings)
             service.runbook_service = AsyncMock()
-            service.mcp_client = AsyncMock()
+            service.health_check_mcp_client = AsyncMock()
             
             yield service
     
@@ -740,7 +750,7 @@ class TestCleanup:
         await service.close()
         
         service.runbook_service.close.assert_called_once()
-        service.mcp_client.close.assert_called_once()
+        service.health_check_mcp_client.close.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_close_with_exception(self, alert_service_with_resources):
@@ -753,7 +763,7 @@ class TestCleanup:
         
         # Only the first cleanup method should be attempted due to exception handling
         service.runbook_service.close.assert_called_once()
-        service.mcp_client.close.assert_not_called() 
+        service.health_check_mcp_client.close.assert_not_called() 
 
 
 @pytest.mark.unit
@@ -1186,7 +1196,7 @@ class TestEnhancedChainExecution:
         )
         
         # Mock get_agent to return appropriate agents
-        def mock_get_agent(agent_identifier, iteration_strategy=None):
+        def mock_get_agent(agent_identifier, mcp_client, iteration_strategy=None):
             if agent_identifier == 'DataAgent':
                 agent = successful_agent
             elif agent_identifier == 'AnalysisAgent': 
@@ -1199,8 +1209,11 @@ class TestEnhancedChainExecution:
         
         service.agent_factory.get_agent.side_effect = mock_get_agent
         
+        # Create mock session MCP client
+        session_mcp_client = AsyncMock()
+        
         # Execute chain stages
-        result = await service._execute_chain_stages(chain_definition, chain_context)
+        result = await service._execute_chain_stages(chain_definition, chain_context, session_mcp_client)
         
         # Verify result indicates failure with aggregated error
         from tarsy.models.constants import ChainStatus
@@ -1254,15 +1267,18 @@ class TestEnhancedChainExecution:
             final_analysis="All systems operational"
         )
         
-        def mock_get_agent(agent_identifier, iteration_strategy=None):
+        def mock_get_agent(agent_identifier, mcp_client, iteration_strategy=None):
             agent = successful_agent
             agent.set_current_stage_execution_id = Mock()
             return agent
         
         service.agent_factory.get_agent.side_effect = mock_get_agent
         
+        # Create mock session MCP client
+        session_mcp_client = AsyncMock()
+        
         # Execute chain stages
-        result = await service._execute_chain_stages(chain_definition, chain_context)
+        result = await service._execute_chain_stages(chain_definition, chain_context, session_mcp_client)
         
         # Verify successful result
         from tarsy.models.constants import ChainStatus
@@ -1303,15 +1319,18 @@ class TestEnhancedChainExecution:
         failing_agent = AsyncMock()
         failing_agent.process_alert.side_effect = Exception("Unexpected agent failure")
         
-        def mock_get_agent(agent_identifier, iteration_strategy=None):
+        def mock_get_agent(agent_identifier, mcp_client, iteration_strategy=None):
             agent = failing_agent
             agent.set_current_stage_execution_id = Mock()
             return agent
         
         service.agent_factory.get_agent.side_effect = mock_get_agent
         
+        # Create mock session MCP client
+        session_mcp_client = AsyncMock()
+        
         # Execute chain stages
-        result = await service._execute_chain_stages(chain_definition, chain_context)
+        result = await service._execute_chain_stages(chain_definition, chain_context, session_mcp_client)
         
         # Verify exception is handled and results in failed status with error
         from tarsy.models.constants import ChainStatus
@@ -1404,7 +1423,7 @@ class TestFullErrorPropagation:
             error_message="API rate limit exceeded"
         )
         
-        def mock_get_agent(agent_identifier, iteration_strategy=None):
+        def mock_get_agent(agent_identifier, mcp_client, iteration_strategy=None):
             if agent_identifier == 'Agent1':
                 agent = failing_agent_1
             else:  # Agent2
@@ -1483,7 +1502,7 @@ class TestFullErrorPropagation:
             error_message="Critical system error detected"
         )
         
-        def mock_get_agent(agent_identifier, iteration_strategy=None):
+        def mock_get_agent(agent_identifier, mcp_client, iteration_strategy=None):
             agent = failing_agent
             agent.set_current_stage_execution_id = Mock()
             return agent
