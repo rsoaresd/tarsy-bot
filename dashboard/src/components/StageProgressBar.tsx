@@ -7,6 +7,7 @@ import {
   Stepper,
   StepContent,
   Chip,
+  alpha,
 } from '@mui/material';
 import {
   CheckCircle,
@@ -17,50 +18,29 @@ import {
 } from '@mui/icons-material';
 import type { StageProgressBarProps } from '../types';
 import { formatDurationMs } from '../utils/timestamp';
+import { STAGE_STATUS, getStageStatusDisplayName, getStageStatusChipColor } from '../utils/statusConstants';
 
 // Helper function to get step icon based on status
 const getStepIcon = (status: string, isActive: boolean = false) => {
   switch (status) {
-    case 'completed':
+    case STAGE_STATUS.COMPLETED:
       return <CheckCircle color="success" />;
-    case 'failed':
+    case STAGE_STATUS.FAILED:
       return <ErrorIcon color="error" />;
-    case 'active':
+    case STAGE_STATUS.ACTIVE:
       return <PlayArrow color="primary" />;
-    case 'pending':
+    case STAGE_STATUS.PENDING:
     default:
       return <Schedule color={isActive ? 'primary' : 'disabled'} />;
   }
 };
 
-// Helper function to get step color
-const getStepColor = (status: string): string => {
-  switch (status) {
-    case 'completed':
-      return 'success';
-    case 'failed':
-      return 'error';
-    case 'active':
-      return 'primary';
-    case 'pending':
-    default:
-      return 'grey';
-  }
-};
-
 // Helper function to format stage status
 const formatStageStatus = (status: string): string => {
-  switch (status) {
-    case 'completed':
-      return 'Completed';
-    case 'failed':
-      return 'Failed';
-    case 'active':
-      return 'Running';
-    case 'pending':
-    default:
-      return 'Pending';
+  if (status === STAGE_STATUS.ACTIVE) {
+    return 'Running';
   }
+  return getStageStatusDisplayName(status);
 };
 
 const StageProgressBar: React.FC<StageProgressBarProps> = ({
@@ -93,8 +73,8 @@ const StageProgressBar: React.FC<StageProgressBarProps> = ({
       >
         {sortedStages.map((stage, index) => {
           const isActive = typeof currentStageIndex === 'number' && index === currentStageIndex;
-          const isCompleted = stage.status === 'completed';
-          const isRunning = stage.status === 'active';
+          const isCompleted = stage.status === STAGE_STATUS.COMPLETED;
+          const isRunning = stage.status === STAGE_STATUS.ACTIVE;
 
           return (
             <Step key={stage.execution_id} active={isActive} completed={isCompleted}>
@@ -123,7 +103,7 @@ const StageProgressBar: React.FC<StageProgressBarProps> = ({
                       <Chip
                         label={formatStageStatus(stage.status)}
                         size="small"
-                        color={getStepColor(stage.status) as any}
+                        color={getStageStatusChipColor(stage.status)}
                         variant={isActive ? 'filled' : 'outlined'}
                         sx={{ height: 20, fontSize: '0.65rem' }}
                       />
@@ -162,17 +142,17 @@ const StageProgressBar: React.FC<StageProgressBarProps> = ({
                           
                           {/* LLM interactions badge */}
                           {stage.llm_interaction_count > 0 && (
-                            <Box sx={{ 
+                            <Box sx={(theme) => ({ 
                               display: 'flex',
                               alignItems: 'center',
                               gap: 0.25,
                               px: 0.5,
                               py: 0.25,
-                              backgroundColor: 'primary.50',
+                              backgroundColor: alpha(theme.palette.primary.main, 0.05),
                               borderRadius: '8px',
                               border: '1px solid',
-                              borderColor: 'primary.200'
-                            }}>
+                              borderColor: alpha(theme.palette.primary.main, 0.2)
+                            })}>
                               <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main', fontSize: '0.6rem' }}>
                                 🧠 {stage.llm_interaction_count}
                               </Typography>
@@ -181,17 +161,17 @@ const StageProgressBar: React.FC<StageProgressBarProps> = ({
                           
                           {/* MCP interactions badge */}
                           {stage.mcp_communication_count > 0 && (
-                            <Box sx={{ 
+                            <Box sx={(theme) => ({ 
                               display: 'flex',
                               alignItems: 'center',
                               gap: 0.25,
                               px: 0.5,
                               py: 0.25,
-                              backgroundColor: 'secondary.50',
+                              backgroundColor: alpha(theme.palette.secondary.main, 0.05),
                               borderRadius: '8px',
                               border: '1px solid',
-                              borderColor: 'secondary.200'
-                            }}>
+                              borderColor: alpha(theme.palette.secondary.main, 0.2)
+                            })}>
                               <Typography variant="caption" sx={{ fontWeight: 600, color: 'secondary.main', fontSize: '0.6rem' }}>
                                 🔧 {stage.mcp_communication_count}
                               </Typography>
@@ -241,7 +221,7 @@ const StageProgressBar: React.FC<StageProgressBarProps> = ({
                     )}
                     
                     {/* Success indicator */}
-                    {stage.status === 'completed' && stage.stage_output && (
+                    {stage.status === STAGE_STATUS.COMPLETED && stage.stage_output && (
                       <Typography
                         variant="caption"
                         color="success.main"
@@ -265,10 +245,10 @@ const StageProgressBar: React.FC<StageProgressBarProps> = ({
       {/* Overall progress summary */}
       <Box sx={{ mt: 2, p: 1, backgroundColor: 'grey.50', borderRadius: 1 }}>
         <Typography variant="caption" color="text.secondary" align="center" display="block">
-          {stages.filter(s => s.status === 'completed').length} completed, {' '}
-          {stages.filter(s => s.status === 'failed').length} failed, {' '}
-          {stages.filter(s => s.status === 'active').length} active, {' '}
-          {stages.filter(s => s.status === 'pending').length} pending
+          {stages.filter(s => s.status === STAGE_STATUS.COMPLETED).length} completed, {' '}
+          {stages.filter(s => s.status === STAGE_STATUS.FAILED).length} failed, {' '}
+          {stages.filter(s => s.status === STAGE_STATUS.ACTIVE).length} active, {' '}
+          {stages.filter(s => s.status === STAGE_STATUS.PENDING).length} pending
         </Typography>
       </Box>
     </Box>

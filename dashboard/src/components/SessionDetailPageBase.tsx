@@ -23,6 +23,8 @@ import { websocketService } from '../services/websocketService';
 import { useSession } from '../contexts/SessionContext';
 import type { DetailedSession } from '../types';
 import { useAdvancedAutoScroll } from '../hooks/useAdvancedAutoScroll';
+import { isTerminalSessionEvent } from '../utils/eventTypes';
+import { isActiveSessionStatus } from '../utils/statusConstants';
 
 // Lazy load shared components
 const SessionHeader = lazy(() => import('./SessionHeader'));
@@ -107,7 +109,7 @@ function SessionDetailPageBase({
   // Auto-scroll settings - only enable by default for active sessions
   const [autoScrollEnabled, setAutoScrollEnabled] = useState<boolean>(() => {
     // Initialize based on session status if available
-    return session ? (session.status === 'in_progress' || session.status === 'pending') : false;
+    return session ? isActiveSessionStatus(session.status) : false;
   });
   
   // Track previous session status to detect transitions
@@ -123,8 +125,10 @@ function SessionDetailPageBase({
   // Update auto-scroll enabled state when session transitions between active/inactive
   useEffect(() => {
     if (session) {
-      const previousActive = prevStatusRef.current === 'in_progress' || prevStatusRef.current === 'pending';
-      const currentActive = session.status === 'in_progress' || session.status === 'pending';
+      const previousActive = prevStatusRef.current
+        ? isActiveSessionStatus(prevStatusRef.current)
+        : false;
+      const currentActive = isActiveSessionStatus(session.status);
       
       // Only update auto-scroll on first load or when crossing active↔inactive boundary
       if (prevStatusRef.current === undefined || previousActive !== currentActive) {
@@ -153,11 +157,11 @@ function SessionDetailPageBase({
   // Perform initial scroll to bottom for active sessions
   useEffect(() => {
     if (
-      session && 
-      !loading && 
-      !hasPerformedInitialScrollRef.current && 
+      session &&
+      !loading &&
+      !hasPerformedInitialScrollRef.current &&
       autoScrollEnabled &&
-      (session.status === 'in_progress' || session.status === 'pending')
+      isActiveSessionStatus(session.status)
     ) {
       // Wait for content to render, then scroll to bottom
       const scrollTimer = setTimeout(() => {
@@ -251,12 +255,12 @@ function SessionDetailPageBase({
       
       // Use pattern matching for robust event handling
       if (eventType.startsWith('session.')) {
-        // Session lifecycle events (session.created, session.started, session.completed, session.failed)
+        // Session lifecycle events (session.created, session.started, session.completed, session.failed, session.cancelled)
         console.log('🔄 Session lifecycle event, refreshing data');
         
-        // For major status changes (completed/failed), refresh everything
-        if (eventType === 'session.completed' || eventType === 'session.failed') {
-          console.log('🔄 Session completed/failed - full refresh');
+        // For terminal session events, refresh everything
+        if (isTerminalSessionEvent(eventType)) {
+          console.log('🔄 Session reached terminal state - full refresh');
           throttledUpdate(() => {
             if (sessionId) {
               refreshSessionStages(sessionId);
@@ -287,8 +291,8 @@ function SessionDetailPageBase({
       }
       else if (eventType.startsWith('llm.') || eventType.startsWith('mcp.')) {
         // LLM/MCP interaction events (llm.interaction, mcp.tool_call, mcp.list_tools)
-        // Only update if session is in progress
-        if (sessionRef.current?.status === 'in_progress') {
+        // Only update if session is active (in progress, pending, or canceling)
+        if (sessionRef.current?.status && isActiveSessionStatus(sessionRef.current.status)) {
           console.log('🔄 Activity update, using partial refresh');
           
           // Always update summary for real-time statistics (lightweight)
@@ -390,7 +394,7 @@ function SessionDetailPageBase({
         )}
         
         {/* Live Updates indicator */}
-        {session && (session.status === 'in_progress' || session.status === 'pending') && !loading && (
+        {session && isActiveSessionStatus(session.status) && !loading && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
             <CircularProgress size={14} sx={{ color: 'inherit' }} />
             <Typography variant="caption" sx={{ color: 'inherit', fontSize: '0.75rem' }}>
@@ -452,7 +456,7 @@ function SessionDetailPageBase({
 
 
           {/* Auto-scroll toggle - only show for active sessions */}
-          {session && (session.status === 'in_progress' || session.status === 'pending') && (
+          {session && isActiveSessionStatus(session.status) && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
               <FormControlLabel
                 control={

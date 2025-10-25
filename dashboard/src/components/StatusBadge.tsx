@@ -4,7 +4,9 @@ import {
   CheckCircle, 
   Error, 
   Schedule, 
-  Refresh 
+  Refresh,
+  HourglassEmpty,
+  Cancel
 } from '@mui/icons-material';
 import type { StatusBadgeProps } from '../types';
 
@@ -15,6 +17,24 @@ const getStatusConfig = (status: string): {
   label: string 
 } => {
   switch (status) {
+    case 'pending': 
+      return { 
+        color: 'warning', 
+        icon: <Schedule sx={{ fontSize: 16 }} />, 
+        label: 'Pending' 
+      };
+    case 'in_progress':
+      return { 
+        color: 'info', 
+        icon: <Refresh sx={{ fontSize: 16 }} />, 
+        label: 'In Progress' 
+      };
+    case 'canceling':
+      return { 
+        color: 'warning', 
+        icon: <HourglassEmpty sx={{ fontSize: 16 }} />, 
+        label: 'Canceling' 
+      };
     case 'completed': 
       return { 
         color: 'success', 
@@ -27,17 +47,11 @@ const getStatusConfig = (status: string): {
         icon: <Error sx={{ fontSize: 16 }} />, 
         label: 'Failed' 
       };
-    case 'in_progress':
+    case 'cancelled': 
       return { 
-        color: 'info', 
-        icon: <Refresh sx={{ fontSize: 16 }} />, 
-        label: 'In Progress' 
-      };
-    case 'pending': 
-      return { 
-        color: 'warning', 
-        icon: <Schedule sx={{ fontSize: 16 }} />, 
-        label: 'Pending' 
+        color: 'default', 
+        icon: <Cancel sx={{ fontSize: 16 }} />, 
+        label: 'Cancelled' 
       };
     default: 
       return { 
@@ -55,6 +69,25 @@ const getStatusConfig = (status: string): {
 const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'small' }) => {
   const { color, icon, label } = getStatusConfig(status);
   
+  // Custom styling for cancelled status to make it more noticeable
+  const customSx = status === 'cancelled' 
+    ? {
+        fontWeight: 600,
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        color: 'white',
+        border: '1px solid rgba(0, 0, 0, 0.8)',
+        '& .MuiChip-icon': {
+          marginLeft: '4px',
+          color: 'white',
+        },
+      }
+    : {
+        fontWeight: 500,
+        '& .MuiChip-icon': {
+          marginLeft: '4px',
+        },
+      };
+  
   return (
     <Chip
       size={size}
@@ -62,12 +95,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'small' }) => 
       icon={icon}
       label={label}
       variant="filled"
-      sx={{
-        fontWeight: 500,
-        '& .MuiChip-icon': {
-          marginLeft: '4px',
-        },
-      }}
+      sx={customSx}
     />
   );
 };

@@ -31,37 +31,38 @@ import {
 import TokenUsageDisplay from './TokenUsageDisplay';
 import type { StageCardProps, TimelineItem } from '../types';
 import { formatTimestamp, formatDurationMs } from '../utils/timestamp';
+import { STAGE_STATUS, getStageStatusDisplayName } from '../utils/statusConstants';
 
 // Helper function to get stage status configuration
 const getStageStatusConfig = (status: string) => {
   switch (status) {
-    case 'completed':
+    case STAGE_STATUS.COMPLETED:
       return {
         color: 'success' as const,
         icon: <CheckCircle />,
-        label: 'Completed',
+        label: getStageStatusDisplayName(STAGE_STATUS.COMPLETED),
         bgColor: 'success.light',
       };
-    case 'failed':
+    case STAGE_STATUS.FAILED:
       return {
         color: 'error' as const,
         icon: <ErrorIcon />,
-        label: 'Failed',
+        label: getStageStatusDisplayName(STAGE_STATUS.FAILED),
         bgColor: 'error.light',
       };
-    case 'active':
+    case STAGE_STATUS.ACTIVE:
       return {
         color: 'primary' as const,
         icon: <PlayArrow />,
         label: 'Running',
         bgColor: 'primary.light',
       };
-    case 'pending':
+    case STAGE_STATUS.PENDING:
     default:
       return {
         color: 'default' as const,
         icon: <Schedule />,
-        label: 'Pending',
+        label: getStageStatusDisplayName(STAGE_STATUS.PENDING),
         bgColor: 'grey.100',
       };
   }
@@ -105,7 +106,7 @@ const StageCard: React.FC<StageCardProps> = ({
         border: '1px solid',
         borderColor: statusConfig.color === 'default' ? 'divider' : `${statusConfig.color}.main`,
         backgroundColor: expanded ? statusConfig.bgColor : 'background.paper',
-        opacity: stage.status === 'pending' ? 0.7 : 1,
+        opacity: stage.status === STAGE_STATUS.PENDING ? 0.7 : 1,
       }}
     >
       <CardContent sx={{ pb: 1 }}>
@@ -181,7 +182,7 @@ const StageCard: React.FC<StageCardProps> = ({
         )}
 
         {/* Success indicator */}
-        {stage.status === 'completed' && !hasError && (
+        {stage.status === STAGE_STATUS.COMPLETED && !hasError && (
           <Box
             sx={{
               mt: 1,
@@ -304,17 +305,17 @@ const StageCard: React.FC<StageCardProps> = ({
                     
                     {/* LLM interactions badge */}
                     {stage.llm_interaction_count > 0 && (
-                      <Box sx={{ 
+                      <Box sx={(theme) => ({ 
                         display: 'flex',
                         alignItems: 'center',
                         gap: 0.25,
                         px: 0.75,
                         py: 0.25,
-                        backgroundColor: 'primary.50',
+                        backgroundColor: alpha(theme.palette.primary.main, 0.05),
                         borderRadius: '12px',
                         border: '1px solid',
-                        borderColor: 'primary.200'
-                      }}>
+                        borderColor: alpha(theme.palette.primary.main, 0.2)
+                      })}>
                         <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main', fontSize: '0.7rem' }}>
                           🧠 {stage.llm_interaction_count}
                         </Typography>
@@ -326,17 +327,17 @@ const StageCard: React.FC<StageCardProps> = ({
                     
                     {/* MCP interactions badge */}
                     {stage.mcp_communication_count > 0 && (
-                      <Box sx={{ 
+                      <Box sx={(theme) => ({ 
                         display: 'flex',
                         alignItems: 'center',
                         gap: 0.25,
                         px: 0.75,
                         py: 0.25,
-                        backgroundColor: 'secondary.50',
+                        backgroundColor: alpha(theme.palette.secondary.main, 0.05),
                         borderRadius: '12px',
                         border: '1px solid',
-                        borderColor: 'secondary.200'
-                      }}>
+                        borderColor: alpha(theme.palette.secondary.main, 0.2)
+                      })}>
                         <Typography variant="caption" sx={{ fontWeight: 600, color: 'secondary.main', fontSize: '0.7rem' }}>
                           🔧 {stage.mcp_communication_count}
                         </Typography>

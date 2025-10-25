@@ -24,7 +24,8 @@ import {
 } from '@mui/icons-material';
 import { format, parseISO } from 'date-fns';
 import TimeRangeModal from './TimeRangeModal';
-import type { FilterPanelProps } from '../types';
+import type { FilterPanelProps, Session } from '../types';
+import { ALL_SESSION_STATUSES, getSessionStatusDisplayName, getSessionStatusChipColor } from '../utils/statusConstants';
 
 /**
  * FilterPanel component for Phase 6 - Advanced Filtering & Pagination
@@ -68,12 +69,10 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
 
   // Filter options with defaults
   // Always show all possible status options, regardless of what's in the database
-  const allStatusOptions = ['completed', 'failed', 'in_progress', 'pending'];
-  
   const defaultFilterOptions = {
     agent_types: filterOptions?.agent_types || ['kubernetes', 'network', 'database'],
     alert_types: filterOptions?.alert_types || ['NamespaceTerminating', 'PodCrashLooping', 'NodeNotReady'],
-    status_options: allStatusOptions
+    status_options: ALL_SESSION_STATUSES
   };
 
   // Handler functions
@@ -87,7 +86,7 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
   const handleStatusChange = (statuses: string[]) => {
     onFiltersChange({
       ...filters,
-      status: statuses as ('completed' | 'failed' | 'in_progress' | 'pending')[]
+      status: statuses as Session['status'][]
     });
   };
 
@@ -109,27 +108,6 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
     const newShowAdvanced = !showAdvancedFilters;
     setShowAdvancedFilters(newShowAdvanced);
     onToggleAdvanced?.(newShowAdvanced);
-  };
-
-  // Helper functions for chip display and colors
-  const getStatusDisplayName = (status: string): string => {
-    switch (status) {
-      case 'completed': return 'Completed';
-      case 'failed': return 'Failed';
-      case 'in_progress': return 'In Progress';
-      case 'pending': return 'Pending';
-      default: return status;
-    }
-  };
-
-  const getStatusColor = (status: string): 'success' | 'error' | 'info' | 'warning' | 'default' => {
-    switch (status) {
-      case 'completed': return 'success';
-      case 'failed': return 'error';
-      case 'in_progress': return 'info';
-      case 'pending': return 'warning';
-      default: return 'default';
-    }
   };
 
   // Clear handlers for individual filter chips
@@ -246,9 +224,9 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
                     {selected.map((value) => (
                       <Chip 
                         key={value} 
-                        label={getStatusDisplayName(value)} 
+                        label={getSessionStatusDisplayName(value)} 
                         size="small" 
-                        color={getStatusColor(value)}
+                        color={getSessionStatusChipColor(value)}
                       />
                     ))}
                   </Box>
@@ -256,7 +234,7 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
               >
                 {defaultFilterOptions.status_options.map((status) => (
                   <MenuItem key={status} value={status}>
-                    {getStatusDisplayName(status)}
+                    {getSessionStatusDisplayName(status)}
                   </MenuItem>
                 ))}
               </Select>
@@ -393,11 +371,11 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
               {filters.status && filters.status.map(status => (
                 <Chip
                   key={status}
-                  label={`Status: ${getStatusDisplayName(status)}`}
+                  label={`Status: ${getSessionStatusDisplayName(status)}`}
                   onDelete={() => handleClearStatus(status)}
                   size="small"
                   variant="outlined"
-                  color={getStatusColor(status)}
+                  color={getSessionStatusChipColor(status)}
                 />
               ))}
 

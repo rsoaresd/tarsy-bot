@@ -167,7 +167,7 @@ describe('API Client Retry Logic', () => {
       toJSON: () => ({}),
     };
 
-    // Mock successful response for the third attempt
+    // Mock successful response for the third attempt (backend returns flat structure)
     const successResponse = {
       data: {
         sessions: [
@@ -177,6 +177,7 @@ describe('API Client Retry Logic', () => {
         total_count: 2,
         page: 1,
         page_size: 25,
+        total_pages: 1,
       },
       status: 200,
       statusText: 'OK',
@@ -214,15 +215,19 @@ describe('API Client Retry Logic', () => {
     // Third attempt succeeds
     const result = await resultPromise;
 
-    // Verify the result matches the SessionsResponse format
+    // Verify the result matches the normalized SessionsResponse format
     expect(result).toEqual({
       sessions: [
         { session_id: 'test-1', status: 'completed', alert_type: 'PodCrashLooping' },
         { session_id: 'test-2', status: 'failed', alert_type: 'PodCrashLooping' },
       ],
-      total_count: 2,
-      page: 1,
-      page_size: 25,
+      pagination: {
+        page: 1,
+        page_size: 25,
+        total_pages: 1,
+        total_items: 2,
+      },
+      filters_applied: {},
     });
 
     // Verify axios client was called 3 times (2 failures + 1 success)
@@ -239,6 +244,60 @@ describe('API Client Retry Logic', () => {
 
     // Restore real timers
     vi.useRealTimers();
+  });
+
+  it('should handle already-nested pagination format from backend', async () => {
+    // Get reference to the mock axios client
+    const mockClient = mockedAxios.create();
+    
+    // Mock response with already-nested pagination structure
+    const nestedResponse = {
+      data: {
+        sessions: [
+          { session_id: 'test-1', status: 'completed', alert_type: 'PodCrashLooping' },
+        ],
+        pagination: {
+          page: 1,
+          page_size: 25,
+          total_pages: 1,
+          total_items: 1,
+        },
+        filters_applied: {
+          status: ['completed'],
+        },
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    };
+
+    mockClient.get.mockResolvedValueOnce(nestedResponse);
+
+    // Test with filters
+    const testFilters = {
+      status: ['completed'] as ('completed')[],
+    };
+
+    const result = await (apiClient as any).getFilteredSessions(testFilters, 1, 25);
+
+    // Verify the result is returned as-is when already nested
+    expect(result).toEqual({
+      sessions: [
+        { session_id: 'test-1', status: 'completed', alert_type: 'PodCrashLooping' },
+      ],
+      pagination: {
+        page: 1,
+        page_size: 25,
+        total_pages: 1,
+        total_items: 1,
+      },
+      filters_applied: {
+        status: ['completed'],
+      },
+    });
+
+    expect(mockClient.get).toHaveBeenCalledTimes(1);
   });
 
   it('should not retry on HTTP errors (4xx, 5xx)', async () => {
@@ -449,6 +508,101 @@ describe('API Client Retry Logic', () => {
       attemptCount = 0; // Reset for next iteration
       vi.clearAllMocks();
     }
+  });
+});
+
+describe('API Client Session Cancellation', () => {
+  let consoleErrorSpy: any;
+  const mockClient = mockedAxios.create();
+
+  beforeEach(() => {
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('should successfully cancel a session', async () => {
+    const sessionId = 'test-session-123';
+    const successResponse = {
+      data: {
+        success: true,
+        message: 'Cancellation request sent',
+        status: 'canceling'
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: {} as any,
+    };
+
+    mockClient.post.mockResolvedValueOnce(successResponse);
+
+    const result = await apiClient.cancelSession(sessionId);
+
+    expect(result).toEqual({
+      success: true,
+      message: 'Cancellation request sent',
+      status: 'canceling'
+    });
+    expect(mockClient.post).toHaveBeenCalledWith(`/api/v1/history/sessions/${sessionId}/cancel`);
+    expect(mockClient.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('should handle 404 when cancelling non-existent session', async () => {
+    const sessionId = 'non-existent-session';
+    const notFoundError: any = {
+      isAxiosError: true,
+      request: {},
+      response: {
+        status: 404,
+        data: { detail: 'Session non-existent-session not found' },
+      },
+      message: 'Request failed with status code 404',
+    };
+
+    mockClient.post.mockRejectedValueOnce(notFoundError);
+
+    await expect(apiClient.cancelSession(sessionId)).rejects.toThrow();
+    expect(mockClient.post).toHaveBeenCalledWith(`/api/v1/history/sessions/${sessionId}/cancel`);
+  });
+
+  it('should handle 400 when cancelling already completed session', async () => {
+    const sessionId = 'completed-session';
+    const badRequestError: any = {
+      isAxiosError: true,
+      request: {},
+      response: {
+        status: 400,
+        data: { detail: 'Session already completed, cannot cancel' },
+      },
+      message: 'Request failed with status code 400',
+    };
+
+    mockClient.post.mockRejectedValueOnce(badRequestError);
+
+    await expect(apiClient.cancelSession(sessionId)).rejects.toThrow();
+    expect(mockClient.post).toHaveBeenCalledWith(`/api/v1/history/sessions/${sessionId}/cancel`);
+  });
+
+  it('should handle network errors when cancelling session', async () => {
+    const sessionId = 'test-session-456';
+    const networkError: any = {
+      isAxiosError: true,
+      request: {},
+      response: undefined,
+      message: 'Network Error',
+    };
+
+    mockClient.post.mockRejectedValueOnce(networkError);
+
+    await expect(apiClient.cancelSession(sessionId)).rejects.toThrow();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Error cancelling session:',
+      networkError
+    );
   });
 });
 

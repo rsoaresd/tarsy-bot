@@ -1,5 +1,5 @@
 /**
- * Alert processing status component - EP-0018
+ * Alert processing status component
  * Adapted from alert-dev-ui ProcessingStatus.tsx for dashboard integration
  * Shows real-time progress of alert processing via WebSocket
  */
@@ -16,6 +16,9 @@ import {
   Paper,
   Button,
   Tooltip,
+  CircularProgress,
+  Fade,
+  Zoom,
 } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
@@ -23,17 +26,28 @@ import {
   HourglassTop as HourglassIcon,
   OpenInNew as OpenInNewIcon,
   Visibility as VisibilityIcon,
+  Cancel as CancelIcon,
+  HourglassEmpty as HourglassEmptyIcon,
 } from '@mui/icons-material';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 
 import type { ProcessingStatus, ProcessingStatusProps } from '../types';
 import { websocketService } from '../services/websocketService';
 import { apiClient } from '../services/api';
+import { SESSION_EVENTS, isTerminalSessionEvent } from '../utils/eventTypes';
+import {
+  ALERT_PROCESSING_STATUS,
+  getAlertProcessingStatusChipColor,
+  getAlertProcessingStatusProgressColor,
+} from '../utils/statusConstants';
 
 const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onComplete }) => {
   const [status, setStatus] = useState<ProcessingStatus | null>(null);
   const [wsError, setWsError] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [sessionExists, setSessionExists] = useState<boolean>(false);
+  const [checkingSession, setCheckingSession] = useState<boolean>(true);
+  const [pollError, setPollError] = useState<string | null>(null);
 
   // Store onComplete in a ref to avoid effect re-runs when it changes
   const onCompleteRef = useRef(onComplete);
@@ -47,6 +61,9 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
   
   // Track terminal state immediately (not waiting for React state update)
   const isTerminalRef = useRef(false);
+  
+  // Track pending timeout for cleanup
+  const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Reset mount flag on (re)mount or session change
@@ -55,6 +72,10 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
     didCompleteRef.current = false;
     // Reset terminal state for new session
     isTerminalRef.current = false;
+    // Reset session existence check
+    setSessionExists(false);
+    setCheckingSession(true);
+    setPollError(null);
     
     // Initialize WebSocket connection status
     const initialConnectionStatus = websocketService.isConnected;
@@ -71,7 +92,7 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
     // Set initial processing status
     setStatus({
       session_id: sessionId,
-      status: 'processing',
+      status: ALERT_PROCESSING_STATUS.PROCESSING,
       progress: 10,
       current_step: 'Session initialized, processing alert...',
       timestamp: new Date().toISOString()
@@ -89,6 +110,107 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
     return () => {
       isMountedRef.current = false; // Mark component as unmounted
       unsubscribeConnection();
+      // Clear any pending poll timeout
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+  }, [sessionId]);
+
+  // Poll to check if session exists in the database
+  useEffect(() => {
+    let attempts = 0;
+    const maxAttempts = 30;
+    let currentDelay = 1000; // Start with 1 second
+    const maxDelay = 5000; // Cap at 5 seconds
+    
+    const checkSessionExists = async () => {
+      // Don't proceed if component is unmounted
+      if (!isMountedRef.current) {
+        return;
+      }
+      
+      try {
+        // Try to fetch the session detail to confirm it exists
+        await apiClient.getSessionDetail(sessionId);
+        
+        // If we get here, session exists
+        if (isMountedRef.current) {
+          setSessionExists(true);
+          setCheckingSession(false);
+          setPollError(null);
+          console.log(`✅ Session ${sessionId} confirmed to exist in database`);
+          
+          // Clear any pending timeout
+          if (pollTimeoutRef.current) {
+            clearTimeout(pollTimeoutRef.current);
+            pollTimeoutRef.current = null;
+          }
+        }
+      } catch (error: any) {
+        attempts++;
+        
+        // Check if it's a 404 error (session not found)
+        const is404 = error?.response?.status === 404;
+        
+        if (is404) {
+          // Stop polling immediately for 404 - session doesn't exist
+          console.warn(`❌ Session ${sessionId} not found (404)`);
+          if (isMountedRef.current) {
+            setCheckingSession(false);
+            setSessionExists(false); // Keep disabled
+            setPollError('Session not found. The alert processing may not have started yet.');
+          }
+          // Clear any pending timeout
+          if (pollTimeoutRef.current) {
+            clearTimeout(pollTimeoutRef.current);
+            pollTimeoutRef.current = null;
+          }
+          return;
+        }
+        
+        // For other errors, check if we've hit max attempts
+        if (attempts >= maxAttempts) {
+          console.warn(`⚠️ Session ${sessionId} not found after ${maxAttempts} attempts`);
+          if (isMountedRef.current) {
+            setCheckingSession(false);
+            setSessionExists(false); // Keep disabled - don't enable on timeout
+            setPollError('Unable to verify session existence. Please try refreshing the page.');
+          }
+          // Clear any pending timeout
+          if (pollTimeoutRef.current) {
+            clearTimeout(pollTimeoutRef.current);
+            pollTimeoutRef.current = null;
+          }
+          return;
+        }
+        
+        // For non-404 errors, retry with exponential backoff
+        // Double the delay each time, capped at maxDelay
+        currentDelay = Math.min(currentDelay * 2, maxDelay);
+        
+        console.log(
+          `⚠️ Failed to check session ${sessionId} (attempt ${attempts}/${maxAttempts}), ` +
+          `retrying in ${currentDelay}ms...`
+        );
+        
+        // Schedule next attempt with backoff delay
+        if (isMountedRef.current) {
+          pollTimeoutRef.current = setTimeout(checkSessionExists, currentDelay);
+        }
+      }
+    };
+    
+    // Initial check (immediate)
+    checkSessionExists();
+    
+    // Cleanup
+    return () => {
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
     };
   }, [sessionId]);
 
@@ -120,15 +242,21 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
 
       if (eventType.startsWith('session.')) {
         // Session lifecycle events
-        const isCompleted = eventType === 'session.completed';
-        const isFailed = eventType === 'session.failed';
+        const isCompleted = eventType === SESSION_EVENTS.COMPLETED;
+        const isFailed = eventType === SESSION_EVENTS.FAILED;
+        const isCancelled = eventType === SESSION_EVENTS.CANCELLED;
         
         updatedStatus = {
           session_id: sessionId,
-          status: isCompleted ? 'completed' : isFailed ? 'error' : 'processing',
+          status: isCompleted ? ALERT_PROCESSING_STATUS.COMPLETED : 
+                  isFailed ? ALERT_PROCESSING_STATUS.ERROR : 
+                  isCancelled ? ALERT_PROCESSING_STATUS.CANCELLED : 
+                  ALERT_PROCESSING_STATUS.PROCESSING,
           progress: 0,
           current_step: isCompleted ? 'Processing completed' : 
-                       isFailed ? 'Processing failed' : 'Processing...',
+                       isFailed ? 'Processing failed' : 
+                       isCancelled ? 'Processing cancelled' : 
+                       'Processing...',
           timestamp: new Date().toISOString(),
           error: update.error_message || undefined,
           result: update.final_analysis || undefined
@@ -156,7 +284,7 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
         // Terminal state is only determined by session.completed/session.failed
         updatedStatus = {
           session_id: sessionId,
-          status: 'processing',
+          status: ALERT_PROCESSING_STATUS.PROCESSING,
           progress: 0,
           current_step: `Stage: ${update.stage_name || 'Processing'}`,
           timestamp: new Date().toISOString()
@@ -166,7 +294,7 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
         // LLM interaction events
         updatedStatus = {
           session_id: sessionId,
-          status: 'processing',
+          status: ALERT_PROCESSING_STATUS.PROCESSING,
           progress: 0,
           current_step: 'Analyzing with AI...',
           timestamp: new Date().toISOString()
@@ -176,7 +304,7 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
         // MCP interaction events
         updatedStatus = {
           session_id: sessionId,
-          status: 'processing',
+          status: ALERT_PROCESSING_STATUS.PROCESSING,
           progress: 0,
           current_step: 'Gathering system information...',
           timestamp: new Date().toISOString()
@@ -185,15 +313,15 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
 
       if (updatedStatus) {
         // Mark terminal state immediately (before React state update) to prevent race conditions
-        // Only session.completed or session.failed should trigger terminal state
-        const isSessionTerminal = eventType === 'session.completed' || eventType === 'session.failed';
+        // Only terminal session events should trigger terminal state
+        const isSessionTerminal = isTerminalSessionEvent(eventType);
         if (isSessionTerminal) {
           isTerminalRef.current = true;
         }
         
         setStatus(updatedStatus);
         
-        // Call onComplete callback only when session completes or fails (not on stage.failed)
+        // Call onComplete callback when session reaches any terminal state
         if (isSessionTerminal && onCompleteRef.current && !didCompleteRef.current) {
           didCompleteRef.current = true; // Mark as completed to prevent duplicate calls
           setTimeout(() => {
@@ -214,28 +342,16 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
     };
   }, [sessionId]); // sessionId dependency
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'queued':
-      case 'processing':
-        return 'info'; // Match main dashboard color for processing
-      case 'completed':
-        return 'success';
-      case 'error':
-        return 'error';
-      default:
-        return 'primary';
-    }
-  };
-
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed':
+      case ALERT_PROCESSING_STATUS.COMPLETED:
         return <CheckCircleIcon color="success" />;
-      case 'error':
+      case ALERT_PROCESSING_STATUS.ERROR:
         return <ErrorIcon color="error" />;
-      case 'processing':
-      case 'queued':
+      case ALERT_PROCESSING_STATUS.CANCELLED:
+        return <CancelIcon color="disabled" />;
+      case ALERT_PROCESSING_STATUS.PROCESSING:
+      case ALERT_PROCESSING_STATUS.QUEUED:
         return <HourglassIcon color="primary" />;
       default:
         return null;
@@ -280,7 +396,7 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
               {getStatusIcon(status.status)}
               <Chip 
                 label={status.status.toUpperCase()} 
-                color={getStatusColor(status.status)} 
+                color={getAlertProcessingStatusChipColor(status.status)} 
                 size="small"
               />
             </Box>
@@ -298,32 +414,88 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
               Session ID: {status.session_id}
             </Typography>
             
-            <Tooltip title="Open detailed alert view in new tab" arrow>
-              <Button
-                variant="contained"
-                color="success"
-                size="medium"
-                startIcon={<VisibilityIcon />}
-                endIcon={<OpenInNewIcon />}
-                onClick={handleViewDetails}
-                sx={{ 
-                  boxShadow: 2,
-                  px: 2.5,
-                  '&:hover': {
-                    boxShadow: 4,
-                  }
-                }}
-              >
-                View Full Details
-              </Button>
-            </Tooltip>
+            {/* Show loading state while checking if session exists */}
+            {checkingSession && !sessionExists && !pollError ? (
+              <Zoom in timeout={300}>
+                <Box 
+                  display="flex" 
+                  alignItems="center" 
+                  gap={1.5}
+                  sx={{
+                    px: 2.5,
+                    py: 1,
+                    bgcolor: 'action.hover',
+                    borderRadius: 1,
+                    border: '1px dashed',
+                    borderColor: 'primary.main',
+                  }}
+                >
+                  <CircularProgress size={20} thickness={4} />
+                  <Box display="flex" alignItems="center" gap={0.5}>
+                    <HourglassEmptyIcon 
+                      sx={{ 
+                        fontSize: 20,
+                        color: 'primary.main',
+                        animation: 'pulse 1.5s ease-in-out infinite',
+                        '@keyframes pulse': {
+                          '0%, 100%': { opacity: 1 },
+                          '50%': { opacity: 0.5 },
+                        }
+                      }} 
+                    />
+                    <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                      Initializing session...
+                    </Typography>
+                  </Box>
+                </Box>
+              </Zoom>
+            ) : pollError ? (
+              <Fade in timeout={500}>
+                <Alert severity="warning" sx={{ flex: 1, maxWidth: 500 }}>
+                  {pollError}
+                </Alert>
+              </Fade>
+            ) : (
+              <Fade in timeout={500}>
+                <Tooltip 
+                  title={sessionExists ? "Open detailed alert view in new tab" : "Session is being created..."} 
+                  arrow
+                >
+                  <span>
+                    <Button
+                      variant="contained"
+                      color="success"
+                      size="medium"
+                      startIcon={sessionExists ? <VisibilityIcon /> : <CircularProgress size={16} color="inherit" />}
+                      endIcon={<OpenInNewIcon />}
+                      onClick={handleViewDetails}
+                      disabled={!sessionExists}
+                      sx={{ 
+                        boxShadow: 2,
+                        px: 2.5,
+                        transition: 'all 0.3s ease-in-out',
+                        '&:hover': {
+                          boxShadow: 4,
+                          transform: 'translateY(-2px)',
+                        },
+                        '&:disabled': {
+                          opacity: 0.6,
+                        }
+                      }}
+                    >
+                      View Full Details
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Fade>
+            )}
           </Box>
 
           <Box mb={3}>
             <Typography variant="body1" gutterBottom>
               {status.current_step}
             </Typography>
-            {status.status === 'processing' && (
+            {status.status === ALERT_PROCESSING_STATUS.PROCESSING && (
               <LinearProgress 
                 variant="indeterminate" 
                 sx={{ 
@@ -333,7 +505,7 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
                     borderRadius: 1,
                   }
                 }} 
-                color={getStatusColor(status.status)} 
+                color={getAlertProcessingStatusProgressColor(status.status)} 
               />
             )}
           </Box>
@@ -359,7 +531,7 @@ const AlertProcessingStatus: React.FC<ProcessingStatusProps> = ({ sessionId, onC
         </CardContent>
       </Card>
 
-      {status.result && status.status === 'completed' && (
+      {status.result && status.status === ALERT_PROCESSING_STATUS.COMPLETED && (
         <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>

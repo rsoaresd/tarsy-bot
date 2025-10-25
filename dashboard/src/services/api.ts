@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance, AxiosError } from 'axios';
 import type { SessionsResponse, Session, DetailedSession, SessionFilter, FilterOptions, SearchResult, SystemWarning } from '../types';
 import { authService } from './auth';
+import { TERMINAL_SESSION_STATUSES } from '../utils/statusConstants';
 
 // API base URL configuration  
 // In development, use Vite proxy (relative URLs) to handle CORS with OAuth2 proxy
@@ -200,15 +201,17 @@ class APIClient {
   }
 
   /**
-   * Fetch historical sessions (completed/failed) - Phase 2
-   * Gets sessions with status 'completed' or 'failed'
+   * Fetch historical sessions (completed/failed/cancelled)
+   * Gets sessions with terminal statuses
    */
   async getHistoricalSessions(page: number = 1, pageSize: number = 25): Promise<SessionsResponse> {
     try {
       // Build query string manually to ensure proper FastAPI format
       const queryParams = new URLSearchParams();
-      queryParams.append('status', 'completed');
-      queryParams.append('status', 'failed');
+      // Add all terminal statuses
+      TERMINAL_SESSION_STATUSES.forEach(status => {
+        queryParams.append('status', status);
+      });
       queryParams.append('page', page.toString());
       queryParams.append('page_size', pageSize.toString());
       const url = `/api/v1/history/sessions?${queryParams.toString()}`;
@@ -218,7 +221,26 @@ class APIClient {
       
       
       if (response.data && typeof response.data === 'object' && 'sessions' in response.data) {
-        return response.data;
+        // Transform flat response to SessionsResponse structure
+        const data: any = response.data;
+        
+        // Check if pagination is already nested (new format) or flat (old format)
+        if (data.pagination) {
+          // Already in the correct nested format
+          return response.data;
+        } else {
+          // Transform flat structure to nested SessionsResponse format
+          return {
+            sessions: data.sessions,
+            pagination: {
+              page: data.page || 1,
+              page_size: data.page_size || 25,
+              total_pages: data.total_pages || 0,
+              total_items: data.total_count || 0,
+            },
+            filters_applied: data.filters_applied || {},
+          };
+        }
       } else {
         throw new Error('Invalid historical sessions response format');
       }
@@ -351,6 +373,22 @@ class APIClient {
     }
   }
 
+  /**
+   * Cancel an active session
+   * 
+   * Sends a cancellation request for the specified session.
+   * The backend will attempt to cancel the processing task and mark the session as cancelled.
+   */
+  async cancelSession(sessionId: string): Promise<{ success: boolean; message: string; status: string }> {
+    try {
+      const response = await this.client.post(`/api/v1/history/sessions/${sessionId}/cancel`);
+      return response.data;
+    } catch (error) {
+      console.error('Error cancelling session:', error);
+      throw error;
+    }
+  }
+
   // Phase 4: Search and filtering methods
 
   /**
@@ -457,7 +495,26 @@ class APIClient {
       
       
       if (response.data && typeof response.data === 'object' && 'sessions' in response.data) {
-        return response.data;
+        // Transform flat response to SessionsResponse structure
+        const data: any = response.data;
+        
+        // Check if pagination is already nested (new format) or flat (old format)
+        if (data.pagination) {
+          // Already in the correct nested format
+          return response.data;
+        } else {
+          // Transform flat structure to nested SessionsResponse format
+          return {
+            sessions: data.sessions,
+            pagination: {
+              page: data.page || 1,
+              page_size: data.page_size || 25,
+              total_pages: data.total_pages || 0,
+              total_items: data.total_count || 0,
+            },
+            filters_applied: data.filters_applied || {},
+          };
+        }
       } else {
         throw new Error('Invalid filtered sessions response format');
       }

@@ -13,6 +13,7 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
+  alpha,
 } from '@mui/material';
 import {
   ExpandMore,
@@ -26,17 +27,18 @@ import {
 } from '@mui/icons-material';
 import type { ChainTimelineProps, StageExecution } from '../types';
 import { formatTimestamp, formatDurationMs } from '../utils/timestamp';
+import { STAGE_STATUS, getStageStatusChipColor } from '../utils/statusConstants';
 
 // Helper function to get stage status icon
 const getStageStatusIcon = (status: string) => {
   switch (status) {
-    case 'completed':
+    case STAGE_STATUS.COMPLETED:
       return <CheckCircle color="success" />;
-    case 'failed':
+    case STAGE_STATUS.FAILED:
       return <ErrorIcon color="error" />;
-    case 'active':
+    case STAGE_STATUS.ACTIVE:
       return <PlayArrow color="primary" />;
-    case 'pending':
+    case STAGE_STATUS.PENDING:
     default:
       return <Schedule color="disabled" />;
   }
@@ -44,17 +46,12 @@ const getStageStatusIcon = (status: string) => {
 
 // Helper function to get stage status color
 const getStageStatusColor = (status: string): 'success' | 'error' | 'primary' | 'default' => {
-  switch (status) {
-    case 'completed':
-      return 'success';
-    case 'failed':
-      return 'error';
-    case 'active':
-      return 'primary';
-    case 'pending':
-    default:
-      return 'default';
+  const chipColor = getStageStatusChipColor(status);
+  // Map to compatible types
+  if (chipColor === 'warning' || chipColor === 'info') {
+    return 'default';
   }
+  return chipColor as 'success' | 'error' | 'primary' | 'default';
 };
 
 // Helper function to get interaction type icon
@@ -127,12 +124,12 @@ const ChainTimeline: React.FC<ChainTimelineProps> = ({
               variant="outlined" 
             />
             <Chip 
-              label={`${chainExecution.stages.filter(s => s.status === 'completed').length} completed`} 
+              label={`${chainExecution.stages.filter(s => s.status === STAGE_STATUS.COMPLETED).length} completed`} 
               color="success" 
               variant="outlined" 
             />
             <Chip 
-              label={`${chainExecution.stages.filter(s => s.status === 'failed').length} failed`} 
+              label={`${chainExecution.stages.filter(s => s.status === STAGE_STATUS.FAILED).length} failed`} 
               color="error" 
               variant="outlined" 
             />
@@ -210,17 +207,17 @@ const ChainTimeline: React.FC<ChainTimelineProps> = ({
                     
                     {/* LLM interactions badge */}
                     {stage.llm_interaction_count > 0 && (
-                      <Box sx={{ 
+                      <Box sx={(theme) => ({ 
                         display: 'flex',
                         alignItems: 'center',
                         gap: 0.25,
                         px: 0.75,
                         py: 0.25,
-                        backgroundColor: 'primary.50',
+                        backgroundColor: alpha(theme.palette.primary.main, 0.05),
                         borderRadius: '12px',
                         border: '1px solid',
-                        borderColor: 'primary.200'
-                      }}>
+                        borderColor: alpha(theme.palette.primary.main, 0.2)
+                      })}>
                         <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main', fontSize: '0.7rem' }}>
                           🧠 {stage.llm_interaction_count}
                         </Typography>
@@ -232,17 +229,17 @@ const ChainTimeline: React.FC<ChainTimelineProps> = ({
                     
                     {/* MCP interactions badge */}
                     {stage.mcp_communication_count > 0 && (
-                      <Box sx={{ 
+                      <Box sx={(theme) => ({ 
                         display: 'flex',
                         alignItems: 'center',
                         gap: 0.25,
                         px: 0.75,
                         py: 0.25,
-                        backgroundColor: 'secondary.50',
+                        backgroundColor: alpha(theme.palette.secondary.main, 0.05),
                         borderRadius: '12px',
                         border: '1px solid',
-                        borderColor: 'secondary.200'
-                      }}>
+                        borderColor: alpha(theme.palette.secondary.main, 0.2)
+                      })}>
                         <Typography variant="caption" sx={{ fontWeight: 600, color: 'secondary.main', fontSize: '0.7rem' }}>
                           🔧 {stage.mcp_communication_count}
                         </Typography>
