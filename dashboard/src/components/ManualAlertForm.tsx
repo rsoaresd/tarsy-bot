@@ -4,7 +4,8 @@
  * Supports runbook dropdown with GitHub repository integration
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -25,7 +26,8 @@ import {
   Add as AddIcon, 
   Close as CloseIcon,
   Description as DescriptionIcon,
-  TableChart as TableChartIcon
+  TableChart as TableChartIcon,
+  InfoOutlined as InfoIcon
 } from '@mui/icons-material';
 
 import type { KeyValuePair, ManualAlertFormProps } from '../types';
@@ -194,6 +196,19 @@ const isValidRunbookUrl = (url: string | null, approvedRunbooks: string[]): bool
 };
 
 const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  // Track if we've already processed resubmit state (prevents re-processing on re-renders)
+  const resubmitProcessedRef = useRef(false);
+  
+  // Default alert type to use (set by resubmit or will use API default)
+  const defaultAlertTypeRef = useRef<string | null>(null);
+  
+  // Re-submission state
+  const [sourceSessionId, setSourceSessionId] = useState<string | null>(null);
+  const [showResubmitBanner, setShowResubmitBanner] = useState(false);
+  
   // Common fields
   const [alertType, setAlertType] = useState('');
   const [runbook, setRunbook] = useState<string | null>(DEFAULT_RUNBOOK);
@@ -221,16 +236,76 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
   const [success, setSuccess] = useState<string | null>(null);
   const [runbookError, setRunbookError] = useState<string | null>(null);
 
-  // Load available alert types and runbooks on component mount
+  // STEP 1: Process resubmit FIRST - set the default alert type before API loads
+  useEffect(() => {
+    const state = location.state as any;
+    
+    // Only process resubmit once (prevents issues with StrictMode and re-renders)
+    if (state?.resubmit && state?.alertData && !resubmitProcessedRef.current) {
+      resubmitProcessedRef.current = true;
+      
+      // Set the default alert type for API loading to use
+      if (state.alertType) {
+        defaultAlertTypeRef.current = state.alertType;
+      }
+      
+      // Set re-submission state
+      setSourceSessionId(state.sessionId || null);
+      setShowResubmitBanner(true);
+      
+      // Set runbook
+      if (state.runbook) {
+        setRunbook(state.runbook);
+      }
+      
+      // Process alert data
+      const alertData = state.alertData;
+      
+      // Filter out meta fields (runbook, alert_type) from the data
+      const filteredData = { ...alertData };
+      delete filteredData.runbook;
+      delete filteredData.alert_type;
+      
+      // Always use text mode for re-submissions
+      setMode(1);
+      
+      // Special case: if data is just {"message": "text"}, extract the plain text
+      const keys = Object.keys(filteredData);
+      if (keys.length === 1 && keys[0] === 'message' && typeof filteredData.message === 'string') {
+        // Extract just the message text (form will wrap it back when submitting)
+        setFreeText(filteredData.message);
+      } else {
+        // Format the data as JSON for easy editing
+        setFreeText(JSON.stringify(filteredData, null, 2));
+      }
+      
+      // Clear location state to prevent re-population on refresh
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location, navigate]);
+
+  // STEP 2: Load available alert types and runbooks from API
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        // Load alert types
+        // Load alert types from API
         const alertTypes = await apiClient.getAlertTypes();
         if (Array.isArray(alertTypes)) {
-          setAvailableAlertTypes(alertTypes);
-          // Set default alertType to 'kubernetes' if available, otherwise first available type
-          if (alertTypes.includes('kubernetes')) {
+          // Check if we have a default alert type (from resubmit)
+          const defaultType = defaultAlertTypeRef.current;
+          
+          // Ensure default type is in the list
+          let finalAlertTypes = alertTypes;
+          if (defaultType && !alertTypes.includes(defaultType)) {
+            finalAlertTypes = [defaultType, ...alertTypes];
+          }
+          
+          setAvailableAlertTypes(finalAlertTypes);
+          
+          // Set the alert type (use default if available, otherwise use API default)
+          if (defaultType) {
+            setAlertType(defaultType);
+          } else if (alertTypes.includes('kubernetes')) {
             setAlertType('kubernetes');
           } else if (alertTypes.length > 0) {
             setAlertType(alertTypes[0]);
@@ -470,6 +545,37 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
           Select a runbook from the dropdown or use the default.
         </Typography>
       </Box>
+
+      {/* Re-submit banner */}
+      {showResubmitBanner && sourceSessionId && (
+        <Box sx={{ mb: 3, px: 3 }}>
+          <MuiAlert 
+            severity="info"
+            icon={<InfoIcon />}
+            onClose={() => setShowResubmitBanner(false)}
+            sx={{ 
+              borderRadius: 3,
+              '& .MuiAlert-icon': { fontSize: 24 }
+            }}
+          >
+            <Typography variant="body2">
+              <strong>Pre-filled from previous session:</strong>{' '}
+              <code style={{ 
+                backgroundColor: 'rgba(0, 0, 0, 0.05)', 
+                padding: '2px 6px', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '0.875rem'
+              }}>
+                {sourceSessionId.slice(-12)}
+              </code>
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              You can modify any fields before submitting.
+            </Typography>
+          </MuiAlert>
+        </Box>
+      )}
 
       <Card 
         elevation={0} 

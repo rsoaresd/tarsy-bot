@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Paper,
   Box,
@@ -10,9 +11,10 @@ import {
   DialogContentText,
   DialogActions,
   CircularProgress,
+  Tooltip,
   alpha,
 } from '@mui/material';
-import { CancelOutlined } from '@mui/icons-material';
+import { CancelOutlined, Replay as ReplayIcon } from '@mui/icons-material';
 import StatusBadge from './StatusBadge';
 import ProgressIndicator from './ProgressIndicator';
 import TokenUsageDisplay from './TokenUsageDisplay';
@@ -299,17 +301,23 @@ function SessionSummary({ summary, sessionStatus, sessionTokens }: {
  * Displays session metadata including status, timing, and summary information
  */
 function SessionHeader({ session, onRefresh }: SessionHeaderProps) {
+  const navigate = useNavigate();
+  
   const isInProgress =
     session.status === SESSION_STATUS.IN_PROGRESS ||
     session.status === SESSION_STATUS.PENDING ||
     session.status === SESSION_STATUS.CANCELING;
-  const isCanceling = session.status === SESSION_STATUS.CANCELING;
-  const canCancel = isInProgress || isCanceling;
+  const sessionIsCanceling = session.status === SESSION_STATUS.CANCELING;
+  const canCancel = isInProgress || sessionIsCanceling;
+  const isTerminalStatus = 
+    session.status === SESSION_STATUS.COMPLETED ||
+    session.status === SESSION_STATUS.FAILED ||
+    session.status === SESSION_STATUS.CANCELLED;
   const previousStatusRef = useRef<string>(session.status);
   
   // Cancel dialog state
   const [showCancelDialog, setShowCancelDialog] = useState(false);
-  const [isCancelling, setIsCancelling] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   
   // Detect status changes from in_progress to completed and trigger refresh
@@ -339,12 +347,12 @@ function SessionHeader({ session, onRefresh }: SessionHeaderProps) {
     previousStatusRef.current = currentStatus;
   }, [session.status, onRefresh]);
   
-  // Clear cancelling state when session status changes to cancelled
+  // Clear canceling state when session status changes to cancelled
   useEffect(() => {
-    if (session.status === SESSION_STATUS.CANCELLED && isCancelling) {
-      setIsCancelling(false);
+    if (session.status === SESSION_STATUS.CANCELLED && isCanceling) {
+      setIsCanceling(false);
     }
-  }, [session.status, isCancelling]);
+  }, [session.status, isCanceling]);
   
   // Handle cancel button click
   const handleCancelClick = () => {
@@ -352,9 +360,9 @@ function SessionHeader({ session, onRefresh }: SessionHeaderProps) {
     setCancelError(null);
   };
   
-  // Handle dialog close without cancelling
+  // Handle dialog close without canceling
   const handleDialogClose = () => {
-    if (!isCancelling) {
+    if (!isCanceling) {
       setShowCancelDialog(false);
       setCancelError(null);
     }
@@ -362,20 +370,33 @@ function SessionHeader({ session, onRefresh }: SessionHeaderProps) {
   
   // Handle cancel confirmation
   const handleConfirmCancel = async () => {
-    setIsCancelling(true);
+    setIsCanceling(true);
     setCancelError(null);
     
     try {
       await apiClient.cancelSession(session.session_id);
       // Close dialog on success
       setShowCancelDialog(false);
-      // Keep isCancelling true - will be cleared when WebSocket updates status to 'cancelled'
+      // Keep isCanceling true - will be cleared when WebSocket updates status to 'cancelled'
     } catch (error) {
       // Show error, allow retry
       const errorMessage = handleAPIError(error);
       setCancelError(errorMessage);
-      setIsCancelling(false);
+      setIsCanceling(false);
     }
+  };
+  
+  // Handle re-submit button click
+  const handleResubmit = () => {
+    navigate('/submit-alert', {
+      state: {
+        resubmit: true,
+        alertType: session.alert_type,
+        runbook: session.runbook_url || null,
+        alertData: session.alert_data,
+        sessionId: session.session_id
+      }
+    });
   };
 
   return (
@@ -408,7 +429,7 @@ function SessionHeader({ session, onRefresh }: SessionHeaderProps) {
                   wordBreak: 'break-word'
                 }}
               >
-                {session.alert_data?.alert_type || session.alert_type || 'Alert Processing'}
+                {session.alert_type || 'Alert Processing'}
                 {session.chain_definition?.name && (
                   <Typography component="span" sx={{ color: 'text.secondary', fontWeight: 400 }}>
                     {' - '}{session.chain_definition.name}
@@ -465,15 +486,41 @@ function SessionHeader({ session, onRefresh }: SessionHeaderProps) {
                 Submitted by: <strong>{session.author}</strong>
               </Typography>
             )}
+            
+            {/* Runbook URL information */}
+            {session.runbook_url && (
+              <Typography 
+                variant="body2" 
+                color="text.secondary"
+                sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}
+              >
+                Runbook: 
+                <a 
+                  href={session.runbook_url} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{ 
+                    color: 'inherit',
+                    textDecoration: 'underline',
+                    fontFamily: 'monospace',
+                    fontSize: '0.85em'
+                  }}
+                >
+                  {session.runbook_url.length > 200 
+                    ? `${session.runbook_url.substring(0, 197)}...` 
+                    : session.runbook_url}
+                </a>
+              </Typography>
+            )}
           </Box>
 
-          {/* Right side: Duration Timer and Cancel Button */}
+          {/* Right side: Duration Timer and Action Buttons */}
           <Box sx={{ 
             display: 'flex', 
             flexDirection: 'column',
             alignItems: 'flex-end',
-            gap: 1,
-            minWidth: 180
+            gap: 1.5,
+            minWidth: 200
           }}>
             {/* Duration Label */}
             <Typography 
@@ -509,25 +556,91 @@ function SessionHeader({ session, onRefresh }: SessionHeaderProps) {
               />
             </Box>
             
-            {/* Cancel Button - Only for active sessions */}
-            {canCancel && (
-              <Button
-                variant="outlined"
-                color="warning"
-                size="small"
-                startIcon={isCancelling || isCanceling ? <CircularProgress size={16} /> : <CancelOutlined />}
-                onClick={handleCancelClick}
-                disabled={isCancelling || isCanceling}
-                sx={{
-                  mt: 0.5,
-                  minWidth: 120,
-                  textTransform: 'none',
-                  fontWeight: 600
-                }}
-              >
-                {isCancelling ? 'Cancelling...' : isCanceling ? 'Canceling...' : 'Cancel Session'}
-              </Button>
-            )}
+            {/* Action Buttons Section - More Prominent */}
+            <Box sx={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: 1.5, 
+              width: '100%',
+              mt: 1
+            }}>
+              {/* Cancel Button - Only for active sessions */}
+              {canCancel && (
+                <Button
+                  variant="outlined"
+                  size="large"
+                  onClick={handleCancelClick}
+                  disabled={isCanceling || sessionIsCanceling}
+                  sx={{
+                    minWidth: 180,
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    fontSize: '0.95rem',
+                    py: 1,
+                    px: 2.5,
+                    backgroundColor: 'white',
+                    color: 'error.main',
+                    borderColor: 'error.main',
+                    borderWidth: 1.5,
+                    '&:hover': {
+                      backgroundColor: 'error.main',
+                      borderColor: 'error.main',
+                      color: 'white',
+                    },
+                    transition: 'all 0.2s ease-in-out',
+                  }}
+                >
+                  {isCanceling || sessionIsCanceling ? (
+                    <CircularProgress size={18} color="inherit" sx={{ mr: 1 }} />
+                  ) : (
+                    <CancelOutlined 
+                      sx={{ 
+                        mr: 1,
+                        fontSize: '1.2rem',
+                      }} 
+                    />
+                  )}
+                  {isCanceling || sessionIsCanceling ? 'CANCELING...' : 'CANCEL SESSION'}
+                </Button>
+              )}
+              
+              {/* Re-submit Button - Only for terminal sessions */}
+              {isTerminalStatus && (
+                <Tooltip title="Submit a new alert with the same data" placement="left">
+                  <Button
+                    variant="outlined"
+                    size="large"
+                    onClick={handleResubmit}
+                    sx={{
+                      minWidth: 180,
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      fontSize: '0.95rem',
+                      py: 1,
+                      px: 2.5,
+                      backgroundColor: 'white',
+                      color: 'info.main',
+                      borderColor: 'info.main',
+                      borderWidth: 1.5,
+                      '&:hover': {
+                        backgroundColor: 'info.main',
+                        borderColor: 'info.main',
+                        color: 'white',
+                      },
+                      transition: 'all 0.2s ease-in-out',
+                    }}
+                  >
+                    <ReplayIcon 
+                      sx={{ 
+                        mr: 1,
+                        fontSize: '1.2rem',
+                      }} 
+                    />
+                    RE-SUBMIT ALERT
+                  </Button>
+                </Tooltip>
+              )}
+            </Box>
           </Box>
         </Box>
 
@@ -555,7 +668,7 @@ function SessionHeader({ session, onRefresh }: SessionHeaderProps) {
           <DialogActions sx={{ px: 3, pb: 2 }}>
             <Button 
               onClick={handleDialogClose} 
-              disabled={isCancelling}
+              disabled={isCanceling}
               color="inherit"
             >
               Cancel
@@ -564,10 +677,10 @@ function SessionHeader({ session, onRefresh }: SessionHeaderProps) {
               onClick={handleConfirmCancel} 
               variant="contained" 
               color="warning"
-              disabled={isCancelling}
-              startIcon={isCancelling ? <CircularProgress size={16} color="inherit" /> : undefined}
+              disabled={isCanceling}
+              startIcon={isCanceling ? <CircularProgress size={16} color="inherit" /> : undefined}
             >
-              {isCancelling ? 'Cancelling...' : 'Confirm Cancellation'}
+              {isCanceling ? 'CANCELING...' : 'CONFIRM CANCELLATION'}
             </Button>
           </DialogActions>
         </Dialog>

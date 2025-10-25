@@ -1,8 +1,8 @@
 """
-Unit tests for author field in History Service.
+Unit tests for optional metadata fields in History Service.
 
-Tests that HistoryService correctly saves and retrieves author information
-when creating alert sessions.
+Tests that HistoryService correctly saves and retrieves optional metadata
+(author, runbook_url) when creating alert sessions.
 """
 
 from unittest.mock import Mock, patch
@@ -18,8 +18,8 @@ from tarsy.services.history_service import HistoryService
 
 
 @pytest.mark.unit
-class TestHistoryServiceAuthorField:
-    """Test author field handling in HistoryService."""
+class TestHistoryServiceOptionalMetadata:
+    """Test optional metadata fields (author, runbook_url) handling in HistoryService."""
 
     @pytest.fixture
     def mock_settings(self, isolated_test_settings):
@@ -67,29 +67,30 @@ class TestHistoryServiceAuthorField:
         )
 
     @pytest.mark.parametrize(
-        "author,expected_author",
+        "author,runbook,expected_author,expected_runbook",
         [
-            ("github-user", "github-user"),
-            ("user@example.com", "user@example.com"),
-            ("api-client", "api-client"),
-            (None, None),
+            ("github-user", "https://example.com/runbook.md", "github-user", "https://example.com/runbook.md"),
+            ("user@example.com", "https://github.com/company/runbooks/k8s.md", "user@example.com", "https://github.com/company/runbooks/k8s.md"),
+            ("api-client", None, "api-client", None),
+            (None, "https://internal-wiki/runbook", None, "https://internal-wiki/runbook"),
+            (None, None, None, None),
         ],
     )
-    def test_create_session_with_author(
-        self, history_service, sample_chain_definition, author, expected_author
+    def test_create_session_with_optional_metadata(
+        self, history_service, sample_chain_definition, author, runbook, expected_author, expected_runbook
     ):
-        """Test that create_session correctly saves author field."""
-        # Create context with specific author
+        """Test that create_session correctly saves optional metadata fields (author and runbook_url)."""
+        # Create context with specific author and runbook
         alert = Alert(
             alert_type="test",
-            runbook="https://example.com/runbook.md",
+            runbook=runbook,
             data={"message": "Test alert"}
         )
         processing_alert = ProcessingAlert.from_api_alert(alert)
         
         context = ChainContext.from_processing_alert(
             processing_alert=processing_alert,
-            session_id="test-session-with-author",
+            session_id="test-session-with-metadata",
             current_stage_name="initial",
             author=author
         )
@@ -114,25 +115,26 @@ class TestHistoryServiceAuthorField:
             
             created_session = captured_session[0]
             assert isinstance(created_session, AlertSession)
-            assert created_session.session_id == "test-session-with-author"
+            assert created_session.session_id == "test-session-with-metadata"
             assert created_session.author == expected_author
+            assert created_session.runbook_url == expected_runbook
             assert created_session.status == AlertSessionStatus.PENDING.value
 
-    def test_create_session_without_author(
+    def test_create_session_without_optional_metadata(
         self, history_service, sample_chain_definition
     ):
-        """Test that create_session works when author is None."""
-        # Create context without author
+        """Test that create_session works when optional metadata (author, runbook_url) are None."""
+        # Create context without author or runbook
         alert = Alert(
             alert_type="test",
-            runbook="https://example.com/runbook.md",
             data={"message": "Test alert"}
+            # No runbook provided
         )
         processing_alert = ProcessingAlert.from_api_alert(alert)
         
         context = ChainContext.from_processing_alert(
             processing_alert=processing_alert,
-            session_id="test-session-no-author",
+            session_id="test-session-no-metadata",
             current_stage_name="initial"
             # author not provided, should default to None
         )
@@ -156,11 +158,27 @@ class TestHistoryServiceAuthorField:
             
             created_session = captured_session[0]
             assert created_session.author is None
+            assert created_session.runbook_url is None
 
-    def test_create_session_preserves_author_through_retry(
-        self, history_service, sample_chain_context, sample_chain_definition
+    def test_create_session_preserves_metadata_through_retry(
+        self, history_service, sample_chain_definition
     ):
-        """Test that author field is preserved through retry logic."""
+        """Test that optional metadata fields are preserved through retry logic."""
+        # Create context with both author and runbook
+        alert = Alert(
+            alert_type="test",
+            runbook="https://example.com/runbook-preserved.md",
+            data={"message": "Test alert"}
+        )
+        processing_alert = ProcessingAlert.from_api_alert(alert)
+        
+        context = ChainContext.from_processing_alert(
+            processing_alert=processing_alert,
+            session_id="test-session-preserved",
+            current_stage_name="initial",
+            author="test-user"
+        )
+        
         captured_sessions = []
 
         def mock_create_alert_session(session):
@@ -174,23 +192,22 @@ class TestHistoryServiceAuthorField:
             mock_get_repo.return_value.__enter__.return_value = mock_repo
 
             # Create session should succeed
-            result = history_service.create_session(
-                sample_chain_context, sample_chain_definition
-            )
+            result = history_service.create_session(context, sample_chain_definition)
 
             assert result is True
             assert len(captured_sessions) == 1
             
-            # Author should be preserved
+            # Both author and runbook_url should be preserved
             assert captured_sessions[0].author == "test-user"
+            assert captured_sessions[0].runbook_url == "https://example.com/runbook-preserved.md"
 
-    def test_create_session_author_in_alert_session_construction(
+    def test_create_session_metadata_in_alert_session_construction(
         self, history_service, sample_chain_definition
     ):
-        """Test that author is correctly included in AlertSession construction."""
+        """Test that optional metadata fields are correctly included in AlertSession construction."""
         alert = Alert(
             alert_type="kubernetes",
-            runbook="https://example.com/runbook.md",
+            runbook="https://github.com/company/k8s-runbooks/troubleshooting.md",
             data={"namespace": "test-ns", "message": "Test"}
         )
         processing_alert = ProcessingAlert.from_api_alert(alert)
@@ -205,9 +222,11 @@ class TestHistoryServiceAuthorField:
         captured_session = []
 
         def mock_create_alert_session(session):
-            # Verify all expected fields are present
+            # Verify all expected fields including optional metadata are present
             assert hasattr(session, 'author')
+            assert hasattr(session, 'runbook_url')
             assert session.author == "construction-test-user"
+            assert session.runbook_url == "https://github.com/company/k8s-runbooks/troubleshooting.md"
             assert session.session_id == "test-session-construction"
             assert session.agent_type == "chain:test-chain"
             assert session.alert_type == "kubernetes"
@@ -226,10 +245,24 @@ class TestHistoryServiceAuthorField:
             assert result is True
             assert len(captured_session) == 1
 
-    def test_create_session_disabled_service_ignores_author(
-        self, sample_chain_context, sample_chain_definition
+    def test_create_session_disabled_service_ignores_metadata(
+        self, sample_chain_definition
     ):
-        """Test that disabled service gracefully handles author field."""
+        """Test that disabled service gracefully handles optional metadata fields."""
+        alert = Alert(
+            alert_type="test",
+            runbook="https://example.com/runbook.md",
+            data={"message": "Test"}
+        )
+        processing_alert = ProcessingAlert.from_api_alert(alert)
+        
+        context = ChainContext.from_processing_alert(
+            processing_alert=processing_alert,
+            session_id="test-session-disabled",
+            current_stage_name="initial",
+            author="test-user"
+        )
+        
         mock_settings = Mock()
         mock_settings.history_enabled = False
 
@@ -237,7 +270,7 @@ class TestHistoryServiceAuthorField:
             service = HistoryService()
             
             # Should return False without attempting to save
-            result = service.create_session(sample_chain_context, sample_chain_definition)
+            result = service.create_session(context, sample_chain_definition)
             
             assert result is False
             # No database operations should occur
