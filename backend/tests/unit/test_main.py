@@ -394,8 +394,9 @@ class TestMainEndpoints:
         else:
             mock_db_info.return_value = db_status
         
-        # Mock event system as healthy for these tests
-        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+        # Mock shutdown flag as False to test normal health check behavior
+        with patch('tarsy.main.shutdown_in_progress', False), \
+             patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
             mock_event_system = Mock()
             mock_listener = Mock()
             mock_listener.running = True
@@ -435,6 +436,23 @@ class TestMainEndpoints:
                 if isinstance(db_status, Exception):
                     assert str(db_status) in data["error"]
 
+    @patch('tarsy.main.shutdown_in_progress', True)
+    def test_health_endpoint_during_shutdown(self, client):
+        """Test health endpoint returns 503 when shutdown is in progress."""
+        response = client.get("/health")
+        
+        # Assert HTTP 503 status code
+        assert response.status_code == 503
+        
+        # Parse response JSON
+        data = response.json()
+        
+        # Assert status is "shutting_down"
+        assert data["status"] == "shutting_down"
+        
+        # Assert message contains "shutting down" (case-insensitive)
+        assert "shutting down" in data["message"].lower()
+
     @patch('tarsy.main.get_database_info')
     def test_health_endpoint_with_warnings(self, mock_db_info, client):
         """Test health endpoint includes system warnings."""
@@ -464,8 +482,9 @@ class TestMainEndpoints:
             "runbook_service", "Runbook service disabled"
         )
 
-        # Mock event system as healthy for this test
-        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+        # Mock shutdown flag and event system as healthy for this test
+        with patch('tarsy.main.shutdown_in_progress', False), \
+             patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
             mock_event_system = Mock()
             mock_listener = Mock()
             mock_listener.running = True
@@ -511,8 +530,9 @@ class TestMainEndpoints:
             "retention_days": 30,
         }
 
-        # Mock event system as healthy for this test
-        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+        # Mock shutdown flag and event system as healthy for this test
+        with patch('tarsy.main.shutdown_in_progress', False), \
+             patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
             mock_event_system = Mock()
             mock_listener = Mock()
             mock_listener.running = True
@@ -543,8 +563,9 @@ class TestMainEndpoints:
             "migration_version": "3717971cb125"
         }
 
-        # Mock event system as healthy
-        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+        # Mock shutdown flag and event system as healthy
+        with patch('tarsy.main.shutdown_in_progress', False), \
+             patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
             mock_event_system = Mock()
             mock_listener = Mock()
             mock_listener.running = True
@@ -571,7 +592,9 @@ class TestMainEndpoints:
             "migration_version": "not_initialized"
         }
 
-        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+        # Mock shutdown flag and event system as healthy
+        with patch('tarsy.main.shutdown_in_progress', False), \
+             patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
             mock_event_system = Mock()
             mock_listener = Mock()
             mock_listener.running = True
@@ -592,7 +615,9 @@ class TestMainEndpoints:
             "retention_days": 90,
         }
 
-        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+        # Mock shutdown flag and event system as healthy
+        with patch('tarsy.main.shutdown_in_progress', False), \
+             patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
             mock_event_system = Mock()
             mock_listener = Mock()
             mock_listener.running = True
@@ -1261,7 +1286,8 @@ class TestCriticalCoverage:
 
     def test_database_connection_failure_handling(self, client):
         """Test handling of database connection failures."""
-        with patch('tarsy.main.get_database_info') as mock_db_info:
+        with patch('tarsy.main.shutdown_in_progress', False), \
+             patch('tarsy.main.get_database_info') as mock_db_info:
             mock_db_info.side_effect = Exception("Database connection failed")
             
             # Health endpoint should handle database failures gracefully and return 503
@@ -1281,8 +1307,9 @@ class TestCriticalCoverage:
             "retention_days": 30,
         }
         
-        # Mock get_event_system to raise RuntimeError (event system not initialized)
-        with patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
+        # Mock shutdown flag and get_event_system to raise RuntimeError (event system not initialized)
+        with patch('tarsy.main.shutdown_in_progress', False), \
+             patch('tarsy.services.events.manager.get_event_system') as mock_get_event_system:
             mock_get_event_system.side_effect = RuntimeError("Event system not initialized")
             
             response = client.get("/health")
