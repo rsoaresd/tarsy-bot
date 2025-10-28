@@ -270,8 +270,8 @@ class DataMaskingService:
         
         try:
             # Convert response to string and mask it entirely
-            response_str = json.dumps(response, default=str)
-            masked_content = "***MASKED_ERROR***"
+            json.dumps(response, default=str)
+            masked_content = "__MASKED_ERROR__"
             
             # Try to preserve the basic response structure
             if "result" in response:
@@ -282,7 +282,7 @@ class DataMaskingService:
         except Exception as e:
             logger.error(f"Error in fail-safe masking: {e}")
             # Ultimate fail-safe
-            return {"result": "***MASKED_ERROR***"}
+            return {"result": "__MASKED_ERROR__"}
     
     def _apply_patterns(self, text: str, patterns: List[str]) -> str:
         """Apply a list of compiled regex patterns to mask text content.

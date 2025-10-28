@@ -22,6 +22,52 @@ interface ParsedContent {
 }
 
 /**
+ * Calculate smart collapse level based on JSON content size
+ * Returns more conservative expansion for readability
+ */
+const calculateSmartCollapseLevel = (
+  content: any,
+  collapsedProp?: boolean | number
+): boolean | number => {
+  // Only respect explicit false or numeric values
+  // Let true fall through to smart sizing
+  if (collapsedProp === false) return false;
+  if (typeof collapsedProp === 'number') return collapsedProp;
+  
+  try {
+    const jsonString = JSON.stringify(content);
+    const size = jsonString.length;
+    
+    // More conservative thresholds for better readability
+    if (size < 300) return false;      // Fully expand tiny JSON (<300 chars)
+    if (size < 1000) return 2;         // Show 2 levels for small JSON
+    if (size < 3000) return 1;         // Show 1 level for medium JSON
+    return 1; // Collapse to 1 level for large JSON
+  } catch {
+    return 1; // Default to collapsed
+  }
+};
+
+/**
+ * Calculate smart string truncation based on JSON content size
+ * Returns number of chars before truncating strings
+ */
+const calculateShortenTextAfterLength = (content: any): number => {
+  try {
+    const jsonString = JSON.stringify(content);
+    const size = jsonString.length;
+    
+    // More aggressive truncation for larger content
+    if (size < 500) return 0;          // No truncation for tiny JSON
+    if (size < 2000) return 200;       // Truncate at 200 chars for small JSON
+    if (size < 5000) return 100;       // Truncate at 100 chars for medium JSON
+    return 80;                         // Truncate at 80 chars for large JSON
+  } catch {
+    return 100; // Default truncation
+  }
+};
+
+/**
  * JsonDisplay component - Enhanced Phase 5
  * Intelligent content parser with support for JSON, Python objects, and mixed content
  */
@@ -30,7 +76,9 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   
   // Debug info for long content
-  const contentLength = String(data).length;
+  const contentLength = typeof data === 'string'
+    ? data.length
+    : (() => { try { return JSON.stringify(data).length; } catch { return String(data).length; } })();
   const showDebugInfo = contentLength > 1000;
 
   // Enhanced content parser
@@ -39,11 +87,91 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
       return { type: 'plain-text', content: String(value) };
     }
 
-    // Special handling for MCP results that contain YAML/text content
+    // Special handling for MCP results that contain YAML/text/JSON content
     if (typeof value === 'object' && value !== null) {
-      // Check if this is an MCP result with a nested text/YAML result
+      // Check if this is an MCP result with a nested text/YAML/JSON result
       if ('result' in value && typeof value.result === 'string') {
         const resultContent = value.result.trim();
+        
+        // First, try to parse as JSON (most common case)
+        try {
+          const parsedJson = JSON.parse(resultContent);
+          
+          // Successfully parsed as JSON
+          // Check if it's a nested object with multi-line text fields
+          if (typeof parsedJson === 'object' && parsedJson !== null) {
+            // Find ALL fields that contain multi-line text (generic approach)
+            const multiLineFields: Array<{ fieldName: string; content: string }> = [];
+            
+            for (const [key, value] of Object.entries(parsedJson)) {
+              if (
+                typeof value === 'string' && 
+                value.length > 200 &&  // Only create separate section for substantial content
+                value.includes('\n')   // Must be multi-line
+              ) {
+                multiLineFields.push({ fieldName: key, content: value });
+              }
+            }
+            
+            if (multiLineFields.length > 0) {
+              // Create sections: First the JSON, then each multi-line field formatted
+              const sections = [
+                {
+                  title: 'MCP Tool Result (JSON)',
+                  type: 'json',
+                  content: parsedJson,
+                  raw: JSON.stringify(parsedJson, null, 2)
+                }
+              ];
+              
+              // Add a formatted section for each multi-line field
+              for (const { fieldName, content } of multiLineFields) {
+                sections.push({
+                  title: `${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)} (Formatted)`,
+                  type: 'text',
+                  content: content,
+                  raw: content
+                });
+              }
+              
+              return {
+                type: 'mixed',
+                content: { text: '', sections: [] },
+                sections
+              };
+            }
+            
+            // Regular JSON object without special formatting
+            return {
+              type: 'mixed',
+              content: { text: '', sections: [] },
+              sections: [
+                {
+                  title: 'MCP Tool Result (JSON)',
+                  type: 'json',
+                  content: parsedJson,
+                  raw: JSON.stringify(parsedJson, null, 2)
+                }
+              ]
+            };
+          }
+          
+          // Parsed JSON is a simple value (string, number, etc.)
+          return {
+            type: 'mixed',
+            content: { text: '', sections: [] },
+            sections: [
+              {
+                title: 'MCP Tool Result',
+                type: 'json',
+                content: parsedJson,
+                raw: JSON.stringify(parsedJson, null, 2)
+              }
+            ]
+          };
+        } catch {
+          // Not valid JSON (possibly malformed escape sequences), try other formats
+        }
         
         // Check if the result contains YAML content
         if (resultContent.includes('apiVersion:') || 
@@ -276,10 +404,10 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
   };
 
   const handleSectionExpand = (sectionId: string) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [sectionId]: !prev[sectionId]
-    }));
+    setExpandedSections(prev => {
+      const current = prev[sectionId] ?? true;
+      return { ...prev, [sectionId]: !current };
+    });
   };
 
   const parsedContent = parseContent(data);
@@ -382,8 +510,8 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
                   size="small"
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigator.clipboard.writeText(section.content);
-                    // You could add a toast notification here
+                    const text = typeof section.raw === 'string' ? section.raw : String(section.content);
+                    navigator.clipboard?.writeText(text).catch(() => {/* no-op */});
                   }}
                   sx={{ 
                     p: 0.5,
@@ -453,7 +581,7 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
       {parsed.sections?.map((section, index) => (
         <Accordion
           key={index}
-          expanded={expandedSections[section.title] ?? false}
+          expanded={expandedSections[section.title] ?? true}
           onChange={() => handleSectionExpand(section.title)}
           sx={{ mb: 1, border: `1px solid ${theme.palette.divider}` }}
         >
@@ -477,13 +605,19 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
               {section.type === 'json' ? (
                 <JsonView 
                   value={section.content}
-                  collapsed={1}
+                  collapsed={calculateSmartCollapseLevel(section.content, collapsed)}
                   displayDataTypes={false}
                   displayObjectSize={false}
                   enableClipboard={false}
+                  shortenTextAfterLength={calculateShortenTextAfterLength(section.content)}
                   style={{
                     backgroundColor: theme.palette.grey[50],
                     padding: theme.spacing(1),
+                    wordBreak: 'break-word',
+                    overflowWrap: 'break-word',
+                    whiteSpace: 'normal',
+                    overflow: 'auto',
+                    maxWidth: '100%',
                   }}
                 />
               ) : (
@@ -536,7 +670,8 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
                   size="small"
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigator.clipboard.writeText(section.content);
+                    const text = typeof section.raw === 'string' ? section.raw : String(section.content);
+                    navigator.clipboard?.writeText(text).catch(() => {/* no-op */});
                   }}
                   sx={{ 
                     p: 0.5,
@@ -560,6 +695,8 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
 
   const renderJsonContent = (content: any) => (
     <Box sx={{ 
+      maxWidth: '100%',
+      overflow: 'hidden',
       '& .w-rjv': {
         backgroundColor: `${theme.palette.grey[50]} !important`,
         borderRadius: theme.shape.borderRadius,
@@ -568,17 +705,26 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
         fontSize: '0.875rem !important',
         maxHeight: maxHeight,
         overflow: 'auto',
+        maxWidth: '100%',
+        wordBreak: 'break-word',
+        overflowWrap: 'break-word',
       }
     }}>
       <JsonView 
         value={content}
-        collapsed={collapsed}
+        collapsed={calculateSmartCollapseLevel(content, collapsed)}
         displayDataTypes={false}
         displayObjectSize={false}
         enableClipboard={false}
+        shortenTextAfterLength={calculateShortenTextAfterLength(content)}
         style={{
           backgroundColor: theme.palette.grey[50],
           padding: theme.spacing(2),
+          wordBreak: 'break-word',
+          overflowWrap: 'break-word',
+          whiteSpace: 'normal',
+          overflow: 'auto',
+          maxWidth: '100%',
         }}
       />
     </Box>
@@ -629,7 +775,12 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
   );
 
   return (
-    <Box>
+    <Box sx={{ 
+      maxWidth: '100%',
+      overflow: 'hidden',
+      wordBreak: 'break-word',
+      overflowWrap: 'break-word',
+    }}>
       {showDebugInfo && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           Content length: {contentLength.toLocaleString()} characters • Scrollable area
