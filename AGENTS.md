@@ -14,7 +14,7 @@
 ## Backend (Python 3.13+)
 - **Framework:** FastAPI with async/await
 - **Agent Framework:** LangChain with custom sequential chains
-- **Tooling:** Black (formatting), Ruff (linting), pytest (testing)
+- **Tooling:** Black (formatting), Ruff (linting), mypy (type checking), pytest (testing)
 - **Type Hints:** Mandatory for all functions, methods, and class members
 - **Environment:** uv for dependency management
 - **Containers:** podman, podman-compose
@@ -78,15 +78,17 @@ make lint               # Format and lint all code
 # Testing
 make test-backend       # Backend tests only
 make test-dashboard     # Dashboard tests only
-make test-coverage      # Generate coverage reports
 
-# Database
-make db-migrate         # Run pending migrations
-make db-revision        # Create new migration
+# Backend-specific tests (run from backend/ directory)
+cd backend && make test-unit          # Unit tests only
+cd backend && make test-integration   # Integration tests only
+cd backend && make test-e2e           # End-to-end tests only
+cd backend && make test-coverage      # Tests with coverage report
 
-# Containers
-make containers-up      # Start all services via podman-compose
-make containers-clean   # Clean up containers and volumes
+# Database Migrations
+make migration msg="description"  # Create new migration from model changes
+make migration-upgrade  # Apply pending migrations
+make migration-downgrade  # Rollback last migration
 ```
 
 # Development Guidelines
