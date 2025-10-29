@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
@@ -15,22 +15,28 @@ import { useAuth } from '../contexts/AuthContext';
 interface SharedHeaderProps {
   title: string;
   showBackButton?: boolean;
-  backUrl?: string;
   children?: ReactNode; // For additional controls like toggles, status indicators, etc.
 }
 
 export default function SharedHeader({ 
   title, 
   showBackButton = false, 
-  backUrl = '/', 
   children 
 }: SharedHeaderProps) {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
 
   const handleBackClick = () => {
-    navigate(backUrl);
+    // Smart back navigation:
+    // - If there's history (same-tab navigation), go back
+    // - If no history (opened in new tab), go to home page
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate('/');
+    }
   };
+
 
   return (
     <AppBar 
@@ -72,46 +78,56 @@ export default function SharedHeader({
         
         {/* Logo and Title */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexGrow: 1 }}>
-          <Box sx={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            width: 40,
-            height: 40,
-            borderRadius: 2,
-            background: 'rgba(255, 255, 255, 0.1)',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15), 0 0 20px rgba(255, 255, 255, 0.1)',
-            transition: 'all 0.3s ease',
-            position: 'relative',
-            overflow: 'hidden',
-            '&:before': {
-              content: '""',
-              position: 'absolute',
-              top: 0,
-              left: '-100%',
-              width: '100%',
-              height: '100%',
-              background: 'linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent)',
-              animation: 'shimmer 2s infinite',
-            },
-            '&:hover': {
-              background: 'rgba(255, 255, 255, 0.15)',
-              transform: 'translateY(-2px) scale(1.05)',
-              boxShadow: '0 8px 25px rgba(0, 0, 0, 0.2), 0 0 30px rgba(255, 255, 255, 0.2)',
+          <Box
+            component={RouterLink}
+            to="/"
+            aria-label="Home"
+            sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              width: 40,
+              height: 40,
+              borderRadius: 2,
+              background: 'rgba(255, 255, 255, 0.1)',
+              backdropFilter: 'blur(10px)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15), 0 0 20px rgba(255, 255, 255, 0.1)',
+              transition: 'all 0.3s ease',
+              position: 'relative',
+              overflow: 'hidden',
+              textDecoration: 'none',
               '&:before': {
-                left: '100%',
+                content: '""',
+                position: 'absolute',
+                top: 0,
+                left: '-100%',
+                width: '100%',
+                height: '100%',
+                background: 'linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent)',
+                animation: 'none',
+              },
+              '&:hover': {
+                background: 'rgba(255, 255, 255, 0.15)',
+                transform: 'translateY(-2px) scale(1.05)',
+                boxShadow: '0 8px 25px rgba(0, 0, 0, 0.2), 0 0 30px rgba(255, 255, 255, 0.2)',
+                '&:before': {
+                  animation: 'shimmer 0.6s ease-out',
+                }
+              },
+              '&:focus-visible': {
+                outline: '2px solid rgba(255, 255, 255, 0.8)',
+                outlineOffset: '2px',
+              },
+              '@keyframes shimmer': {
+                '0%': { left: '-100%' },
+                '100%': { left: '100%' },
               }
-            },
-            '@keyframes shimmer': {
-              '0%': { left: '-100%' },
-              '100%': { left: '100%' },
-            }
-          }}>
+            }}
+          >
             <img 
               src="/tarsy-logo.png" 
-              alt="Tarsy Logo" 
+              alt="TARSy logo" 
               style={{ 
                 height: '28px', 
                 width: 'auto', 

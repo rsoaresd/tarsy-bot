@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { MouseEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { Container, AppBar, Toolbar, Typography, Box, Tooltip, CircularProgress, IconButton, Menu, MenuItem, ListItemIcon, ListItemText } from '@mui/material';
 import { Refresh, Menu as MenuIcon, Send as SendIcon } from '@mui/icons-material';
 import DashboardLayout from './DashboardLayout';
@@ -76,7 +76,7 @@ function DashboardView() {
   const [menuAnchorEl, setMenuAnchorEl] = useState<null | HTMLElement>(null);
 
   // Throttling state for API calls
-  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const REFRESH_THROTTLE_MS = 1000; // Wait 1 second between refreshes
 
   // In-flight request tracking to prevent overlapping reconnection syncs
@@ -504,7 +504,7 @@ function DashboardView() {
 
   const handleManualAlertSubmission = () => {
     // Open manual alert submission in new tab
-    window.open('/submit-alert', '_blank');
+    window.open('/submit-alert', '_blank', 'noopener,noreferrer');
     handleMenuClose();
   };
 
@@ -548,46 +548,56 @@ function DashboardView() {
           </IconButton>
           
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box sx={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              width: 40,
-              height: 40,
-              borderRadius: 2,
-              background: 'rgba(255, 255, 255, 0.1)',
-              backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15), 0 0 20px rgba(255, 255, 255, 0.1)',
-              transition: 'all 0.3s ease',
-              position: 'relative',
-              overflow: 'hidden',
-              '&:before': {
-                content: '""',
-                position: 'absolute',
-                top: 0,
-                left: '-100%',
-                width: '100%',
-                height: '100%',
-                background: 'linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent)',
-                animation: 'shimmer 2s infinite',
-              },
-              '&:hover': {
-                background: 'rgba(255, 255, 255, 0.15)',
-                transform: 'translateY(-2px) scale(1.05)',
-                boxShadow: '0 8px 25px rgba(0, 0, 0, 0.2), 0 0 30px rgba(255, 255, 255, 0.2)',
+            <Box
+              component={RouterLink}
+              to="/"
+              aria-label="Home"
+              sx={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                width: 40,
+                height: 40,
+                borderRadius: 2,
+                background: 'rgba(255, 255, 255, 0.1)',
+                backdropFilter: 'blur(10px)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15), 0 0 20px rgba(255, 255, 255, 0.1)',
+                transition: 'all 0.3s ease',
+                position: 'relative',
+                overflow: 'hidden',
+                textDecoration: 'none',
                 '&:before': {
-                  left: '100%',
+                  content: '""',
+                  position: 'absolute',
+                  top: 0,
+                  left: '-100%',
+                  width: '100%',
+                  height: '100%',
+                  background: 'linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent)',
+                  animation: 'none',
+                },
+                '&:hover': {
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  transform: 'translateY(-2px) scale(1.05)',
+                  boxShadow: '0 8px 25px rgba(0, 0, 0, 0.2), 0 0 30px rgba(255, 255, 255, 0.2)',
+                  '&:before': {
+                    animation: 'shimmer 0.6s ease-out',
+                  }
+                },
+                '&:focus-visible': {
+                  outline: '2px solid rgba(255, 255, 255, 0.8)',
+                  outlineOffset: '2px',
+                },
+                '@keyframes shimmer': {
+                  '0%': { left: '-100%' },
+                  '100%': { left: '100%' },
                 }
-              },
-              '@keyframes shimmer': {
-                '0%': { left: '-100%' },
-                '100%': { left: '100%' },
-              }
-            }}>
+              }}
+            >
               <img 
                 src="/tarsy-logo.png" 
-                alt="Tarsy Logo" 
+                alt="TARSy logo" 
                 style={{ 
                   height: '28px', 
                   width: 'auto', 
