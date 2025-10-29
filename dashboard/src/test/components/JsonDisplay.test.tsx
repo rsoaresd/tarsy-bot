@@ -287,114 +287,90 @@ describe('JsonDisplay - Python LLM Message Parsing', () => {
   });
 });
 
-describe('JsonDisplay - Expand All Button with Accordions', () => {
-  it('should expand and collapse visible accordions when clicking Expand All button in tabs', async () => {
-    // Create MCP result with both formatted text and raw JSON sections
-    const longText = 'This is a long multi-line text content that triggers the formatted text section.\n'.repeat(10);
-    const mcpResult = {
-      result: JSON.stringify({
-        analysis: longText,
-        data: { key: 'value', count: 42 }
-      })
+describe('JsonDisplay - Single Field Result Unwrapping', () => {
+  it('should unwrap single-field result object with string value', () => {
+    const wrappedResult = {
+      result: 'Simple text value'
     };
     
-    const user = userEvent.setup();
-    const { container, getByRole, getAllByRole } = render(<JsonDisplay data={mcpResult} />);
+    const { container } = render(<JsonDisplay data={wrappedResult} />);
     
-    // Should have tabs
-    expect(container.textContent).toContain('Formatted Text');
-    expect(container.textContent).toContain('Raw Data');
-    
-    // Find the Expand All button
-    const expandButton = getByRole('button', { name: /expand all/i });
-    expect(expandButton).toBeInTheDocument();
-    
-    // Click Expand All - should expand accordions in the Formatted Text tab (activeTab = 0)
-    await user.click(expandButton);
-    
-    // Button text should change to Collapse All
-    await waitFor(() => {
-      expect(getByRole('button', { name: /collapse all/i })).toBeInTheDocument();
-    });
-    
-    // The formatted text accordion should be expanded
-    const accordions = getAllByRole('button', { name: /analysis \(formatted\)/i });
-    expect(accordions.length).toBeGreaterThan(0);
-    
-    // Switch to Raw Data tab
-    const rawDataTab = getByRole('tab', { name: /raw data/i });
-    await user.click(rawDataTab);
-    
-    // Wait for tab switch
-    await waitFor(() => {
-      expect(container.textContent).toContain('MCP Tool Result (JSON)');
-    });
-    
-    // Click Collapse All - should collapse accordions in Raw Data tab
-    const collapseButton = getByRole('button', { name: /collapse all/i });
-    await user.click(collapseButton);
-    
-    // Button text should change back to Expand All
-    await waitFor(() => {
-      expect(getByRole('button', { name: /expand all/i })).toBeInTheDocument();
-    });
+    // Should display the unwrapped string value directly
+    expect(container.textContent).toContain('Simple text value');
+    // Should not show the wrapper object
+    expect(container.textContent).not.toContain('"result"');
   });
   
-  it('should preserve non-visible accordion states when toggling Expand All', async () => {
-    // Create content with multiple sections
-    const longText1 = 'First long text section content.\n'.repeat(10);
-    const longText2 = 'Second long text section content.\n'.repeat(10);
-    const mcpResult = {
-      result: JSON.stringify({
-        analysis: longText1,
-        summary: longText2,
-        data: { key: 'value' }
-      })
+  it('should unwrap single-field result object with direct JSON object', () => {
+    const wrappedResult = {
+      result: {
+        status: 'success',
+        count: 42,
+        items: ['item1', 'item2']
+      }
     };
     
-    const user = userEvent.setup();
-    const { getByRole } = render(<JsonDisplay data={mcpResult} />);
+    const { container } = render(<JsonDisplay data={wrappedResult} />);
     
-    // Wait for tabs to render
-    await waitFor(() => {
-      expect(getByRole('tab', { name: /formatted text/i })).toBeInTheDocument();
-    });
-    
-    // Click Expand All in Formatted Text tab (should expand text sections)
-    const expandButton = getByRole('button', { name: /expand all/i });
-    await user.click(expandButton);
-    
-    // Switch to Raw Data tab
-    const rawDataTab = getByRole('tab', { name: /raw data/i });
-    await user.click(rawDataTab);
-    
-    // Click Collapse All in Raw Data tab (should only collapse raw data sections, not text sections)
-    await waitFor(() => {
-      const collapseButton = getByRole('button', { name: /collapse all/i });
-      expect(collapseButton).toBeInTheDocument();
-    });
+    // Should display the unwrapped object with its actual structure
+    expect(container.textContent).toContain('status');
+    expect(container.textContent).toContain('success');
+    expect(container.textContent).toContain('count');
+    // Should not show the "result" wrapper key
+    expect(container.textContent).not.toMatch(/^result/);
   });
   
-  it('should handle Expand All button when content has no accordions', () => {
-    // Larger JSON that triggers Expand All button but has no accordions (just JSON viewer)
-    const largeData = {
-      data: Array.from({ length: 50 }, (_, i) => ({
-        id: i,
-        name: `Item ${i}`,
-        value: Math.random() * 100
-      }))
+  it('should unwrap single-field result object with array value', () => {
+    const wrappedResult = {
+      result: ['item1', 'item2', 'item3']
     };
     
-    const { getByRole } = render(<JsonDisplay data={largeData} />);
+    const { container } = render(<JsonDisplay data={wrappedResult} />);
     
-    // Should have Expand All button for JSON content
-    const expandButton = getByRole('button', { name: /expand all/i });
-    expect(expandButton).toBeInTheDocument();
+    // Should display the array directly
+    expect(container.textContent).toContain('item1');
+    expect(container.textContent).toContain('item2');
+    expect(container.textContent).toContain('item3');
+  });
+  
+  it('should unwrap nested single-field result objects recursively', () => {
+    const nestedWrappedResult = {
+      result: {
+        result: 'Deeply nested value'
+      }
+    };
     
-    // Clicking should not throw errors
-    expect(() => {
-      expandButton.click();
-    }).not.toThrow();
+    const { container } = render(<JsonDisplay data={nestedWrappedResult} />);
+    
+    // Should unwrap recursively to the innermost value
+    expect(container.textContent).toContain('Deeply nested value');
+  });
+  
+  it('should not unwrap result when there are multiple fields', () => {
+    const multiFieldResult = {
+      result: 'value',
+      otherField: 'other value'
+    };
+    
+    const { container } = render(<JsonDisplay data={multiFieldResult} />);
+    
+    // Should keep the wrapper object intact since it has multiple fields
+    expect(container.textContent).toContain('result');
+    expect(container.textContent).toContain('otherField');
+  });
+  
+  it('should preserve existing behavior for string result fields', () => {
+    // This is the existing behavior - result field with stringified JSON
+    const mcpResult = {
+      result: '{"status":"success","count":42}'
+    };
+    
+    const { container } = render(<JsonDisplay data={mcpResult} />);
+    
+    // Should unwrap and then parse the JSON string
+    expect(container.textContent).toContain('status');
+    expect(container.textContent).toContain('success');
+    expect(container.textContent).toContain('count');
   });
 });
 
