@@ -1,7 +1,9 @@
 import JsonView from '@uiw/react-json-view';
-import { Box, Typography, useTheme, Accordion, AccordionSummary, AccordionDetails, Chip, IconButton } from '@mui/material';
+import { Box, Typography, useTheme, Accordion, AccordionSummary, AccordionDetails, Chip, IconButton, Tabs, Tab, Button } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
+import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
 import { useState } from 'react';
 
 interface JsonDisplayProps {
@@ -10,12 +12,15 @@ interface JsonDisplayProps {
   maxHeight?: number;
 }
 
+type SectionType = 'json' | 'yaml' | 'code' | 'text' | 'system-prompt' | 'user-prompt' | 'assistant-prompt';
+
 interface ParsedContent {
   type: 'json' | 'python-objects' | 'markdown' | 'mixed' | 'plain-text';
   content: any;
   sections?: Array<{
+    id: string;
     title: string;
-    type: string;
+    type: SectionType;
     content: any;
     raw: string;
   }>;
@@ -74,6 +79,8 @@ const calculateShortenTextAfterLength = (content: any): number => {
 function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayProps) {
   const theme = useTheme();
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [activeTab, setActiveTab] = useState<number>(0);
+  const [isFullyExpanded, setIsFullyExpanded] = useState<boolean>(false);
   
   // Debug info for long content
   const contentLength = typeof data === 'string'
@@ -100,35 +107,58 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
           // Successfully parsed as JSON
           // Check if it's a nested object with multi-line text fields
           if (typeof parsedJson === 'object' && parsedJson !== null) {
-            // Find ALL fields that contain multi-line text (generic approach)
-            const multiLineFields: Array<{ fieldName: string; content: string }> = [];
+            // Recursively find ALL fields that contain multi-line text
+            const multiLineFields: Array<{ path: string; fieldName: string; content: string }> = [];
             
-            for (const [key, value] of Object.entries(parsedJson)) {
-              if (
-                typeof value === 'string' && 
-                value.length > 200 &&  // Only create separate section for substantial content
-                value.includes('\n')   // Must be multi-line
-              ) {
-                multiLineFields.push({ fieldName: key, content: value });
+            const findMultiLineFields = (obj: any, path: string[] = []) => {
+              if (typeof obj === 'string' && obj.length > 200 && obj.includes('\n')) {
+                // Found a multi-line text field
+                const fieldName = path[path.length - 1] || 'content';
+                const fullPath = path.join(' → ');
+                multiLineFields.push({ 
+                  path: fullPath, 
+                  fieldName, 
+                  content: obj 
+                });
+              } else if (Array.isArray(obj)) {
+                // Search through array elements
+                obj.forEach((item, index) => {
+                  findMultiLineFields(item, [...path, `[${index}]`]);
+                });
+              } else if (typeof obj === 'object' && obj !== null) {
+                // Search through object properties
+                for (const [key, value] of Object.entries(obj)) {
+                  findMultiLineFields(value, [...path, key]);
+                }
               }
-            }
+            };
+            
+            findMultiLineFields(parsedJson);
             
             if (multiLineFields.length > 0) {
               // Create sections: First the JSON, then each multi-line field formatted
               const sections = [
                 {
+                  id: 'mcp-json',
                   title: 'MCP Tool Result (JSON)',
-                  type: 'json',
+                  type: 'json' as SectionType,
                   content: parsedJson,
                   raw: JSON.stringify(parsedJson, null, 2)
                 }
               ];
               
               // Add a formatted section for each multi-line field
-              for (const { fieldName, content } of multiLineFields) {
+              for (const { path, fieldName, content } of multiLineFields) {
+                // Create a readable title from the path
+                const title = path 
+                  ? `${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)} (Formatted)`
+                  : 'Formatted Text';
+                const id = `mlf:${path || fieldName}`;
+                
                 sections.push({
-                  title: `${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)} (Formatted)`,
-                  type: 'text',
+                  id,
+                  title,
+                  type: 'text' as SectionType,
                   content: content,
                   raw: content
                 });
@@ -147,8 +177,9 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
               content: { text: '', sections: [] },
               sections: [
                 {
+                  id: 'mcp-json',
                   title: 'MCP Tool Result (JSON)',
-                  type: 'json',
+                  type: 'json' as SectionType,
                   content: parsedJson,
                   raw: JSON.stringify(parsedJson, null, 2)
                 }
@@ -162,8 +193,9 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
             content: { text: '', sections: [] },
             sections: [
               {
+                id: 'mcp-json-simple',
                 title: 'MCP Tool Result',
-                type: 'json',
+                type: 'json' as SectionType,
                 content: parsedJson,
                 raw: JSON.stringify(parsedJson, null, 2)
               }
@@ -185,8 +217,9 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
             content: { text: '', sections: [] },
             sections: [
               {
+                id: 'mcp-yaml',
                 title: 'MCP Tool Result (YAML)',
-                type: 'yaml',
+                type: 'yaml' as SectionType,
                 content: resultContent,
                 raw: resultContent
               }
@@ -201,8 +234,9 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
             content: { text: '', sections: [] },
             sections: [
               {
+                id: 'mcp-text',
                 title: 'MCP Tool Result (Text)',
-                type: 'text',
+                type: 'text' as SectionType,
                 content: resultContent,
                 raw: resultContent
               }
@@ -325,12 +359,24 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
       });
 
       if (messages.length > 0) {
-        const sections = messages.map((msg) => ({
-          title: `${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)} Message`,
-          type: msg.role === 'system' ? 'system-prompt' : 'user-prompt',
-          content: msg.content,
-          raw: `Role: ${msg.role}\n\n${msg.content}`
-        }));
+        const sections = messages.map((msg, index) => {
+          let sectionType: SectionType;
+          if (msg.role === 'system') {
+            sectionType = 'system-prompt';
+          } else if (msg.role === 'assistant') {
+            sectionType = 'assistant-prompt';
+          } else {
+            sectionType = 'user-prompt';
+          }
+          
+          return {
+            id: `llm-message-${msg.role}-${index}`,
+            title: `${msg.role.charAt(0).toUpperCase() + msg.role.slice(1)} Message`,
+            type: sectionType,
+            content: msg.content,
+            raw: `Role: ${msg.role}\n\n${msg.content}`
+          };
+        });
 
         return {
           type: 'python-objects',
@@ -358,8 +404,9 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
       try {
         const jsonContent = JSON.parse(jsonMatch[1]);
         sections.push({
+          id: `json-block-${sectionIndex + 1}`,
           title: `JSON Block ${sectionIndex + 1}`,
-          type: 'json',
+          type: 'json' as SectionType,
           content: jsonContent,
           raw: jsonMatch[1]
         });
@@ -376,8 +423,9 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
     while ((codeMatch = codeRegex.exec(content)) !== null) {
       if (codeMatch[1] !== 'json') { // Skip JSON blocks (already handled above)
         sections.push({
+          id: `code-block-${sectionIndex + 1}`,
           title: `${codeMatch[1] || 'Code'} Block ${sectionIndex + 1}`,
-          type: 'code',
+          type: 'code' as SectionType,
           content: codeMatch[2],
           raw: codeMatch[2]
         });
@@ -403,14 +451,63 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
     return { type: 'plain-text', content };
   };
 
-  const handleSectionExpand = (sectionId: string) => {
-    setExpandedSections(prev => {
-      const current = prev[sectionId] ?? true;
-      return { ...prev, [sectionId]: !current };
-    });
+  const handleSectionExpand = (sectionId: string, expanded: boolean) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [sectionId]: expanded
+    }));
   };
 
   const parsedContent = parseContent(data);
+
+  // Helper to get visible section IDs based on active tab
+  const getVisibleSectionIds = (): string[] => {
+    if (parsedContent.type !== 'mixed' || !parsedContent.sections) {
+      return [];
+    }
+    
+    if (activeTab === 0) {
+      // Formatted Text tab: return text sections
+      return parsedContent.sections
+        .filter(s => s.type === 'text')
+        .map(s => s.id);
+    } else if (activeTab === 1) {
+      // Raw Data tab: return json, yaml, code sections
+      return parsedContent.sections
+        .filter(s => s.type === 'json' || s.type === 'yaml' || s.type === 'code')
+        .map(s => s.id);
+    } else {
+      // Other tabs: return all section IDs
+      return parsedContent.sections.map(s => s.id);
+    }
+  };
+
+  // Check if JSON content is already fully expanded (nothing to collapse/expand)
+  const isAlreadyFullyExpanded = (content: any): boolean => {
+    try {
+      const jsonString = JSON.stringify(content);
+      const size = jsonString.length;
+      // If content is tiny (<300 chars), it's already fully shown
+      // This matches the threshold in calculateSmartCollapseLevel
+      return size < 300;
+    } catch {
+      return false;
+    }
+  };
+
+  // Determine if expand/collapse is useful (only for JSON content that has something to expand)
+  const hasExpandableContent = (() => {
+    if (parsedContent.type === 'json') {
+      return !isAlreadyFullyExpanded(parsedContent.content);
+    }
+    if (parsedContent.type === 'mixed' && parsedContent.sections) {
+      // Check if any JSON section has something to expand
+      return parsedContent.sections.some(s => 
+        s.type === 'json' && !isAlreadyFullyExpanded(s.content)
+      );
+    }
+    return false;
+  })();
 
   // Render based on content type
   const renderContent = () => {
@@ -439,17 +536,25 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
       
       {parsed.sections?.map((section, index) => (
         <Accordion
-          key={index}
-          expanded={expandedSections[section.title] ?? index === 0}
-          onChange={() => handleSectionExpand(section.title)}
+          key={section.id ?? index}
+          expanded={expandedSections[section.id] ?? index === 0}
+          onChange={(_, expanded) => handleSectionExpand(section.id, expanded)}
           sx={{ mb: 1, border: `1px solid ${theme.palette.divider}` }}
         >
           <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
               <Chip 
-                label={section.type === 'system-prompt' ? 'System' : 'User'} 
+                label={
+                  section.type === 'system-prompt' ? 'System' : 
+                  section.type === 'assistant-prompt' ? 'Assistant' : 
+                  'User'
+                } 
                 size="small" 
-                color={section.type === 'system-prompt' ? 'secondary' : 'primary'}
+                color={
+                  section.type === 'system-prompt' ? 'secondary' : 
+                  section.type === 'assistant-prompt' ? 'success' : 
+                  'primary'
+                }
                 variant="filled"
               />
               <Typography variant="subtitle2" sx={{ flex: 1 }}>
@@ -474,7 +579,10 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
                   bgcolor: theme.palette.grey[50],
                   borderRadius: 1,
                   border: `1px solid ${theme.palette.divider}`,
-                  maxHeight: section.type === 'user-prompt' ? 400 : 200,
+                  maxHeight: 
+                    section.type === 'user-prompt' ? 400 : 
+                    section.type === 'assistant-prompt' ? 600 : 
+                    200,
                   overflow: 'auto',
                   // Enhanced scrollbars
                   '&::-webkit-scrollbar': {
@@ -520,7 +628,11 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
                       color: 'white',
                     }
                   }}
-                  title={`Copy ${section.type === 'system-prompt' ? 'System' : 'User'} Message`}
+                  title={`Copy ${
+                    section.type === 'system-prompt' ? 'System' : 
+                    section.type === 'assistant-prompt' ? 'Assistant' : 
+                    'User'
+                  } Message`}
                 >
                   <ContentCopyIcon fontSize="small" />
                 </IconButton>
@@ -545,82 +657,198 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
     const mainText = typeof parsed.content === 'object' ? parsed.content.text : parsed.content;
     const cleanedText = cleanMainText(mainText);
 
+    // Separate sections by type
+    const formattedTextSections = parsed.sections?.filter(s => s.type === 'text') || [];
+    const rawDataSections = parsed.sections?.filter(s => s.type === 'json' || s.type === 'yaml' || s.type === 'code') || [];
+    
+    // Determine if we should show tabs (only if there are formatted text sections)
+    const shouldShowTabs = formattedTextSections.length > 0;
+
+    // Helper function to render a section accordion
+    const renderSectionAccordion = (section: any, index: number) => (
+      <Accordion
+        key={section.id ?? index}
+        expanded={expandedSections[section.id] ?? false}
+        onChange={(_, expanded) => handleSectionExpand(section.id, expanded)}
+        sx={{ mb: 1, border: `1px solid ${theme.palette.divider}` }}
+      >
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Chip 
+              label={section.type.toUpperCase()} 
+              size="small" 
+              color={
+                section.type === 'json' ? 'success' : 
+                section.type === 'yaml' ? 'info' : 
+                'default'
+              }
+              variant="outlined"
+            />
+            <Typography variant="subtitle2">{section.title}</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ position: 'relative' }}>
+            {section.type === 'json' ? (
+              <JsonView 
+                value={section.content}
+                collapsed={isFullyExpanded ? false : calculateSmartCollapseLevel(section.content, collapsed)}
+                displayDataTypes={false}
+                displayObjectSize={false}
+                enableClipboard={false}
+                shortenTextAfterLength={isFullyExpanded ? 0 : calculateShortenTextAfterLength(section.content)}
+                style={{
+                  backgroundColor: theme.palette.grey[50],
+                  padding: theme.spacing(1),
+                  wordBreak: 'break-word',
+                  overflowWrap: 'break-word',
+                  whiteSpace: 'normal',
+                  overflow: 'auto',
+                  maxWidth: '100%',
+                }}
+              />
+            ) : (
+              <Box 
+                component="pre" 
+                sx={{ 
+                  fontFamily: 'monospace',
+                  fontSize: '0.875rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  m: 0,
+                  p: 2,
+                  bgcolor: theme.palette.grey[50],
+                  borderRadius: 1,
+                  border: `1px solid ${theme.palette.divider}`,
+                  maxHeight: section.type === 'yaml' ? 500 : maxHeight / 2,
+                  overflow: 'auto',
+                  // Enhanced scrollbars for YAML content
+                  '&::-webkit-scrollbar': {
+                    width: '8px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    backgroundColor: theme.palette.grey[100],
+                    borderRadius: '4px',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    backgroundColor: theme.palette.grey[400],
+                    borderRadius: '4px',
+                    '&:hover': {
+                      backgroundColor: theme.palette.primary.main,
+                    },
+                  },
+                }}
+              >
+                {section.content}
+              </Box>
+            )}
+            
+            {/* Individual Copy Button for each section */}
+            <Box sx={{ 
+              position: 'absolute', 
+              top: 8, 
+              right: 8, 
+              zIndex: 1,
+              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              borderRadius: 1,
+              backdropFilter: 'blur(4px)'
+            }}>
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const text = typeof section.raw === 'string' ? section.raw : String(section.content);
+                  navigator.clipboard?.writeText(text).catch(() => {/* no-op */});
+                }}
+                sx={{ 
+                  p: 0.5,
+                  '&:hover': {
+                    backgroundColor: theme.palette.primary.main,
+                    color: 'white',
+                  }
+                }}
+                title={`Copy ${section.type === 'yaml' ? 'YAML' : section.type.toUpperCase()} Content`}
+              >
+                <ContentCopyIcon fontSize="small" />
+              </IconButton>
+            </Box>
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+    );
+
+    // Render without tabs if no formatted text sections
+    if (!shouldShowTabs) {
+      return (
+        <Box>
+          <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Chip label="Mixed Content" size="small" color="info" variant="outlined" />
+            <Typography variant="caption" color="text.secondary">
+              {parsed.sections?.length} structured block{parsed.sections?.length !== 1 ? 's' : ''}
+            </Typography>
+          </Box>
+
+          {/* Main text content - only show if there's meaningful content after cleanup */}
+          {cleanedText && cleanedText.length > 20 && (
+            <Box 
+              component="pre" 
+              sx={{ 
+                fontFamily: 'monospace',
+                fontSize: '0.875rem',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                m: 0,
+                mb: 2,
+                p: 2,
+                bgcolor: theme.palette.grey[50],
+                borderRadius: 1,
+                border: `1px solid ${theme.palette.divider}`,
+                maxHeight: maxHeight / 2,
+                overflow: 'auto',
+              }}
+            >
+              {cleanedText}
+            </Box>
+          )}
+
+          {/* All sections as accordions */}
+          {parsed.sections?.map((section, index) => renderSectionAccordion(section, index))}
+        </Box>
+      );
+    }
+
+    // Render with tabs when formatted text sections exist
     return (
       <Box>
         <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
           <Chip label="Mixed Content" size="small" color="info" variant="outlined" />
           <Typography variant="caption" color="text.secondary">
-            {parsed.sections?.length} structured block{parsed.sections?.length !== 1 ? 's' : ''}
+            {formattedTextSections.length} formatted • {rawDataSections.length} raw
           </Typography>
         </Box>
 
-        {/* Main text content - only show if there's meaningful content after cleanup */}
-        {cleanedText && cleanedText.length > 20 && (
-          <Box 
-            component="pre" 
-            sx={{ 
-              fontFamily: 'monospace',
-              fontSize: '0.875rem',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              m: 0,
-              mb: 2,
-              p: 2,
-              bgcolor: theme.palette.grey[50],
-              borderRadius: 1,
-              border: `1px solid ${theme.palette.divider}`,
-              maxHeight: maxHeight / 2,
-              overflow: 'auto',
-            }}
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+          <Tabs 
+            value={activeTab} 
+            onChange={(_, newValue) => setActiveTab(newValue)}
+            aria-label="tool result tabs"
           >
-            {cleanedText}
-          </Box>
-        )}
+            <Tab label="Formatted Text" id="tab-0" aria-controls="tabpanel-0" />
+            <Tab label="Raw Data" id="tab-1" aria-controls="tabpanel-1" />
+          </Tabs>
+        </Box>
 
-      {/* Structured sections */}
-      {parsed.sections?.map((section, index) => (
-        <Accordion
-          key={index}
-          expanded={expandedSections[section.title] ?? true}
-          onChange={() => handleSectionExpand(section.title)}
-          sx={{ mb: 1, border: `1px solid ${theme.palette.divider}` }}
+        {/* Tab Panel 0: Formatted Text */}
+        <Box
+          role="tabpanel"
+          hidden={activeTab !== 0}
+          id="tabpanel-0"
+          aria-labelledby="tab-0"
         >
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Chip 
-                label={section.type.toUpperCase()} 
-                size="small" 
-                color={
-                  section.type === 'json' ? 'success' : 
-                  section.type === 'yaml' ? 'info' : 
-                  'default'
-                }
-                variant="outlined"
-              />
-              <Typography variant="subtitle2">{section.title}</Typography>
-            </Box>
-          </AccordionSummary>
-          <AccordionDetails>
-            <Box sx={{ position: 'relative' }}>
-              {section.type === 'json' ? (
-                <JsonView 
-                  value={section.content}
-                  collapsed={calculateSmartCollapseLevel(section.content, collapsed)}
-                  displayDataTypes={false}
-                  displayObjectSize={false}
-                  enableClipboard={false}
-                  shortenTextAfterLength={calculateShortenTextAfterLength(section.content)}
-                  style={{
-                    backgroundColor: theme.palette.grey[50],
-                    padding: theme.spacing(1),
-                    wordBreak: 'break-word',
-                    overflowWrap: 'break-word',
-                    whiteSpace: 'normal',
-                    overflow: 'auto',
-                    maxWidth: '100%',
-                  }}
-                />
-              ) : (
+          {activeTab === 0 && (
+            <Box>
+              {/* Main text content - only show if there's meaningful content after cleanup */}
+              {cleanedText && cleanedText.length > 20 && (
                 <Box 
                   component="pre" 
                   sx={{ 
@@ -629,106 +857,81 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
                     m: 0,
+                    mb: 2,
                     p: 2,
                     bgcolor: theme.palette.grey[50],
                     borderRadius: 1,
                     border: `1px solid ${theme.palette.divider}`,
-                    maxHeight: section.type === 'yaml' ? 500 : maxHeight / 2,
+                    maxHeight: maxHeight / 2,
                     overflow: 'auto',
-                    // Enhanced scrollbars for YAML content
-                    '&::-webkit-scrollbar': {
-                      width: '8px',
-                    },
-                    '&::-webkit-scrollbar-track': {
-                      backgroundColor: theme.palette.grey[100],
-                      borderRadius: '4px',
-                    },
-                    '&::-webkit-scrollbar-thumb': {
-                      backgroundColor: theme.palette.grey[400],
-                      borderRadius: '4px',
-                      '&:hover': {
-                        backgroundColor: theme.palette.primary.main,
-                      },
-                    },
                   }}
                 >
-                  {section.content}
+                  {cleanedText}
                 </Box>
               )}
-              
-              {/* Individual Copy Button for each section */}
-              <Box sx={{ 
-                position: 'absolute', 
-                top: 8, 
-                right: 8, 
-                zIndex: 1,
-                backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                borderRadius: 1,
-                backdropFilter: 'blur(4px)'
-              }}>
-                <IconButton
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const text = typeof section.raw === 'string' ? section.raw : String(section.content);
-                    navigator.clipboard?.writeText(text).catch(() => {/* no-op */});
-                  }}
-                  sx={{ 
-                    p: 0.5,
-                    '&:hover': {
-                      backgroundColor: theme.palette.primary.main,
-                      color: 'white',
-                    }
-                  }}
-                  title={`Copy ${section.type === 'yaml' ? 'YAML' : section.type.toUpperCase()} Content`}
-                >
-                  <ContentCopyIcon fontSize="small" />
-                </IconButton>
-              </Box>
+              {formattedTextSections.map((section, index) => renderSectionAccordion(section, index))}
             </Box>
-          </AccordionDetails>
-        </Accordion>
-              ))}
+          )}
+        </Box>
+
+        {/* Tab Panel 1: Raw Data */}
+        <Box
+          role="tabpanel"
+          hidden={activeTab !== 1}
+          id="tabpanel-1"
+          aria-labelledby="tab-1"
+        >
+          {activeTab === 1 && (
+            <Box>
+              {rawDataSections.map((section, index) => renderSectionAccordion(section, index))}
+            </Box>
+          )}
+        </Box>
       </Box>
     );
   };
 
-  const renderJsonContent = (content: any) => (
-    <Box sx={{ 
-      maxWidth: '100%',
-      overflow: 'hidden',
-      '& .w-rjv': {
-        backgroundColor: `${theme.palette.grey[50]} !important`,
-        borderRadius: theme.shape.borderRadius,
-        border: `1px solid ${theme.palette.divider}`,
-        fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace !important',
-        fontSize: '0.875rem !important',
-        maxHeight: maxHeight,
-        overflow: 'auto',
+  const renderJsonContent = (content: any) => {
+    const effectiveCollapsed = isFullyExpanded ? false : calculateSmartCollapseLevel(content, collapsed);
+    const effectiveShortenText = isFullyExpanded ? 0 : calculateShortenTextAfterLength(content);
+    
+    return (
+      <Box sx={{ 
         maxWidth: '100%',
-        wordBreak: 'break-word',
-        overflowWrap: 'break-word',
-      }
-    }}>
-      <JsonView 
-        value={content}
-        collapsed={calculateSmartCollapseLevel(content, collapsed)}
-        displayDataTypes={false}
-        displayObjectSize={false}
-        enableClipboard={false}
-        shortenTextAfterLength={calculateShortenTextAfterLength(content)}
-        style={{
-          backgroundColor: theme.palette.grey[50],
-          padding: theme.spacing(2),
-          wordBreak: 'break-word',
-          overflowWrap: 'break-word',
-          whiteSpace: 'normal',
+        overflow: 'hidden',
+        '& .w-rjv': {
+          backgroundColor: `${theme.palette.grey[50]} !important`,
+          borderRadius: theme.shape.borderRadius,
+          border: `1px solid ${theme.palette.divider}`,
+          fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace !important',
+          fontSize: '0.875rem !important',
+          maxHeight: maxHeight,
           overflow: 'auto',
           maxWidth: '100%',
-        }}
-      />
-    </Box>
-  );
+          wordBreak: 'break-word',
+          overflowWrap: 'break-word',
+        }
+      }}>
+        <JsonView 
+          value={content}
+          collapsed={effectiveCollapsed}
+          displayDataTypes={false}
+          displayObjectSize={false}
+          enableClipboard={false}
+          shortenTextAfterLength={effectiveShortenText}
+          style={{
+            backgroundColor: theme.palette.grey[50],
+            padding: theme.spacing(2),
+            wordBreak: 'break-word',
+            overflowWrap: 'break-word',
+            whiteSpace: 'normal',
+            overflow: 'auto',
+            maxWidth: '100%',
+          }}
+        />
+      </Box>
+    );
+  };
 
   const renderMarkdownContent = (content: string) => (
     <Box 
@@ -781,10 +984,62 @@ function JsonDisplay({ data, collapsed = true, maxHeight = 400 }: JsonDisplayPro
       wordBreak: 'break-word',
       overflowWrap: 'break-word',
     }}>
-      {showDebugInfo && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          Content length: {contentLength.toLocaleString()} characters • Scrollable area
-        </Typography>
+      {/* Header with debug info and expand/collapse button */}
+      {(showDebugInfo || hasExpandableContent) && (
+        <Box sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          mb: 1,
+          gap: 2
+        }}>
+          {showDebugInfo && (
+            <Typography variant="caption" color="text.secondary">
+              Content length: {contentLength.toLocaleString()} characters • Scrollable area
+            </Typography>
+          )}
+          {hasExpandableContent && (
+            <Box sx={{ marginLeft: 'auto' }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={isFullyExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
+                onClick={() => {
+                  const newExpandedState = !isFullyExpanded;
+                  setIsFullyExpanded(newExpandedState);
+                  
+                  // Also toggle visible accordions based on active tab
+                  const visibleSectionIds = getVisibleSectionIds();
+                  if (visibleSectionIds.length > 0) {
+                    setExpandedSections(prev => {
+                      const updated = { ...prev };
+                      if (newExpandedState) {
+                        // Expanding: add visible section IDs
+                        visibleSectionIds.forEach(id => {
+                          updated[id] = true;
+                        });
+                      } else {
+                        // Collapsing: remove visible section IDs, preserve others
+                        visibleSectionIds.forEach(id => {
+                          delete updated[id];
+                        });
+                      }
+                      return updated;
+                    });
+                  }
+                }}
+                sx={{ 
+                  textTransform: 'none',
+                  fontSize: '0.75rem',
+                  py: 0.25,
+                  px: 1,
+                }}
+              >
+                {isFullyExpanded ? 'Collapse All' : 'Expand All'}
+              </Button>
+            </Box>
+          )}
+        </Box>
       )}
       {renderContent()}
     </Box>
