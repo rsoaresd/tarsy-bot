@@ -36,6 +36,15 @@ class TestAlertControllerCriticalCoverage:
         """Create test client."""
         return TestClient(app)
 
+    @pytest.fixture(autouse=True)
+    def mock_alert_service(self):
+        """Mock alert_service with chain_registry for default alert type."""
+        with patch('tarsy.main.alert_service') as mock_service:
+            mock_chain_registry = Mock()
+            mock_chain_registry.get_default_alert_type.return_value = "kubernetes"
+            mock_service.chain_registry = mock_chain_registry
+            yield mock_service
+
     def test_memory_usage_under_load(self, client):
         """Test memory usage behavior under load for alert submission."""
         from tests.utils import AlertFactory
@@ -75,14 +84,19 @@ class TestAlertTypesEndpoint:
         mock_chain_registry.list_available_alert_types.return_value = [
             "kubernetes", "database", "network"
         ]
+        mock_chain_registry.get_default_alert_type.return_value = "kubernetes"
         mock_alert_service.chain_registry = mock_chain_registry
         
         response = client.get("/api/v1/alert-types")
         assert response.status_code == 200
         data = response.json()
         
-        assert data == ["kubernetes", "database", "network"]
+        assert data == {
+            "alert_types": ["kubernetes", "database", "network"],
+            "default_alert_type": "kubernetes"
+        }
         mock_chain_registry.list_available_alert_types.assert_called_once()
+        mock_chain_registry.get_default_alert_type.assert_called_once()
 
 
 @pytest.mark.unit  
@@ -93,6 +107,15 @@ class TestSubmitAlertEndpoint:
     def client(self):
         """Create test client."""
         return TestClient(app)
+
+    @pytest.fixture(autouse=True)
+    def mock_alert_service(self):
+        """Mock alert_service with chain_registry for default alert type."""
+        with patch('tarsy.main.alert_service') as mock_service:
+            mock_chain_registry = Mock()
+            mock_chain_registry.get_default_alert_type.return_value = "kubernetes"
+            mock_service.chain_registry = mock_chain_registry
+            yield mock_service
 
     @pytest.fixture
     def valid_alert_data(self):
@@ -134,29 +157,16 @@ class TestSubmitAlertEndpoint:
         ("invalid json", 400, "Invalid JSON"),
         ("not a dict", 400, "Invalid data structure"),
         (
-            {"invalid": "no required fields"},
-            422,
-            "Validation failed"
-        ),
-        (
             {"alert_type": "", "runbook": "https://example.com/runbook.md", "data": {}},
             400,
             "Invalid alert_type"
         ),
     ])
-    @patch('tarsy.main.alert_service')
     def test_submit_alert_input_validation(
-        self, mock_alert_service, client, valid_alert_data, invalid_input, expected_status, expected_error
+        self, client, valid_alert_data, invalid_input, expected_status, expected_error
     ):
         """Test alert submission with various invalid inputs."""
         from tarsy.models.alert import AlertResponse
-        
-        # Mock alert service (won't be called for input validation errors, but needs to exist)
-        mock_alert_service.process_alert = AsyncMock(return_value=AlertResponse(
-            session_id="test-alert-123",
-            status="queued",
-            message="Alert submitted for processing"
-        ))
         if invalid_input == "invalid json":
             response = client.post(
                 "/api/v1/alerts",
@@ -187,17 +197,8 @@ class TestSubmitAlertEndpoint:
             assert "field" in data["detail"]
 
 
-    @patch('tarsy.main.alert_service')
-    def test_submit_alert_payload_too_large(self, mock_alert_service, client):
+    def test_submit_alert_payload_too_large(self, client):
         """Test rejection of extremely large payloads."""
-        from tarsy.models.alert import AlertResponse
-        
-        # Mock alert service (won't be called due to size limit, but needs to exist)
-        mock_alert_service.process_alert = AsyncMock(return_value=AlertResponse(
-            session_id="test-alert-123",
-            status="queued",
-            message="Alert submitted for processing"
-        ))
         
         large_data = {
             "alert_type": "test",
@@ -210,9 +211,8 @@ class TestSubmitAlertEndpoint:
         response = client.post("/api/v1/alerts", json=large_data)
         assert response.status_code == 413
 
-    @patch('tarsy.main.alert_service')
     def test_submit_alert_unsafe_runbook_url_rejected(
-        self, mock_alert_service, client, valid_alert_data
+        self, client, valid_alert_data
     ):
         """Test alert submission with unsafe runbook URL schemes gets rejected."""
         valid_alert_data["runbook"] = "file:///etc/passwd"  # Unsafe URL scheme
@@ -259,6 +259,30 @@ class TestSubmitAlertEndpoint:
         
         response = client.post("/api/v1/alerts", json=minimal_data)
         assert response.status_code == 200
+        
+        # Verify background callback was called
+        assert app.state.process_alert_callback.called
+
+    def test_submit_alert_without_alert_type_uses_default(
+        self, client
+    ):
+        """Test alert submission without alert_type uses the default from chain registry."""
+        # Mock the process_alert_callback in app state
+        app.state.process_alert_callback = AsyncMock()
+        
+        alert_data_no_type = {
+            "data": {
+                "namespace": "test-namespace",
+                "message": "Test alert without explicit alert_type"
+            }
+        }
+        
+        response = client.post("/api/v1/alerts", json=alert_data_no_type)
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert data["status"] == "queued"
+        assert "session_id" in data
         
         # Verify background callback was called
         assert app.state.process_alert_callback.called
@@ -336,6 +360,15 @@ class TestInputSanitization:
     def client(self):
         """Create test client.""" 
         return TestClient(app)
+
+    @pytest.fixture(autouse=True)
+    def mock_alert_service(self):
+        """Mock alert_service with chain_registry for default alert type."""
+        with patch('tarsy.main.alert_service') as mock_service:
+            mock_chain_registry = Mock()
+            mock_chain_registry.get_default_alert_type.return_value = "kubernetes"
+            mock_service.chain_registry = mock_chain_registry
+            yield mock_service
 
     def test_sanitize_xss_prevention(self, client):
         """Test XSS prevention in input sanitization."""
@@ -647,6 +680,14 @@ class TestAlertControllerCriticalCoverage:
         """Create test client."""
         return TestClient(app)
 
+    @pytest.fixture(autouse=True)
+    def mock_alert_service(self):
+        """Mock alert_service with chain_registry for default alert type."""
+        with patch('tarsy.main.alert_service') as mock_service:
+            mock_chain_registry = Mock()
+            mock_chain_registry.get_default_alert_type.return_value = "kubernetes"
+            mock_service.chain_registry = mock_chain_registry
+            yield mock_service
 
     def test_malicious_payload_handling(self, client):
         """Test handling of potentially malicious payloads."""
@@ -722,6 +763,15 @@ class TestGracefulShutdownBehavior:
     def client(self):
         """Create test client."""
         return TestClient(app)
+
+    @pytest.fixture(autouse=True)
+    def mock_alert_service(self):
+        """Mock alert_service with chain_registry for default alert type."""
+        with patch('tarsy.main.alert_service') as mock_service:
+            mock_chain_registry = Mock()
+            mock_chain_registry.get_default_alert_type.return_value = "kubernetes"
+            mock_service.chain_registry = mock_chain_registry
+            yield mock_service
 
     @patch('tarsy.main.shutdown_in_progress', True)
     def test_submit_alert_rejects_during_shutdown(self, client):

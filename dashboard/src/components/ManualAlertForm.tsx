@@ -231,6 +231,7 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
   // Available options
   const [availableAlertTypes, setAvailableAlertTypes] = useState<string[]>([]);
   const [availableRunbooks, setAvailableRunbooks] = useState<string[]>([]);
+  const [defaultAlertType, setDefaultAlertType] = useState<string>('');
   
   // UI state
   const [loading, setLoading] = useState(false);
@@ -296,26 +297,29 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
     const loadOptions = async () => {
       try {
         // Load alert types from API
-        const alertTypes = await apiClient.getAlertTypes();
-        if (Array.isArray(alertTypes)) {
-          // Check if we have a default alert type (from resubmit)
-          const defaultType = defaultAlertTypeRef.current;
+        const alertTypesResponse = await apiClient.getAlertTypes();
+        if (alertTypesResponse && alertTypesResponse.alert_types) {
+          const { alert_types, default_alert_type } = alertTypesResponse;
           
-          // Ensure default type is in the list
-          let finalAlertTypes = alertTypes;
-          if (defaultType && !alertTypes.includes(defaultType)) {
-            finalAlertTypes = [defaultType, ...alertTypes];
+          // Store the default alert type from backend
+          setDefaultAlertType(default_alert_type);
+          
+          // Check if we have a default alert type (from resubmit)
+          const resubmitDefaultType = defaultAlertTypeRef.current;
+          
+          // Ensure resubmit default type is in the list
+          let finalAlertTypes = alert_types;
+          if (resubmitDefaultType && !alert_types.includes(resubmitDefaultType)) {
+            finalAlertTypes = [resubmitDefaultType, ...alert_types];
           }
           
           setAvailableAlertTypes(finalAlertTypes);
           
-          // Set the alert type (use default if available, otherwise use API default)
-          if (defaultType) {
-            setAlertType(defaultType);
-          } else if (alertTypes.includes('kubernetes')) {
-            setAlertType('kubernetes');
-          } else if (alertTypes.length > 0) {
-            setAlertType(alertTypes[0]);
+          // Set the alert type (use resubmit default if available, otherwise use API default)
+          if (resubmitDefaultType) {
+            setAlertType(resubmitDefaultType);
+          } else {
+            setAlertType(default_alert_type);
           }
         }
 
@@ -413,9 +417,13 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
 
       // Build alert data
       const alertData: any = {
-        alert_type: alertType.trim(),
         data: processedData
       };
+      
+      // Only include alert_type if it's different from the default
+      if (alertType.trim() !== defaultAlertType) {
+        alertData.alert_type = alertType.trim();
+      }
       
       // Add runbook only if not "Default Runbook"
       if (runbook && runbook !== DEFAULT_RUNBOOK) {
@@ -494,9 +502,13 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
 
       // Build alert data
       const alertData: any = {
-        alert_type: alertType.trim(),
         data: parsed.data
       };
+      
+      // Only include alert_type if it's different from the default
+      if (alertType.trim() !== defaultAlertType) {
+        alertData.alert_type = alertType.trim();
+      }
       
       // Add runbook only if not "Default Runbook"
       if (runbook && runbook !== DEFAULT_RUNBOOK) {
