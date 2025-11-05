@@ -275,7 +275,38 @@ class TestBaseAgentMCPIntegration:
                 )]
             }
         )
-        client.call_tool = AsyncMock(return_value={"result": "success"})
+        
+        # Mock call_tool with validation logic
+        async def mock_call_tool_with_validation(
+            server_name, tool_name, parameters, session_id=None,
+            stage_execution_id=None, investigation_conversation=None,
+            mcp_selection=None, configured_servers=None
+        ):
+            # Validate like MCPClient does
+            if mcp_selection is not None:
+                selected_server = next(
+                    (s for s in mcp_selection.servers if s.name == server_name), None
+                )
+                if selected_server is None:
+                    allowed_servers = [s.name for s in mcp_selection.servers]
+                    raise ValueError(
+                        f"Tool '{tool_name}' from server '{server_name}' not allowed by MCP selection. "
+                        f"Allowed servers: {allowed_servers}"
+                    )
+                if selected_server.tools is not None and len(selected_server.tools) > 0:
+                    if tool_name not in selected_server.tools:
+                        raise ValueError(
+                            f"Tool '{tool_name}' not allowed by MCP selection. "
+                            f"Allowed tools from '{server_name}': {selected_server.tools}"
+                        )
+            elif configured_servers and server_name not in configured_servers:
+                raise ValueError(
+                    f"Tool '{tool_name}' from server '{server_name}' not allowed by agent configuration. "
+                    f"Configured servers: {configured_servers}"
+                )
+            return {"result": "success"}
+        
+        client.call_tool = AsyncMock(side_effect=mock_call_tool_with_validation)
         return client
 
     @pytest.fixture
@@ -363,6 +394,271 @@ class TestBaseAgentMCPIntegration:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
+    async def test_get_available_tools_with_server_selection(
+        self, base_agent, mock_mcp_client, mock_mcp_registry
+    ):
+        """Test getting tools with user-provided server selection (all tools from servers)."""
+        from tarsy.models.mcp_selection_models import MCPSelectionConfig, MCPServerSelection
+        
+        base_agent._configured_servers = ["default-server"]
+        
+        # Mock registry to return available servers
+        mock_mcp_registry.get_all_server_ids.return_value = ["kubernetes-server", "argocd-server", "default-server"]
+        
+        # Mock list_tools to return different tools for different servers
+        async def mock_list_tools_side_effect(session_id, server_name, stage_execution_id=None):
+            if server_name == "kubernetes-server":
+                return {
+                    "kubernetes-server": [
+                        Tool(name="kubectl-get", description="Get Kubernetes resources", inputSchema={}),
+                        Tool(name="kubectl-describe", description="Describe Kubernetes resources", inputSchema={})
+                    ]
+                }
+            elif server_name == "argocd-server":
+                return {
+                    "argocd-server": [
+                        Tool(name="get-application", description="Get ArgoCD application", inputSchema={})
+                    ]
+                }
+            return {}
+        
+        mock_mcp_client.list_tools.side_effect = mock_list_tools_side_effect
+        
+        # Create MCP selection (all tools from selected servers)
+        mcp_selection = MCPSelectionConfig(
+            servers=[
+                MCPServerSelection(name="kubernetes-server"),
+                MCPServerSelection(name="argocd-server")
+            ]
+        )
+        
+        # Get tools with selection
+        tools = await base_agent._get_available_tools("test_session", mcp_selection=mcp_selection)
+        
+        # Verify we got tools from both selected servers (not the default one)
+        assert len(tools.tools) == 3
+        tool_names = {tool.tool.name for tool in tools.tools}
+        assert tool_names == {"kubectl-get", "kubectl-describe", "get-application"}
+        
+        # Verify servers
+        servers = {tool.server for tool in tools.tools}
+        assert servers == {"kubernetes-server", "argocd-server"}
+        
+        # Verify list_tools was called for selected servers
+        assert mock_mcp_client.list_tools.call_count == 2
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_get_available_tools_with_tool_selection(
+        self, base_agent, mock_mcp_client, mock_mcp_registry
+    ):
+        """Test getting tools with specific tool filtering."""
+        from tarsy.models.mcp_selection_models import MCPSelectionConfig, MCPServerSelection
+        
+        base_agent._configured_servers = ["default-server"]
+        
+        # Mock registry
+        mock_mcp_registry.get_all_server_ids.return_value = ["kubernetes-server", "argocd-server"]
+        
+        # Mock list_tools
+        async def mock_list_tools_side_effect(session_id, server_name, stage_execution_id=None):
+            if server_name == "kubernetes-server":
+                return {
+                    "kubernetes-server": [
+                        Tool(name="kubectl-get", description="Get resources", inputSchema={}),
+                        Tool(name="kubectl-describe", description="Describe resources", inputSchema={}),
+                        Tool(name="kubectl-logs", description="Get logs", inputSchema={})
+                    ]
+                }
+            elif server_name == "argocd-server":
+                return {
+                    "argocd-server": [
+                        Tool(name="get-application", description="Get app", inputSchema={}),
+                        Tool(name="sync-application", description="Sync app", inputSchema={})
+                    ]
+                }
+            return {}
+        
+        mock_mcp_client.list_tools.side_effect = mock_list_tools_side_effect
+        
+        # Create MCP selection with specific tools
+        mcp_selection = MCPSelectionConfig(
+            servers=[
+                MCPServerSelection(
+                    name="kubernetes-server",
+                    tools=["kubectl-get"]  # Only request specific tool
+                ),
+                MCPServerSelection(
+                    name="argocd-server",
+                    tools=["get-application"]
+                )
+            ]
+        )
+        
+        # Get tools with selection
+        tools = await base_agent._get_available_tools("test_session", mcp_selection=mcp_selection)
+        
+        # Verify we got only the requested tools
+        assert len(tools.tools) == 2
+        tool_names = {tool.tool.name for tool in tools.tools}
+        assert tool_names == {"kubectl-get", "get-application"}
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_get_available_tools_with_mixed_selection(
+        self, base_agent, mock_mcp_client, mock_mcp_registry
+    ):
+        """Test mixed selection: all tools from one server, specific tools from another."""
+        from tarsy.models.mcp_selection_models import MCPSelectionConfig, MCPServerSelection
+        
+        base_agent._configured_servers = ["default-server"]
+        
+        # Mock registry
+        mock_mcp_registry.get_all_server_ids.return_value = ["kubernetes-server", "argocd-server"]
+        
+        # Mock list_tools
+        async def mock_list_tools_side_effect(session_id, server_name, stage_execution_id=None):
+            if server_name == "kubernetes-server":
+                return {
+                    "kubernetes-server": [
+                        Tool(name="kubectl-get", description="Get resources", inputSchema={}),
+                        Tool(name="kubectl-describe", description="Describe resources", inputSchema={})
+                    ]
+                }
+            elif server_name == "argocd-server":
+                return {
+                    "argocd-server": [
+                        Tool(name="get-application", description="Get app", inputSchema={}),
+                        Tool(name="sync-application", description="Sync app", inputSchema={})
+                    ]
+                }
+            return {}
+        
+        mock_mcp_client.list_tools.side_effect = mock_list_tools_side_effect
+        
+        # Mixed selection: all tools from kubernetes-server, specific from argocd-server
+        mcp_selection = MCPSelectionConfig(
+            servers=[
+                MCPServerSelection(name="kubernetes-server"),  # All tools (no tools field)
+                MCPServerSelection(name="argocd-server", tools=["get-application"])  # Specific tool
+            ]
+        )
+        
+        # Get tools
+        tools = await base_agent._get_available_tools("test_session", mcp_selection=mcp_selection)
+        
+        # Verify results
+        assert len(tools.tools) == 3
+        tool_names = {tool.tool.name for tool in tools.tools}
+        assert tool_names == {"kubectl-get", "kubectl-describe", "get-application"}
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_get_available_tools_invalid_server_selection(
+        self, base_agent, mock_mcp_client, mock_mcp_registry
+    ):
+        """Test error when selected server doesn't exist."""
+        from tarsy.models.mcp_selection_models import MCPSelectionConfig, MCPServerSelection
+        from tarsy.agents.exceptions import MCPServerSelectionError
+        
+        base_agent._configured_servers = ["default-server"]
+        
+        # Mock registry with available servers
+        mock_mcp_registry.get_all_server_ids.return_value = ["kubernetes-server", "argocd-server"]
+        
+        # Try to select non-existent server
+        mcp_selection = MCPSelectionConfig(
+            servers=[
+                MCPServerSelection(name="non-existent-server")
+            ]
+        )
+        
+        # Should raise MCPServerSelectionError
+        with pytest.raises(MCPServerSelectionError) as exc_info:
+            await base_agent._get_available_tools("test_session", mcp_selection=mcp_selection)
+        
+        # Verify error details
+        error = exc_info.value
+        assert "non-existent-server" in str(error)
+        assert error.requested_servers == ["non-existent-server"]
+        assert set(error.available_servers) == {"argocd-server", "kubernetes-server"}
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_get_available_tools_invalid_tool_selection(
+        self, base_agent, mock_mcp_client, mock_mcp_registry
+    ):
+        """Test error when selected tool doesn't exist on server."""
+        from tarsy.models.mcp_selection_models import MCPSelectionConfig, MCPServerSelection
+        from tarsy.agents.exceptions import MCPToolSelectionError
+        
+        base_agent._configured_servers = ["default-server"]
+        
+        # Mock registry
+        mock_mcp_registry.get_all_server_ids.return_value = ["kubernetes-server"]
+        
+        # Mock list_tools with available tools
+        mock_mcp_client.list_tools.return_value = {
+            "kubernetes-server": [
+                Tool(name="kubectl-get", description="Get resources", inputSchema={}),
+                Tool(name="kubectl-describe", description="Describe resources", inputSchema={})
+            ]
+        }
+        
+        # Try to select non-existent tool
+        mcp_selection = MCPSelectionConfig(
+            servers=[
+                MCPServerSelection(
+                    name="kubernetes-server",
+                    tools=["non-existent-tool"]
+                )
+            ]
+        )
+        
+        # Should raise MCPToolSelectionError
+        with pytest.raises(MCPToolSelectionError) as exc_info:
+            await base_agent._get_available_tools("test_session", mcp_selection=mcp_selection)
+        
+        # Verify error details
+        error = exc_info.value
+        assert error.server_name == "kubernetes-server"
+        assert error.requested_tools == ["non-existent-tool"]
+        assert set(error.available_tools) == {"kubectl-describe", "kubectl-get"}
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_get_available_tools_multiple_invalid_servers(
+        self, base_agent, mock_mcp_client, mock_mcp_registry
+    ):
+        """Test error message when multiple servers are invalid."""
+        from tarsy.models.mcp_selection_models import MCPSelectionConfig, MCPServerSelection
+        from tarsy.agents.exceptions import MCPServerSelectionError
+        
+        base_agent._configured_servers = ["default-server"]
+        
+        # Mock registry
+        mock_mcp_registry.get_all_server_ids.return_value = ["kubernetes-server"]
+        
+        # Try to select multiple non-existent servers
+        mcp_selection = MCPSelectionConfig(
+            servers=[
+                MCPServerSelection(name="bad-server-1"),
+                MCPServerSelection(name="bad-server-2"),
+                MCPServerSelection(name="kubernetes-server")  # This one is valid
+            ]
+        )
+        
+        # Should raise MCPServerSelectionError
+        with pytest.raises(MCPServerSelectionError) as exc_info:
+            await base_agent._get_available_tools("test_session", mcp_selection=mcp_selection)
+        
+        # Verify error includes all missing servers
+        error = exc_info.value
+        assert "bad-server-1" in str(error)
+        assert "bad-server-2" in str(error)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
     async def test_execute_mcp_tools_success(self, base_agent, mock_mcp_client):
         """Test successful MCP tool execution."""
         base_agent._configured_servers = ["test-server"]
@@ -384,7 +680,7 @@ class TestBaseAgentMCPIntegration:
         assert results["test-server"][0]["result"] == {"result": "success"}
 
         mock_mcp_client.call_tool.assert_called_once_with(
-            "test-server", "kubectl-get", {"resource": "pods"}, "test-session-123", None, None
+            "test-server", "kubectl-get", {"resource": "pods"}, "test-session-123", None, None, None, ["test-server"]
         )
 
     @pytest.mark.unit
@@ -405,7 +701,8 @@ class TestBaseAgentMCPIntegration:
         results = await base_agent.execute_mcp_tools(tools_to_call, "test-session-456")
 
         assert "forbidden-server" in results
-        assert "not allowed for agent" in results["forbidden-server"][0]["error"]
+        assert "not allowed" in results["forbidden-server"][0]["error"]
+        assert "configured servers" in results["forbidden-server"][0]["error"].lower()
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -915,7 +1212,7 @@ class TestBaseAgentSummarization:
         
         # Verify MCP client was called with investigation conversation
         mock_mcp_client.call_tool.assert_called_once_with(
-            "test-server", "kubectl-get", {"resource": "pods"}, "test-session-summarization", None, investigation_conversation
+            "test-server", "kubectl-get", {"resource": "pods"}, "test-session-summarization", None, investigation_conversation, None, ["test-server"]
         )
 
     @pytest.mark.asyncio
@@ -975,5 +1272,5 @@ class TestBaseAgentSummarization:
         
         # Verify MCP client was called without investigation conversation (None)
         mock_mcp_client.call_tool.assert_called_once_with(
-            "test-server", "kubectl-get", {"resource": "nodes"}, "test-session-compat", None, None
+            "test-server", "kubectl-get", {"resource": "nodes"}, "test-session-compat", None, None, None, ["test-server"]
         )

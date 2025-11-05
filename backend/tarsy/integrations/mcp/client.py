@@ -24,6 +24,7 @@ from tarsy.utils.error_details import extract_error_details
 if TYPE_CHECKING:
     from tarsy.integrations.mcp.summarizer import MCPResultSummarizer
     from tarsy.models.unified_interactions import LLMConversation
+    from tarsy.models.mcp_selection_models import MCPSelectionConfig
 
 # Setup logger for this module
 logger = get_module_logger(__name__)
@@ -181,13 +182,70 @@ class MCPClient:
             
             raise
     
+    async def list_tools_simple(
+        self,
+        server_name: Optional[str] = None,
+    ) -> Dict[str, List[Tool]]:
+        """
+        List available tools from MCP servers without database storage.
+        
+        This is a lightweight version for API discovery that doesn't use hook contexts
+        or store interactions in the database. Use this for non-alert scenarios like
+        the MCP servers discovery endpoint.
+        
+        Args:
+            server_name: Optional server name to list tools from. If None, lists from all servers.
+            
+        Returns:
+            Dictionary mapping server names to lists of Tool objects
+        """
+        if not self._initialized:
+            await self.initialize()
+        
+        all_tools = {}
+        
+        if server_name:
+            # List tools from specific server
+            if server_name in self.sessions:
+                try:
+                    session = self.sessions[server_name]
+                    tools_result = await asyncio.wait_for(
+                        session.list_tools(),
+                        timeout=MCP_OPERATION_TIMEOUT_SECONDS
+                    )
+                    all_tools[server_name] = tools_result.tools
+                    logger.debug(f"Listed {len(tools_result.tools)} tools from {server_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to list tools from {server_name}: {e}")
+                    all_tools[server_name] = []
+        else:
+            # List tools from all servers
+            for name in list(self.sessions.keys()):
+                try:
+                    session = self.sessions.get(name)
+                    if not session:
+                        all_tools[name] = []
+                        continue
+                    
+                    tools_result = await asyncio.wait_for(
+                        session.list_tools(),
+                        timeout=MCP_OPERATION_TIMEOUT_SECONDS
+                    )
+                    all_tools[name] = tools_result.tools
+                    logger.debug(f"Listed {len(tools_result.tools)} tools from {name}")
+                except Exception as e:
+                    logger.warning(f"Failed to list tools from {name}: {e}")
+                    all_tools[name] = []
+        
+        return all_tools
+    
     async def list_tools(
         self,
         session_id: str,
         server_name: Optional[str] = None,
         stage_execution_id: Optional[str] = None,
     ) -> Dict[str, List[Tool]]:
-        """List available tools from MCP servers."""
+        """List available tools from MCP servers with database storage."""
         if not self._initialized:
             await self.initialize()
         
@@ -296,36 +354,6 @@ class MCPClient:
             await ctx.complete_success({})
             
             return all_tools
-    
-    async def ping(self, server_id: str) -> bool:
-        """
-        Check if an MCP server is healthy and responsive.
-        
-        Uses list_tools() as a lightweight health check. Does not modify
-        session state - the client handles automatic recovery on failures.
-        
-        Args:
-            server_id: ID of the server to ping
-            
-        Returns:
-            True if server is healthy and responsive, False otherwise
-        """
-        try:
-            if server_id not in self.sessions:
-                return False
-            
-            # Use list_tools as health check with short timeout
-            # 5 seconds is enough for local servers; connection refused is immediate
-            session = self.sessions[server_id]
-            await asyncio.wait_for(
-                session.list_tools(),
-                timeout=5.0  # Fast failure detection for crashes
-            )
-            return True
-            
-        except Exception as e:
-            logger.debug(f"Ping failed for {server_id}: {extract_error_details(e)}")
-            return False
     
     async def try_initialize_server(self, server_id: str) -> bool:
         """
@@ -439,7 +467,17 @@ class MCPClient:
                 "result": f"Error: Failed to summarize large result ({estimated_tokens} tokens). Summarization error: {str(e)}"
             }
 
-    async def call_tool(self, server_name: str, tool_name: str, parameters: Dict[str, Any], session_id: str, stage_execution_id: Optional[str] = None, investigation_conversation: Optional['LLMConversation'] = None) -> Dict[str, Any]:
+    async def call_tool(
+        self, 
+        server_name: str, 
+        tool_name: str, 
+        parameters: Dict[str, Any], 
+        session_id: str, 
+        stage_execution_id: Optional[str] = None, 
+        investigation_conversation: Optional['LLMConversation'] = None,
+        mcp_selection: Optional['MCPSelectionConfig'] = None,
+        configured_servers: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Call a specific tool on an MCP server with optional investigation context for summarization.
         
         Timeline: This method ensures correct interaction ordering in history:
@@ -454,6 +492,8 @@ class MCPClient:
             session_id: Required session ID for timeline logging and tracking
             stage_execution_id: Optional stage execution ID
             investigation_conversation: Optional ReAct conversation for context-aware summarization
+            mcp_selection: Optional MCP selection config to validate tool calls against (user override)
+            configured_servers: Optional list of agent's configured servers (fallback if no mcp_selection)
         """
         if not self._initialized:
             await self.initialize()
@@ -470,6 +510,28 @@ class MCPClient:
             
             # Get request ID for logging
             request_id = ctx.get_request_id()
+            
+            # Validate tool call is allowed (raises ValueError if not)
+            # This validation happens INSIDE the context so failures are automatically recorded
+            try:
+                self._validate_tool_call(server_name, tool_name, mcp_selection, configured_servers)
+            except ValueError as e:
+                # Mark interaction as failed and let the context record it
+                from tarsy.utils.timestamp import now_us
+                ctx.interaction.success = False
+                ctx.interaction.error_message = f"Validation failed: {str(e)}"
+                ctx.interaction.tool_result = {
+                    "error": str(e),
+                    "error_type": "validation_error"
+                }
+                ctx.interaction.end_time_us = now_us()
+                ctx.interaction.duration_ms = (ctx.interaction.end_time_us - ctx.interaction.start_time_us) / 1000
+                
+                # Trigger hooks to record validation failure in database
+                await ctx._trigger_appropriate_hooks()
+                
+                # Re-raise so the agent receives the error
+                raise
             
             # Emit started event before execution (for real-time UI feedback)
             from tarsy.services.events.event_helpers import publish_mcp_tool_call_started
@@ -656,6 +718,63 @@ class MCPClient:
         mcp_comm_logger.error(f"Server: {server_name}")
         mcp_comm_logger.error(f"Error: {error_message}")
         mcp_comm_logger.error(f"=== END LIST TOOLS ERROR [ID: {request_id}] ===")
+    
+    def _validate_tool_call(
+        self, 
+        server_name: str, 
+        tool_name: str, 
+        mcp_selection: Optional['MCPSelectionConfig'],
+        configured_servers: Optional[List[str]]
+    ) -> None:
+        """
+        Validate that a tool call is allowed based on MCP selection or agent configuration.
+        
+        This validation acts as a security filter to ensure that:
+        1. User-provided MCP selections are enforced at execution time
+        2. Agent-configured server restrictions are respected
+        3. Unauthorized tool calls are blocked and recorded as failed interactions
+        
+        Args:
+            server_name: Name of the MCP server
+            tool_name: Name of the tool being called
+            mcp_selection: Optional MCP selection config (user override, takes precedence)
+            configured_servers: Optional list of agent's configured servers (fallback)
+            
+        Raises:
+            ValueError: If the tool call is not allowed by either MCP selection or agent config
+        """
+        # If MCP selection is provided, validate against it (user override)
+        if mcp_selection is not None:
+            # Check if server is in the selection
+            selected_server = next(
+                (s for s in mcp_selection.servers if s.name == server_name), 
+                None
+            )
+            
+            if selected_server is None:
+                # Server not in selection - not allowed
+                allowed_servers = [s.name for s in mcp_selection.servers]
+                raise ValueError(
+                    f"Tool '{tool_name}' from server '{server_name}' not allowed by MCP selection. "
+                    f"Allowed servers: {allowed_servers}"
+                )
+            
+            # If specific tools are selected for this server, check tool is in the list
+            if selected_server.tools is not None and len(selected_server.tools) > 0:
+                if tool_name not in selected_server.tools:
+                    raise ValueError(
+                        f"Tool '{tool_name}' not allowed by MCP selection. "
+                        f"Allowed tools from '{server_name}': {selected_server.tools}"
+                    )
+            # If tools is None or empty, all tools from this server are allowed
+            logger.debug(f"Tool call validated against MCP selection: {server_name}.{tool_name}")
+        
+        # Otherwise, validate against agent's default configured servers (if provided)
+        elif configured_servers and server_name not in configured_servers:
+            raise ValueError(
+                f"Tool '{tool_name}' from server '{server_name}' not allowed by agent configuration. "
+                f"Configured servers: {configured_servers}"
+            )
 
     async def close(self) -> None:
         """Close all MCP client connections and transports."""

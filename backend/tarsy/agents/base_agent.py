@@ -20,6 +20,7 @@ from tarsy.models.agent_execution_result import (
 from tarsy.models.constants import StageStatus
 
 from tarsy.models.processing_context import ChainContext, StageContext, AvailableTools, ToolWithServer
+from tarsy.models.mcp_selection_models import MCPSelectionConfig
 
 if TYPE_CHECKING:
     from tarsy.models.unified_interactions import LLMConversation
@@ -171,7 +172,7 @@ class BaseAgent(ABC):
             # Get available tools only if the iteration strategy needs them
             if self._iteration_controller.needs_mcp_tools():
                 logger.info(f"Enhanced logging: Strategy {self.iteration_strategy.value} requires MCP tool discovery")
-                available_tools = await self._get_available_tools(context.session_id)
+                available_tools = await self._get_available_tools(context.session_id, context.mcp)
                 logger.info(f"Enhanced logging: Retrieved {len(available_tools.tools)} tools for {self.iteration_strategy.value}")
             else:
                 logger.info(f"Enhanced logging: Strategy {self.iteration_strategy.value} skips MCP tool discovery - Final analysis stage")
@@ -322,31 +323,145 @@ class BaseAgent(ABC):
         self._configured_servers = mcp_server_ids
         logger.info(f"Configured agent {self.__class__.__name__} with MCP servers: {mcp_server_ids}")
     
-    async def _get_available_tools(self, session_id: str) -> AvailableTools:
-        """Get available tools from assigned MCP servers using official MCP Tool objects."""
+    async def _get_available_tools(self, session_id: str, mcp_selection: Optional['MCPSelectionConfig'] = None) -> AvailableTools:
+        """
+        Get available tools from MCP servers with optional user selection override.
+        
+        Supports three execution paths:
+        1. No selection: Use agent's default configured servers (current behavior)
+        2. Server selection: Use user-selected servers, fetch all tools from them
+        3. Tool selection: Use user-selected servers, filter to only specified tools
+        
+        Args:
+            session_id: Session ID for tracking
+            mcp_selection: Optional MCP selection config from user (overrides defaults)
+            
+        Returns:
+            AvailableTools with tools from appropriate servers
+            
+        Raises:
+            MCPServerSelectionError: When selected servers don't exist
+            MCPToolSelectionError: When selected tools don't exist on specified server
+            ToolSelectionError: For other tool retrieval failures
+        """
+        from tarsy.agents.exceptions import MCPServerSelectionError, MCPToolSelectionError
+        
         try:
             tools_with_server = []
             
-            if self._configured_servers is None:
-                # This should never happen now - configuration is required
-                error_msg = f"Agent {self.__class__.__name__} has not been properly configured with MCP servers"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
+            # Determine which servers to use
+            if mcp_selection is not None:
+                # User provided MCP selection - use their servers instead of defaults
+                logger.info(f"Agent {self.__class__.__name__} using user-provided MCP selection with {len(mcp_selection.servers)} servers")
+
+                # Validate all selected servers exist in registry
+                requested_server_names = [s.name for s in mcp_selection.servers]
+                available_server_ids = self.mcp_registry.get_all_server_ids()
+                missing_servers = set(requested_server_names) - set(available_server_ids)
+
+                if missing_servers:
+                    missing_list = sorted(missing_servers)
+                    available_list = sorted(available_server_ids)
+                    error_msg = f"Requested MCP servers not found: {missing_list}. Available servers: {available_list}"
+                    logger.error(error_msg)
+                    raise MCPServerSelectionError(
+                        message=error_msg,
+                        requested_servers=requested_server_names,
+                        available_servers=available_list,
+                        context={
+                            "agent_class": self.__class__.__name__,
+                            "session_id": session_id,
+                            "missing_servers": missing_list
+                        }
+                    )
+                
+                # Process each selected server
+                for server_selection in mcp_selection.servers:
+                    server_name = server_selection.name
+                    requested_tool_names = server_selection.tools
+                    
+                    # Fetch tools from the server
+                    server_tools = await self.mcp_client.list_tools(
+                        session_id=session_id, 
+                        server_name=server_name, 
+                        stage_execution_id=self._current_stage_execution_id
+                    )
+                    
+                    if server_name not in server_tools:
+                        logger.warning(f"Server {server_name} returned no tools")
+                        continue
+                    
+                    available_tools = server_tools[server_name]
+                    
+                    # Filter to specific tools if requested
+                    if requested_tool_names is not None and len(requested_tool_names) > 0:
+                        # User specified specific tools - validate they exist
+                        available_tool_names = {tool.name for tool in available_tools}
+                        missing_tools = set(requested_tool_names) - available_tool_names
+                        
+                        if missing_tools:
+                            missing_list = sorted(missing_tools)
+                            available_list = sorted(available_tool_names)
+                            error_msg = f"Requested tools not found on server '{server_name}': {missing_list}. Available tools: {available_list}"
+                            logger.error(error_msg)
+                            raise MCPToolSelectionError(
+                                message=error_msg,
+                                server_name=server_name,
+                                requested_tools=requested_tool_names,
+                                available_tools=available_list,
+                                context={
+                                    "agent_class": self.__class__.__name__,
+                                    "session_id": session_id,
+                                    "missing_tools": missing_list
+                                }
+                            )
+                        
+                        # Filter to only requested tools
+                        for tool in available_tools:
+                            if tool.name in requested_tool_names:
+                                tools_with_server.append(ToolWithServer(
+                                    server=server_name,
+                                    tool=tool
+                                ))
+                        logger.info(f"Agent {self.__class__.__name__} using {len(requested_tool_names)} specific tools from server '{server_name}'")
+                    else:
+                        # No tool filtering - use all tools from server
+                        for tool in available_tools:
+                            tools_with_server.append(ToolWithServer(
+                                server=server_name,
+                                tool=tool
+                            ))
+                        logger.info(f"Agent {self.__class__.__name__} using all {len(available_tools)} tools from server '{server_name}'")
+                
+                logger.info(f"Agent {self.__class__.__name__} retrieved {len(tools_with_server)} tools total from user-selected servers")
             
-            # Use only configured servers for this agent
-            for server_name in self._configured_servers:
-                server_tools = await self.mcp_client.list_tools(session_id=session_id, server_name=server_name, stage_execution_id=self._current_stage_execution_id)
-                if server_name in server_tools:
-                    # Server_tools[server_name] contains official mcp.types.Tool objects
-                    for tool in server_tools[server_name]:
-                        tools_with_server.append(ToolWithServer(
-                            server=server_name,
-                            tool=tool
-                        ))
+            else:
+                # No user selection - use agent's default configured servers
+                if self._configured_servers is None:
+                    error_msg = f"Agent {self.__class__.__name__} has not been properly configured with MCP servers"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+                
+                for server_name in self._configured_servers:
+                    server_tools = await self.mcp_client.list_tools(
+                        session_id=session_id, 
+                        server_name=server_name, 
+                        stage_execution_id=self._current_stage_execution_id
+                    )
+                    if server_name in server_tools:
+                        for tool in server_tools[server_name]:
+                            tools_with_server.append(ToolWithServer(
+                                server=server_name,
+                                tool=tool
+                            ))
+                
+                logger.info(f"Agent {self.__class__.__name__} retrieved {len(tools_with_server)} tools from default servers: {self._configured_servers}")
             
-            logger.info(f"Agent {self.__class__.__name__} retrieved {len(tools_with_server)} tools from servers: {self._configured_servers}")
             return AvailableTools(tools=tools_with_server)
             
+        except (MCPServerSelectionError, MCPToolSelectionError):
+            # Re-raise selection errors as-is (they have detailed context)
+            raise
         except Exception as e:
             error_msg = f"Failed to retrieve tools for agent {self.__class__.__name__}: {str(e)}"
             logger.error(error_msg)
@@ -360,8 +475,13 @@ class BaseAgent(ABC):
                 }
             ) from e
 
-    async def execute_mcp_tools(self, tools_to_call: List[Dict], session_id: str, 
-                          investigation_conversation: Optional['LLMConversation'] = None) -> Dict[str, List[Dict]]:
+    async def execute_mcp_tools(
+        self, 
+        tools_to_call: List[Dict], 
+        session_id: str, 
+        investigation_conversation: Optional['LLMConversation'] = None,
+        mcp_selection: Optional[MCPSelectionConfig] = None
+    ) -> Dict[str, List[Dict]]:
         """
         Execute a list of MCP tool calls and return organized results.
         
@@ -372,9 +492,13 @@ class BaseAgent(ABC):
             tools_to_call: List of tool call dictionaries with server, tool, parameters
             session_id: Session ID for tracking and logging
             investigation_conversation: Optional investigation context for summarization
+            mcp_selection: Optional MCP selection config to validate tool calls against
             
         Returns:
             Dictionary organized by server containing tool execution results
+            
+        Raises:
+            ValueError: If tool call is not allowed by agent configuration or MCP selection
         """
         results = {}
         settings = get_settings()
@@ -386,18 +510,16 @@ class BaseAgent(ABC):
                 tool_name = tool_call.get("tool")
                 tool_params = tool_call.get("parameters", {})
                 
-                # Verify this server is allowed for this agent
-                if self._configured_servers and server_name not in self._configured_servers:
-                    raise ValueError(f"Tool '{tool_name}' from server '{server_name}' not allowed for agent {self.__class__.__name__}")
-                
                 # Pass investigation conversation for context-aware summarization
+                # MCP client now handles validation internally and records failures
                 # Wrap with timeout to catch cases where MCP client's internal timeout fails
                 # MCP client uses a single 60s timeout with no retries, so allow ~10s overhead
                 try:
                     result = await asyncio.wait_for(
                         self.mcp_client.call_tool(
                             server_name, tool_name, tool_params, session_id, 
-                            self._current_stage_execution_id, investigation_conversation
+                            self._current_stage_execution_id, investigation_conversation,
+                            mcp_selection, self._configured_servers
                         ),
                         timeout=mcp_timeout  # Wraps MCP call (no retries) with ~10s overhead
                     )

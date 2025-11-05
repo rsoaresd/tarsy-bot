@@ -880,6 +880,200 @@ class TestHistoryControllerEndpoints:
         assert "total_interactions" in data
     
     @pytest.mark.unit
+    def test_get_session_detail_with_mcp_selection(self, app, client, mock_history_service):
+        """Test that session detail includes MCP selection when present."""
+        from tarsy.models.constants import AlertSessionStatus
+        from tarsy.models.history_models import DetailedSession
+        from tarsy.models.mcp_selection_models import MCPSelectionConfig, MCPServerSelection
+        
+        # Create DetailedSession with MCP selection
+        detailed_session = DetailedSession(
+            session_id="test-session",
+            alert_type="kubernetes",
+            agent_type="chain:k8s-analysis",
+            status=AlertSessionStatus.COMPLETED,
+            author="test-user",
+            runbook_url="https://github.com/test/runbook.md",
+            mcp_selection=MCPSelectionConfig(
+                servers=[
+                    MCPServerSelection(name="kubernetes-server", tools=["list_pods"]),
+                    MCPServerSelection(name="argocd-server")
+                ]
+            ),
+            started_at_us=now_us() - 60000000,
+            completed_at_us=now_us(),
+            error_message=None,
+            alert_data={"namespace": "test"},
+            final_analysis="Test analysis",
+            session_metadata={},
+            chain_id="test-chain",
+            chain_definition={"chain_id": "test-chain"},
+            current_stage_index=1,
+            current_stage_id="stage-1",
+            total_interactions=0,
+            llm_interaction_count=0,
+            mcp_communication_count=0,
+            session_input_tokens=100,
+            session_output_tokens=200,
+            session_total_tokens=300,
+            stages=[]
+        )
+        
+        mock_history_service.get_session_details.return_value = detailed_session
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get("/api/v1/history/sessions/test-session")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Verify MCP selection is in response
+        assert "mcp_selection" in data
+        assert data["mcp_selection"] is not None
+        assert data["mcp_selection"]["servers"][0]["name"] == "kubernetes-server"
+        assert data["mcp_selection"]["servers"][0]["tools"] == ["list_pods"]
+        assert data["mcp_selection"]["servers"][1]["name"] == "argocd-server"
+        assert data["mcp_selection"]["servers"][1]["tools"] is None
+    
+    @pytest.mark.unit
+    def test_get_session_detail_without_mcp_selection(self, app, client, mock_history_service):
+        """Test that session detail handles null MCP selection correctly."""
+        from tarsy.models.constants import AlertSessionStatus
+        from tarsy.models.history_models import DetailedSession
+        
+        # Create DetailedSession without MCP selection
+        detailed_session = DetailedSession(
+            session_id="test-session",
+            alert_type="kubernetes",
+            agent_type="chain:k8s-analysis",
+            status=AlertSessionStatus.COMPLETED,
+            started_at_us=now_us() - 60000000,
+            completed_at_us=now_us(),
+            error_message=None,
+            alert_data={"namespace": "test"},
+            final_analysis="Test analysis",
+            session_metadata={},
+            chain_id="test-chain",
+            chain_definition={"chain_id": "test-chain"},
+            current_stage_index=1,
+            current_stage_id="stage-1",
+            total_interactions=0,
+            llm_interaction_count=0,
+            mcp_communication_count=0,
+            stages=[]
+        )
+        
+        mock_history_service.get_session_details.return_value = detailed_session
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get("/api/v1/history/sessions/test-session")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Verify mcp_selection is null
+        assert "mcp_selection" in data
+        assert data["mcp_selection"] is None
+    
+    @pytest.mark.unit
+    def test_get_sessions_list_with_mcp_selection(self, app, client, mock_history_service):
+        """Test that sessions list includes MCP selection when present."""
+        from tarsy.models.constants import AlertSessionStatus
+        from tarsy.models.history_models import (
+            PaginatedSessions,
+            PaginationInfo,
+            SessionOverview,
+        )
+        from tarsy.models.mcp_selection_models import MCPSelectionConfig, MCPServerSelection
+        
+        now_us_time = now_us()
+        
+        # Session with MCP selection
+        session_with_mcp = SessionOverview(
+            session_id="session-with-mcp",
+            alert_type="kubernetes",
+            agent_type="chain:k8s-analysis",
+            status=AlertSessionStatus.COMPLETED,
+            started_at_us=now_us_time - 60000000,
+            completed_at_us=now_us_time,
+            error_message=None,
+            llm_interaction_count=5,
+            mcp_communication_count=3,
+            total_interactions=8,
+            chain_id="chain-1",
+            mcp_selection=MCPSelectionConfig(
+                servers=[
+                    MCPServerSelection(name="kubectl", tools=["get_pods", "describe_pod"]),
+                    MCPServerSelection(name="argocd")
+                ]
+            )
+        )
+        
+        # Session without MCP selection
+        session_without_mcp = SessionOverview(
+            session_id="session-without-mcp",
+            alert_type="HighCPU",
+            agent_type="chain:monitoring",
+            status=AlertSessionStatus.COMPLETED,
+            started_at_us=now_us_time - 120000000,
+            completed_at_us=now_us_time - 60000000,
+            error_message=None,
+            llm_interaction_count=2,
+            mcp_communication_count=1,
+            total_interactions=3,
+            chain_id="chain-2",
+            mcp_selection=None
+        )
+        
+        # Create PaginatedSessions response
+        paginated_sessions = PaginatedSessions(
+            sessions=[session_with_mcp, session_without_mcp],
+            pagination=PaginationInfo(page=1, page_size=20, total_pages=1, total_items=2),
+            filters_applied={}
+        )
+        
+        mock_history_service.get_sessions_list.return_value = paginated_sessions
+        
+        # Override FastAPI dependency
+        app.dependency_overrides[get_history_service] = lambda: mock_history_service
+        
+        response = client.get("/api/v1/history/sessions")
+        
+        # Clean up
+        app.dependency_overrides.clear()
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        assert "sessions" in data
+        assert len(data["sessions"]) == 2
+        
+        # Verify first session has MCP selection
+        session1 = data["sessions"][0]
+        assert "mcp_selection" in session1
+        assert session1["mcp_selection"] is not None
+        assert len(session1["mcp_selection"]["servers"]) == 2
+        assert session1["mcp_selection"]["servers"][0]["name"] == "kubectl"
+        assert session1["mcp_selection"]["servers"][0]["tools"] == ["get_pods", "describe_pod"]
+        assert session1["mcp_selection"]["servers"][1]["name"] == "argocd"
+        assert session1["mcp_selection"]["servers"][1]["tools"] is None
+        
+        # Verify second session has null MCP selection
+        session2 = data["sessions"][1]
+        assert "mcp_selection" in session2
+        assert session2["mcp_selection"] is None
+    
+    @pytest.mark.unit
     def test_get_session_detail_not_found(self, app, client, mock_history_service):
         """Test session detail for non-existent session."""
         mock_history_service.get_session_details.return_value = None
@@ -1139,7 +1333,9 @@ class TestHistoryControllerResponseFormat:
             # Token usage fields added in EP-0009
             "session_input_tokens", "session_output_tokens", "session_total_tokens",
             # Author field for user tracking
-            "author"
+            "author",
+            # MCP selection field for re-submit functionality
+            "mcp_selection"
         }
         actual_fields = set(session.keys())
         assert required_fields.issubset(actual_fields)

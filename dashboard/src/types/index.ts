@@ -5,6 +5,7 @@ export interface Session {
   status: 'pending' | 'in_progress' | 'canceling' | 'completed' | 'failed' | 'cancelled';
   author: string | null;
   runbook_url: string | null;
+  mcp_selection: MCPSelectionConfig | null;
   started_at_us: number; // Unix timestamp (microseconds since epoch)
   completed_at_us: number | null; // Unix timestamp (microseconds since epoch)
   duration_ms: number | null; // Computed property from backend
@@ -597,4 +598,34 @@ export interface SystemWarning {
 
 export interface SystemWarningBannerProps {
   pollInterval?: number; // Polling interval in milliseconds (default: 30000)
+}
+
+// MCP Selection types (matching backend models)
+export interface MCPServerSelection {
+  name: string;
+  tools?: string[] | null; // null or undefined = all tools, array = specific tools
+}
+
+export interface MCPSelectionConfig {
+  servers: MCPServerSelection[];
+}
+
+// MCP Discovery API types
+export interface MCPToolInfo {
+  name: string;
+  description: string;
+  input_schema: Record<string, any>;
+}
+
+export interface MCPServerInfo {
+  server_id: string;
+  server_type: string;
+  enabled: boolean;
+  tools: MCPToolInfo[];
+}
+
+export interface MCPServersResponse {
+  servers: MCPServerInfo[];
+  total_servers: number;
+  total_tools: number;
 }
