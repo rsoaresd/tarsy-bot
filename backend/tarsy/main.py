@@ -21,6 +21,7 @@ from cachetools import TTLCache
 from tarsy.config.settings import get_settings
 from tarsy.controllers.history_controller import router as history_router
 from tarsy.controllers.alert_controller import router as alert_router
+from tarsy.controllers.chat_controller import router as chat_router
 from tarsy.controllers.websocket_controller import websocket_router
 from tarsy.database.init_db import (
     get_database_info,
@@ -66,6 +67,7 @@ db_manager: Optional["DatabaseManager"] = None  # DatabaseManager for history cl
 
 # Task tracking for session cancellation
 active_tasks: Dict[str, asyncio.Task] = {}  # Maps session_id to asyncio Task
+active_chat_tasks: Dict[str, asyncio.Task] = {}  # Maps chat execution_id to asyncio Task
 active_tasks_lock: Optional[asyncio.Lock] = None  # Initialized in lifespan()
 
 # Graceful shutdown flag
@@ -74,45 +76,60 @@ shutdown_in_progress: bool = False
 
 async def handle_cancel_request(event: dict) -> None:
     """
-    Handle cross-pod cancellation requests.
+    Handle cross-pod cancellation requests for both sessions and chat executions.
     
     This handler is called when a cancellation request is received on the
-    'cancellations' channel. If this pod owns the session task, it will
-    cancel it.
+    'cancellations' channel. If this pod owns the task, it will cancel it.
     
     Args:
-        event: Event dict containing session_id
+        event: Event dict containing session_id or stage_execution_id
     """
     session_id = event.get("session_id")
-    if not session_id:
-        logger.warning("Received cancel request without session_id")
+    stage_execution_id = event.get("stage_execution_id")
+    
+    if not session_id and not stage_execution_id:
+        logger.warning("Received cancel request without session_id or stage_execution_id")
         return
     
     assert active_tasks_lock is not None, "active_tasks_lock not initialized"
     async with active_tasks_lock:
-        task = active_tasks.get(session_id)
-    
-    if task:
-        logger.info(f"Cancelling session {session_id} on this pod")
-        task.cancel()
-        # The task cleanup in process_alert_background will handle:
-        # - Removing from active_tasks
-        # - Updating status to CANCELLED
-        # - Publishing session.cancelled event
-    else:
-        logger.debug(f"Session {session_id} not found on this pod (owned by another pod)")
+        # Handle session cancellation
+        if session_id:
+            task = active_tasks.get(session_id)
+            if task:
+                logger.info(f"Cancelling session {session_id} on this pod")
+                task.cancel()
+                # The task cleanup in process_alert_background will handle:
+                # - Removing from active_tasks
+                # - Updating status to CANCELLED
+                # - Publishing session.cancelled event
+            else:
+                logger.debug(f"Session {session_id} not found on this pod")
+        
+        # Handle chat execution cancellation
+        if stage_execution_id:
+            task = active_chat_tasks.get(stage_execution_id)
+            if task:
+                logger.info(f"Cancelling chat execution {stage_execution_id} on this pod")
+                task.cancel()
+                # The task cleanup in process_chat_message_background will handle:
+                # - Removing from active_chat_tasks
+                # - Updating stage execution status to failed
+                # - Publishing stage.failed event
+            else:
+                logger.debug(f"Chat execution {stage_execution_id} not found on this pod")
 
 
-async def mark_active_sessions_as_interrupted(reason: str) -> None:
+async def mark_active_tasks_as_interrupted(reason: str) -> None:
     """
-    Helper function to mark active sessions as interrupted during shutdown.
+    Mark active sessions and chats as interrupted during shutdown.
     
     Args:
-        reason: Reason for marking sessions as interrupted (e.g., "after timeout", "after error")
+        reason: Reason for marking tasks as interrupted (e.g., "after timeout", "after error")
     """
     settings = get_settings()
     
-    # Only mark sessions if history is enabled
+    # Only mark tasks if history is enabled
     if not settings.history_enabled:
         return
     
@@ -125,12 +142,18 @@ async def mark_active_sessions_as_interrupted(reason: str) -> None:
             return
         
         pod_id = get_pod_id()
-        interrupted_count = await history_service.mark_pod_sessions_interrupted(pod_id)
         
+        # Sessions
+        interrupted_count = await history_service.mark_pod_sessions_interrupted(pod_id)
         if interrupted_count > 0:
             logger.info(f"Marked {interrupted_count} session(s) as interrupted {reason} for pod {pod_id}")
+        
+        # Chats
+        chat_count = await history_service.mark_pod_chats_interrupted(pod_id)
+        if chat_count > 0:
+            logger.info(f"Marked {chat_count} chat(s) as interrupted {reason} for pod {pod_id}")
     except Exception as e:
-        logger.error(f"Failed to mark sessions as interrupted {reason}: {str(e)}")
+        logger.error(f"Failed to mark tasks as interrupted {reason}: {str(e)}")
 
 
 @asynccontextmanager
@@ -277,9 +300,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             import sys
             sys.exit(1)
     
-    # Set up app state with callback to avoid circular imports
-    # The controller will access this callback instead of importing process_alert_background directly
+    # Set up app state with callbacks to avoid circular imports
+    # The controllers will access these callbacks instead of importing the functions directly
     app.state.process_alert_callback = process_alert_background
+    app.state.process_chat_message_callback = process_chat_message_background
     
     logger.info("Tarsy started successfully!")
     
@@ -289,6 +313,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info(f"History service: ENABLED (Database: {db_info.get('database_name', 'unknown')})")
     else:
         logger.info("History service: DISABLED")
+    
+    # Initialize ChatService (requires AlertService components)
+    if settings.history_enabled and db_init_success:
+        try:
+            from tarsy.services.chat_service import initialize_chat_service
+            
+            # Initialize chat service (stored in module-level global for dependency injection)
+            _ = initialize_chat_service(
+                history_service=history_service,
+                agent_factory=alert_service.agent_factory,
+                mcp_client_factory=alert_service.mcp_client_factory,
+            )
+            logger.info("Chat service initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize chat service: {e}", exc_info=True)
+            logger.warning("Application will continue without chat service")
+    else:
+        logger.info("Chat service skipped - history service disabled")
     
     yield
     
@@ -300,34 +342,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Marked service as shutting down - will reject new alert submissions")
     
     # Wait for active sessions to complete gracefully
-    if active_tasks:
-        session_count = len(active_tasks)
+    # Combine both session and chat tasks
+    if active_tasks or active_chat_tasks:
+        async with active_tasks_lock:
+            all_tasks = list(active_tasks.values()) + list(active_chat_tasks.values())
+        
+        total_count = len(all_tasks)
         timeout = settings.alert_processing_timeout
-        logger.info(f"Waiting for {session_count} active session(s) to complete (timeout: {timeout}s)...")
+        logger.info(f"Waiting for {total_count} active task(s) to complete (timeout: {timeout}s)...")
         
         try:
-            async with active_tasks_lock:
-                tasks_to_wait = list(active_tasks.values())
-            
             # Wait for all active tasks with timeout (same as session processing timeout)
             await asyncio.wait_for(
-                asyncio.gather(*tasks_to_wait, return_exceptions=True),
+                asyncio.gather(*all_tasks, return_exceptions=True),
                 timeout=timeout
             )
-            logger.info(f"All {session_count} active session(s) completed gracefully")
+            logger.info(f"All {total_count} active task(s) completed gracefully")
             
         except asyncio.TimeoutError:
-            remaining = len(active_tasks)
-            logger.warning(f"Graceful shutdown timeout after {timeout}s - {remaining} session(s) still active")
+            remaining_sessions = len(active_tasks)
+            remaining_chats = len(active_chat_tasks)
+            logger.warning(
+                f"Graceful shutdown timeout after {timeout}s - "
+                f"{remaining_sessions} session(s) and {remaining_chats} chat(s) still active"
+            )
             
-            # Mark remaining sessions as interrupted after timeout
-            await mark_active_sessions_as_interrupted("after timeout")
+            # Mark remaining sessions and chats as interrupted after timeout
+            await mark_active_tasks_as_interrupted("after timeout")
         
         except Exception as e:
             logger.error(f"Error during graceful shutdown wait: {e}", exc_info=True)
             
-            # Still try to mark sessions as interrupted on error
-            await mark_active_sessions_as_interrupted("after error")
+            # Still try to mark sessions and chats as interrupted on error
+            await mark_active_tasks_as_interrupted("after error")
     else:
         logger.info("No active sessions during shutdown")
     
@@ -394,6 +441,9 @@ app.include_router(websocket_router, tags=["websocket"])
 
 from tarsy.controllers.system_controller import router as system_router
 app.include_router(system_router, tags=["system"])
+
+# Chat routes (registered after other routers)
+app.include_router(chat_router, tags=["chat"])
 
 
 @app.get("/health")
@@ -786,6 +836,113 @@ async def process_alert_background(session_id: str, alert: ChainContext) -> None
             async with active_tasks_lock:
                 active_tasks.pop(session_id, None)
             logger.debug(f"Removed session {session_id} from active tasks")
+
+
+async def process_chat_message_background(
+    chat_id: str,
+    user_question: str,
+    author: str,
+    stage_execution_id: str,
+    message_id: str
+) -> None:
+    """
+    Background task wrapper for chat message processing.
+    Matches process_alert_background() pattern with timeout handling.
+    """
+    start_time = datetime.now()
+    settings = get_settings()
+    
+    try:
+        from tarsy.services.chat_service import get_chat_service
+        chat_service = get_chat_service()
+        
+        logger.info(f"Starting background processing for chat message {message_id} (execution: {stage_execution_id})")
+        
+        # Process with timeout to prevent hanging (matches alert pattern)
+        try:
+            # Use same timeout as alert processing
+            timeout_seconds = settings.alert_processing_timeout
+            logger.info(f"Processing chat message {message_id} with {timeout_seconds}s timeout")
+            
+            # Create the actual processing task
+            task = asyncio.create_task(
+                chat_service.process_chat_message(
+                    chat_id=chat_id,
+                    user_question=user_question,
+                    author=author,
+                    stage_execution_id=stage_execution_id,  # Pass the ID for consistent tracking
+                    message_id=message_id  # Pass the database message ID
+                )
+            )
+            
+            # Update active_chat_tasks to track the inner processing task
+            # This allows cancellation to properly stop the actual processing work
+            assert active_tasks_lock is not None, "active_tasks_lock not initialized"
+            async with active_tasks_lock:
+                active_chat_tasks[stage_execution_id] = task
+            
+            try:
+                await asyncio.wait_for(task, timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                # Timeout occurred - try to cancel the task
+                logger.warning(f"Chat message {stage_execution_id} exceeded {timeout_seconds}s timeout, attempting to cancel task")
+                task.cancel()
+                try:
+                    await task  # Wait for cancellation to complete
+                except asyncio.CancelledError:
+                    logger.info(f"Chat message {stage_execution_id} task cancelled successfully")
+                except Exception as e:
+                    logger.error(f"Error while cancelling chat message {stage_execution_id}: {e}")
+                raise TimeoutError(f"Chat message processing exceeded timeout limit of {timeout_seconds}s") from None
+        
+        except asyncio.CancelledError:
+            # Task was cancelled
+            logger.info(f"Chat message {stage_execution_id} task was cancelled")
+            raise  # Re-raise to preserve the original CancelledError
+        
+        # Calculate processing duration
+        duration = (datetime.now() - start_time).total_seconds()
+        logger.info(f"Chat message {stage_execution_id} processing completed successfully in {duration:.2f}s")
+        
+    except asyncio.CancelledError:
+        # User-requested chat cancellation
+        logger.info(f"Chat execution {stage_execution_id} cancelled by user")
+        
+        # Update stage execution status to cancelled using service-layer updater
+        # This properly persists the cancelled state and publishes events
+        try:
+            await chat_service._update_stage_execution_failed(stage_execution_id, "Cancelled by user")
+            logger.info(f"Updated stage execution {stage_execution_id} as cancelled")
+        except Exception as e:
+            logger.warning(f"Failed to update cancelled chat execution: {e}", exc_info=True)
+        
+        # Clean up from active_chat_tasks
+        assert active_tasks_lock is not None, "active_tasks_lock not initialized"
+        async with active_tasks_lock:
+            active_chat_tasks.pop(stage_execution_id, None)
+        
+        return  # Exit gracefully without marking as error
+        
+    except TimeoutError as e:
+        # Processing timeout
+        duration = (datetime.now() - start_time).total_seconds()
+        error_msg = str(e)
+        logger.error(f"Chat message {stage_execution_id} timeout after {duration:.2f}s: {error_msg}")
+        # Note: Stage execution status will be updated by ChatService's error handling
+    except Exception as e:
+        # Catch-all for unexpected errors
+        duration = (datetime.now() - start_time).total_seconds()
+        error_msg = f"Unexpected processing error: {str(e)}"
+        logger.exception(
+            f"Chat message {stage_execution_id} unexpected error after {duration:.2f}s: {error_msg}"
+        )
+    finally:
+        # Always cleanup task from tracking dict
+        assert active_tasks_lock is not None, "active_tasks_lock not initialized"
+        async with active_tasks_lock:
+            active_chat_tasks.pop(stage_execution_id, None)
+        logger.debug(f"Removed chat message {stage_execution_id} from active tasks")
+
 
 if __name__ == "__main__":
     import uvicorn

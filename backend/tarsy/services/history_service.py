@@ -19,7 +19,7 @@ from tarsy.models.history_models import (
     PaginatedSessions, DetailedSession, FilterOptions, SessionStats
 )
 from tarsy.models.constants import AlertSessionStatus
-from tarsy.models.db_models import AlertSession, StageExecution
+from tarsy.models.db_models import AlertSession, StageExecution, Chat, ChatUserMessage
 from tarsy.utils.timestamp import now_us
 from tarsy.models.unified_interactions import LLMInteraction, MCPInteraction
 from tarsy.models.processing_context import ChainContext
@@ -961,6 +961,249 @@ class HistoryService:
                 return repo.update_alert_session(session)
         
         return self._retry_database_operation("record_interaction", _interaction_operation) or False
+    
+    # ===== CHAT OPERATIONS =====
+    
+    async def create_chat(self, chat: Chat) -> Chat:
+        """Create a new chat record."""
+        if not self.is_enabled:
+            raise ValueError("History service is disabled")
+        
+        def _create_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    raise ValueError("Repository unavailable")
+                return repo.create_chat(chat)
+        
+        return self._retry_database_operation("create_chat", _create_operation)
+    
+    async def get_chat_by_id(self, chat_id: str) -> Optional[Chat]:
+        """Get chat by ID."""
+        if not self.is_enabled:
+            return None
+        
+        def _get_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return None
+                return repo.get_chat_by_id(chat_id)
+        
+        return self._retry_database_operation("get_chat_by_id", _get_operation)
+    
+    async def get_chat_by_session(self, session_id: str) -> Optional[Chat]:
+        """Get chat for a session (if exists)."""
+        if not self.is_enabled:
+            return None
+        
+        def _get_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return None
+                return repo.get_chat_by_session(session_id)
+        
+        return self._retry_database_operation("get_chat_by_session", _get_operation)
+    
+    async def create_chat_user_message(self, message: ChatUserMessage) -> ChatUserMessage:
+        """Create a new chat user message."""
+        if not self.is_enabled:
+            raise ValueError("History service is disabled")
+        
+        def _create_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    raise ValueError("Repository unavailable")
+                return repo.create_chat_user_message(message)
+        
+        return self._retry_database_operation("create_chat_user_message", _create_operation)
+    
+    async def get_stage_executions_for_chat(self, chat_id: str) -> List[StageExecution]:
+        """Get all stage executions for a chat."""
+        if not self.is_enabled:
+            return []
+        
+        def _get_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return []
+                return repo.get_stage_executions_for_chat(chat_id)
+        
+        return self._retry_database_operation(
+            "get_stage_executions_for_chat",
+            _get_operation
+        ) or []
+    
+    async def get_llm_interactions_for_session(self, session_id: str) -> List['LLMInteraction']:
+        """Get all LLM interactions for a session."""
+        if not self.is_enabled:
+            return []
+        
+        def _get_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return []
+                return repo.get_llm_interactions_for_session(session_id)
+        
+        return self._retry_database_operation(
+            "get_llm_interactions_for_session",
+            _get_operation
+        ) or []
+    
+    async def get_llm_interactions_for_stage(self, stage_execution_id: str) -> List['LLMInteraction']:
+        """Get all LLM interactions for a stage execution."""
+        if not self.is_enabled:
+            return []
+        
+        def _get_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return []
+                return repo.get_llm_interactions_for_stage(stage_execution_id)
+        
+        return self._retry_database_operation(
+            "get_llm_interactions_for_stage",
+            _get_operation
+        ) or []
+    
+    async def get_chat_user_message_count(self, chat_id: str) -> int:
+        """Get total user message count for a chat."""
+        if not self.is_enabled:
+            return 0
+        
+        def _count_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return 0
+                return repo.get_chat_user_message_count(chat_id)
+        
+        return self._retry_database_operation(
+            "get_chat_user_message_count",
+            _count_operation
+        ) or 0
+    
+    async def get_chat_user_messages(
+        self,
+        chat_id: str,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[ChatUserMessage]:
+        """Get user messages for a chat with pagination."""
+        if not self.is_enabled:
+            return []
+        
+        def _get_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return []
+                return repo.get_chat_user_messages(chat_id, limit, offset)
+        
+        return self._retry_database_operation(
+            "get_chat_user_messages",
+            _get_operation
+        ) or []
+    
+    # Pod Tracking & Orphan Detection
+    
+    async def start_chat_message_processing(self, chat_id: str, pod_id: str) -> bool:
+        """Mark chat as processing a message on a specific pod."""
+        if not self.is_enabled:
+            return False
+        
+        def _start_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return False
+                return repo.update_chat_pod_tracking(chat_id, pod_id)
+        
+        return self._retry_database_operation(
+            "start_chat_message_processing",
+            _start_operation
+        ) or False
+    
+    def record_chat_interaction(self, chat_id: str) -> bool:
+        """Update chat last_interaction_at timestamp (synchronous)."""
+        if not self.is_enabled:
+            return False
+        
+        def _record_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return False
+                from tarsy.models.db_models import Chat
+                chat = repo.get_chat_by_id(chat_id)
+                if not chat:
+                    return False
+                chat.last_interaction_at = now_us()
+                return repo.update_chat(chat)
+        
+        return self._retry_database_operation(
+            "record_chat_interaction",
+            _record_operation
+        ) or False
+    
+    def cleanup_orphaned_chats(self, timeout_minutes: int = 30) -> int:
+        """Find and clear stale processing markers from orphaned chats."""
+        if not self.is_enabled:
+            return 0
+        
+        def _cleanup_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return 0
+                
+                timeout_us = timeout_minutes * 60 * 1_000_000
+                threshold = now_us() - timeout_us
+                
+                orphaned_chats = repo.find_orphaned_chats(threshold)
+                
+                for chat in orphaned_chats:
+                    chat.pod_id = None
+                    chat.last_interaction_at = None
+                    repo.session.add(chat)
+                repo.session.commit()
+                
+                return len(orphaned_chats)
+        
+        count = self._retry_database_operation(
+            "cleanup_orphaned_chats",
+            _cleanup_operation
+        )
+        
+        if count and count > 0:
+            logger.info(
+                f"Cleaned up {count} orphaned chat message processing markers"
+            )
+        
+        return count or 0
+    
+    async def mark_pod_chats_interrupted(self, pod_id: str) -> int:
+        """Clear processing markers for chats on a shutting-down pod."""
+        if not self.is_enabled:
+            return 0
+        
+        def _interrupt_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return 0
+                
+                active_chats = repo.find_chats_by_pod(pod_id)
+                
+                for chat in active_chats:
+                    chat.pod_id = None
+                    chat.last_interaction_at = None
+                    repo.session.add(chat)
+                repo.session.commit()
+                
+                return len(active_chats)
+        
+        count = self._retry_database_operation(
+            "mark_interrupted_chats",
+            _interrupt_operation
+        )
+        
+        if count and count > 0:
+            logger.info(f"Marked {count} chat(s) as interrupted for pod {pod_id}")
+        
+        return count or 0
 
 
 # Global history service instance

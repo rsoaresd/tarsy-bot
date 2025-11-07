@@ -15,6 +15,7 @@ import type { DetailedSession } from '../types';
 import ChatFlowItem from './ChatFlowItem';
 import CopyButton from './CopyButton';
 import { websocketService } from '../services/websocketService';
+import { isTerminalSessionStatus } from '../utils/statusConstants';
 import { 
   hasMarkdownSyntax, 
   finalAnswerMarkdownComponents, 
@@ -88,8 +89,8 @@ interface ConversationTimelineProps {
 }
 
 interface StreamingItem {
-  type: 'thought' | 'final_answer' | 'summarization' | 'tool_call';
-  content?: string; // For thought/final_answer/summarization
+  type: 'thought' | 'final_answer' | 'summarization' | 'tool_call' | 'user_message';
+  content?: string; // For thought/final_answer/summarization/user_message
   stage_execution_id?: string;
   mcp_event_id?: string; // For tool_call and summarization
   waitingForDb?: boolean; // True when stream completed, waiting for DB confirmation
@@ -97,6 +98,9 @@ interface StreamingItem {
   toolName?: string;
   toolArguments?: any;
   serverName?: string;
+  // User message specific fields
+  author?: string;
+  messageId?: string;
 }
 
 /**
@@ -221,6 +225,70 @@ const StreamingItemRenderer = memo(({ item }: { item: StreamingItem }) => {
     );
   }
   
+  if (item.type === 'user_message') {
+    return (
+      <Box sx={{ mb: 1.5, display: 'flex', gap: 1.5 }}>
+        {/* Circular question mark avatar */}
+        <Box
+          sx={{
+            width: 28,
+            height: 28,
+            borderRadius: '50%',
+            bgcolor: 'primary.main',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            mt: 0.25
+          }}
+        >
+          <Typography variant="body2" sx={{ fontSize: '0.8rem', color: 'white', fontWeight: 600 }}>
+            ?
+          </Typography>
+        </Box>
+        <Box sx={{ flex: 1, minWidth: 0, ml: 4, my: 1, mr: 1 }}>
+          {/* Author name - subtle and lowercase */}
+          <Typography
+            variant="caption"
+            sx={{
+              fontWeight: 500,
+              fontSize: '0.75rem',
+              color: 'text.secondary',
+              mb: 0.5,
+              display: 'block'
+            }}
+          >
+            {item.author} asked:
+          </Typography>
+
+          {/* Message content - conversational styling */}
+          <Box
+            sx={{
+              p: 1.5,
+              borderRadius: 1.5,
+              bgcolor: 'grey.50',
+              border: '1px solid',
+              borderColor: 'grey.200',
+            }}
+          >
+            <Typography
+              variant="body1"
+              sx={{
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                lineHeight: 1.6,
+                fontSize: '0.95rem',
+                color: 'text.primary'
+              }}
+            >
+              {item.content}
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+  
   if (item.type === 'tool_call') {
     // Render in-progress tool call with loading indicator
     return (
@@ -327,6 +395,8 @@ function ConversationTimeline({
   const [streamingItems, setStreamingItems] = useState<Map<string, StreamingItem>>(new Map());
   // Track which chatFlow items have been "claimed" by deduplication (prevents double-matching)
   const [claimedChatFlowItems, setClaimedChatFlowItems] = useState<Set<string>>(new Set());
+  // Track if there's an active chat stage in progress (for showing processing indicator on completed sessions)
+  const [activeChatStageInProgress, setActiveChatStageInProgress] = useState<boolean>(false);
   
   // Memoize chat flow stats to prevent recalculation on every render
   const chatStats = useMemo(() => {
@@ -386,6 +456,14 @@ function ConversationTimeline({
           if (streamItem.type === 'thought' || streamItem.type === 'final_answer') {
             return dbItem.content && streamItem.content && 
                    dbItem.content.trim() === streamItem.content.trim();
+          }
+          
+          if (streamItem.type === 'user_message') {
+            return (
+              !!dbItem.messageId &&
+              !!streamItem.messageId &&
+              dbItem.messageId === streamItem.messageId
+            );
           }
           
           // Match by mcp_event_id for tool_call/summarization
@@ -450,25 +528,76 @@ function ConversationTimeline({
 
   // Clear streaming items when session completes, fails, or is cancelled (with logging)
   useEffect(() => {
-    if (session.status === 'completed' || session.status === 'failed' || session.status === 'cancelled') {
+    if (isTerminalSessionStatus(session.status)) {
       console.log('✅ Session ended, clearing all streaming items');
       setStreamingItems(new Map());
     }
   }, [session.status]);
 
-  // Subscribe to streaming events
-  // Don't subscribe if session is already completed/failed/cancelled
+  // Clear streaming items on WebSocket reconnection for terminal sessions without active chat stage
+  // This prevents "zombie" executions from catchup events after backend restart
   useEffect(() => {
     if (!session.session_id) return;
     
-    // Don't subscribe to streaming events for completed/failed/cancelled sessions
-    if (session.status === 'completed' || session.status === 'failed' || session.status === 'cancelled') {
-      console.log('⏭️ Skipping streaming subscription for terminal session');
+    // Only setup reconnection handler for terminal sessions without active chat stage
+    if (!isTerminalSessionStatus(session.status) || activeChatStageInProgress) {
       return;
     }
     
+    const handleReconnection = (connected: boolean) => {
+      if (connected && isTerminalSessionStatus(session.status) && !activeChatStageInProgress) {
+        console.log('🧹 WebSocket reconnected for terminal session - clearing stale streaming items');
+        setStreamingItems(new Map());
+      }
+    };
+    
+    const unsubscribe = websocketService.onConnectionChange(handleReconnection);
+    
+    return () => unsubscribe();
+  }, [session.session_id, session.status, activeChatStageInProgress]);
+
+  // Subscribe to streaming events
+  // For terminal sessions, only subscribe if there's an active chat stage in progress
+  useEffect(() => {
+    if (!session.session_id) return;
+    
+    // For terminal sessions, only subscribe if there's an ACTIVE chat stage processing (not completed)
+    if (isTerminalSessionStatus(session.status) && !activeChatStageInProgress) {
+      console.log('⏭️ Skipping streaming subscription for terminal session (no active chat stage)');
+      return;
+    }
+    
+    if (isTerminalSessionStatus(session.status) && activeChatStageInProgress) {
+      console.log('✅ Enabling streaming subscription for terminal session with active chat stage');
+    }
+    
     const handleStreamEvent = (event: any) => {
-      if (event.type === 'mcp.tool_call.started') {
+      // Ignore ALL streaming events for terminal sessions without active chat stage processing
+      // This prevents "zombie" executions from WebSocket catchup events after backend restart
+      // Note: We DO show streaming events from ANY user when there's an active chat stage (collaborative viewing)
+      if (isTerminalSessionStatus(session.status) && !activeChatStageInProgress) {
+        console.log('⏭️ Ignoring zombie streaming event for completed work:', event.type);
+        return;
+      }
+      
+      if (event.type === 'stage.started' && event.chat_user_message_content) {
+        // Handle stage.started events with user message data
+        console.log('💬 Stage started with user message:', event.chat_user_message_content.substring(0, 50));
+        setStreamingItems(prev => {
+          const updated = new Map(prev);
+          const key = `user-message-${event.chat_user_message_id}`;
+          
+          updated.set(key, {
+            type: 'user_message' as const,
+            content: event.chat_user_message_content,
+            author: event.chat_user_message_author || 'Unknown',
+            messageId: event.chat_user_message_id,
+            waitingForDb: false
+          });
+          
+          return updated;
+        });
+      } else if (event.type === 'mcp.tool_call.started') {
         setStreamingItems(prev => {
           const updated = new Map(prev);
           // Use communication_id as key for deduplication with DB
@@ -541,7 +670,7 @@ function ConversationTimeline({
     );
     
     return () => unsubscribe();
-  }, [session.session_id]);
+  }, [session.session_id, session.status, activeChatStageInProgress]);
 
   // Clear streaming items when their content appears in DB data (smart deduplication with claimed-item tracking)
   // ONLY runs when chatFlow changes (DB update), NOT when streaming chunks arrive
@@ -585,6 +714,10 @@ function ConversationTimeline({
             // Summarizations match by type and mcp_event_id
             shouldMatch = dbItem.type === 'summarization' && 
                          dbItem.mcp_event_id === streamingItem.mcp_event_id;
+          } else if (streamingItem.type === 'user_message') {
+            // User messages match by type and message_id
+            shouldMatch = dbItem.type === 'user_message' && 
+                         dbItem.messageId === streamingItem.messageId;
           } else {
             // Thoughts and final_answer match by type and content
             shouldMatch = dbItem.type === streamingItem.type && 
@@ -620,6 +753,31 @@ function ConversationTimeline({
   useEffect(() => {
     console.log('🔄 Session changed, resetting claimed items tracking');
     setClaimedChatFlowItems(new Set());
+  }, [session.session_id]);
+
+  // Track chat stage progress for processing indicator (any chat, not just ours)
+  useEffect(() => {
+    if (!session.session_id) return;
+    
+    const handleStageEvent = (event: any) => {
+      // Only track chat stages (those with chat_id)
+      if (!event.chat_id) return;
+      
+      if (event.type === 'stage.started') {
+        console.log('💬 Chat stage started (any user), showing processing indicator');
+        setActiveChatStageInProgress(true);
+      } else if (event.type === 'stage.completed' || event.type === 'stage.failed') {
+        console.log('💬 Chat stage ended, hiding processing indicator');
+        setActiveChatStageInProgress(false);
+      }
+    };
+    
+    const unsubscribe = websocketService.subscribeToChannel(
+      `session:${session.session_id}`,
+      handleStageEvent
+    );
+    
+    return () => unsubscribe();
   }, [session.session_id]);
 
   // Calculate stage stats
@@ -786,8 +944,8 @@ function ConversationTimeline({
               <StreamingItemRenderer key={entryKey} item={entryValue} />
             ))}
 
-            {/* Processing indicator at bottom when session is still in progress */}
-            {session.status === 'in_progress' && <ProcessingIndicator />}
+            {/* Processing indicator at bottom when session/chat is in progress OR when there are streaming items */}
+            {(session.status === 'in_progress' || streamingItems.size > 0 || activeChatStageInProgress) && <ProcessingIndicator />}
           </>
         )}
       </Box>

@@ -145,6 +145,18 @@ class ChainStatistics(BaseModel):
 
 
 # =============================================================================
+# CHAT MESSAGE MODELS
+# =============================================================================
+
+class ChatUserMessageData(BaseModel):
+    """User message data embedded in stage execution responses"""
+    message_id: str
+    content: str
+    author: str
+    created_at_us: int
+
+
+# =============================================================================
 # MAIN RESPONSE MODELS
 # =============================================================================
 
@@ -184,6 +196,8 @@ class SessionOverview(BaseModel):
     # MCP configuration override
     mcp_selection: Optional[MCPSelectionConfig] = None
     
+    chat_message_count: Optional[int] = None  # Number of user messages in follow-up chat (if chat exists)
+    
     # Calculated properties
     @computed_field
     @property
@@ -211,6 +225,11 @@ class DetailedStage(BaseModel):
     duration_ms: Optional[int] = None
     stage_output: Optional[dict] = None  # Structured results produced by this stage (e.g. analysis findings, collected data) - used by subsequent stages in chain. None if stage failed/incomplete.
     error_message: Optional[str] = None
+    
+    # Chat context (if this stage is a chat response)
+    chat_id: Optional[str] = None
+    chat_user_message_id: Optional[str] = None
+    chat_user_message: Optional[ChatUserMessageData] = None  # Full user message data (populated when chat_user_message_id exists)
     
     # ALL interactions that happened during this stage (FULL objects with complete details)
     llm_interactions: List[LLMTimelineEvent] = Field(default_factory=list)  # Complete LLM interactions with full details

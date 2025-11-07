@@ -6,9 +6,9 @@ import { getMessages } from './conversationParser';
 import { parseReActMessage } from './reactParser';
 
 export interface ChatFlowItemData {
-  type: 'thought' | 'tool_call' | 'final_answer' | 'stage_start' | 'summarization';
+  type: 'thought' | 'tool_call' | 'final_answer' | 'stage_start' | 'summarization' | 'user_message';
   timestamp_us: number;
-  content?: string; // For thought/final_answer/summarization
+  content?: string; // For thought/final_answer/summarization/user_message
   stageName?: string; // For stage_start
   stageAgent?: string; // For stage_start
   toolName?: string; // For tool_call
@@ -19,6 +19,9 @@ export interface ChatFlowItemData {
   errorMessage?: string; // For tool_call
   duration_ms?: number | null; // For tool_call
   mcp_event_id?: string; // For tool_call and summarization - used for deduplication
+  // For user_message type
+  author?: string; // User who sent the message
+  messageId?: string; // Message identifier
 }
 
 
@@ -30,13 +33,32 @@ export function parseSessionChatFlow(session: DetailedSession): ChatFlowItemData
 
   // Process each stage in order
   for (const stage of session.stages || []) {
+    const stageStartTimestamp = stage.started_at_us || Date.now() * 1000;
+    
     // Add stage start marker
     chatItems.push({
       type: 'stage_start',
-      timestamp_us: stage.started_at_us || Date.now() * 1000,
+      timestamp_us: stageStartTimestamp,
       stageName: stage.stage_name,
       stageAgent: stage.agent
     });
+
+    // Add user message if this is a chat stage (Option 4: separate item with badge)
+    // Ensure user message timestamp is at least equal to stage_start to keep it within the stage
+    if (stage.chat_user_message) {
+      const userMessageTimestamp = Math.max(
+        stage.chat_user_message.created_at_us,
+        stageStartTimestamp + 1 // +1 to ensure it appears after stage_start marker
+      );
+      
+      chatItems.push({
+        type: 'user_message',
+        timestamp_us: userMessageTimestamp,
+        content: stage.chat_user_message.content,
+        author: stage.chat_user_message.author,
+        messageId: stage.chat_user_message.message_id
+      });
+    }
 
     // Process LLM interactions
     const llmInteractions = (stage.llm_interactions || [])

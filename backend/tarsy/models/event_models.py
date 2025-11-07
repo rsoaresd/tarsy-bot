@@ -63,6 +63,13 @@ class SessionCancelRequestedEvent(BaseEvent):
     session_id: str = Field(description="Session identifier")
 
 
+class ChatCancelRequestedEvent(BaseEvent):
+    """Chat execution cancellation requested (backend-to-backend communication)."""
+
+    type: Literal["chat.cancel_requested"] = "chat.cancel_requested"
+    stage_execution_id: str = Field(description="Stage execution identifier for the chat response")
+
+
 class SessionCancelledEvent(BaseEvent):
     """Session cancelled successfully."""
 
@@ -134,6 +141,11 @@ class StageStartedEvent(BaseEvent):
     session_id: str = Field(description="Session identifier")
     stage_id: str = Field(description="Stage execution identifier")
     stage_name: str = Field(description="Human-readable stage name")
+    chat_id: Optional[str] = Field(default=None, description="Chat ID if this is a chat response stage")
+    # User message data (for chat stages)
+    chat_user_message_id: Optional[str] = Field(default=None, description="User message ID if this is a chat response")
+    chat_user_message_content: Optional[str] = Field(default=None, description="User message content")
+    chat_user_message_author: Optional[str] = Field(default=None, description="User message author")
 
 
 class StageCompletedEvent(BaseEvent):
@@ -144,6 +156,7 @@ class StageCompletedEvent(BaseEvent):
     stage_id: str = Field(description="Stage execution identifier")
     stage_name: str = Field(description="Human-readable stage name")
     status: str = Field(description="Stage status (completed/failed)")
+    chat_id: Optional[str] = Field(default=None, description="Chat ID if this is a chat response stage")
 
 
 # ===== Transient Streaming Events (not persisted to DB) =====
@@ -163,3 +176,26 @@ class LLMStreamChunkEvent(BaseEvent):
     mcp_event_id: Optional[str] = Field(
         default=None, description="MCP event ID if summarizing a tool result"
     )
+
+
+# ===== Chat Events (channel: 'session:{session_id}') =====
+
+
+class ChatCreatedEvent(BaseEvent):
+    """Chat created for a session."""
+    
+    type: Literal["chat.created"] = "chat.created"
+    session_id: str = Field(description="Session identifier")
+    chat_id: str = Field(description="Chat identifier")
+    created_by: str = Field(description="User who created the chat")
+
+
+class ChatUserMessageEvent(BaseEvent):
+    """User sent a message to the chat."""
+    
+    type: Literal["chat.user_message"] = "chat.user_message"
+    session_id: str = Field(description="Session identifier")
+    chat_id: str = Field(description="Chat identifier")
+    message_id: str = Field(description="Message identifier")
+    content: str = Field(description="Message content")
+    author: str = Field(description="Message author")

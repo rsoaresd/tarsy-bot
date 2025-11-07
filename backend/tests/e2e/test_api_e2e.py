@@ -10,6 +10,7 @@ Architecture:
 """
 
 import asyncio
+import logging
 import os
 import re
 from unittest.mock import AsyncMock, Mock, patch
@@ -23,12 +24,17 @@ from .e2e_utils import E2ETestUtils
 
 from .expected_conversations import (
     EXPECTED_ANALYSIS_CONVERSATION,
+    EXPECTED_CHAT_INTERACTIONS,
+    EXPECTED_CHAT_MESSAGE_1_CONVERSATION,
+    EXPECTED_CHAT_MESSAGE_2_CONVERSATION,
     EXPECTED_DATA_COLLECTION_CONVERSATION,
     EXPECTED_STAGES,
     EXPECTED_VERIFICATION_CONVERSATION,
 )
 
 from .conftest import create_mock_stream
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_content(content: str) -> str:
@@ -90,9 +96,10 @@ def assert_conversation_messages(
         # Normalize content for comparison
         expected_content = normalize_content(expected_msg.get("content", ""))
         actual_content = normalize_content(actual_msg.get("content", ""))
+        
         assert (
             expected_content == actual_content
-        ), f"Content mismatch: expected {expected_content}, got {actual_content}"
+        ), f"Content mismatch in message {i}: expected length {len(expected_content)}, got {len(actual_content)}"
 
 
 @pytest.mark.asyncio
@@ -220,6 +227,26 @@ Action Input: {"resource": "namespaces", "name": "stuck-namespace"}""",
                 "response_content": """Based on previous stages, the namespace is stuck due to finalizers.""",
                 "input_tokens": 420, "output_tokens": 180, "total_tokens": 600
                },
+            10: { # Chat - First ReAct iteration
+                "response_content": """Thought: The user wants to see the pods in stuck-namespace. I'll use kubectl_get to list them.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "pods", "namespace": "stuck-namespace"}""",
+                "input_tokens": 150, "output_tokens": 60, "total_tokens": 210
+               },
+            11: { # Chat Message 1 - Final answer
+                "response_content": """Final Answer: I checked the pods in stuck-namespace and found no pods are currently running. This is consistent with the namespace being stuck in Terminating state - all pods have likely been deleted already, but the namespace can't complete deletion due to the finalizers mentioned in the original investigation.""",
+                "input_tokens": 180, "output_tokens": 90, "total_tokens": 270
+               },
+            12: { # Chat Message 2 - ReAct iteration (check namespace status again)
+                "response_content": """Thought: The user wants to know if the namespace still exists. Let me check its current status.
+Action: kubernetes-server.kubectl_get
+Action Input: {"resource": "namespaces", "name": "stuck-namespace"}""",
+                "input_tokens": 200, "output_tokens": 70, "total_tokens": 270
+               },
+            13: { # Chat Message 2 - Final answer
+                "response_content": """Final Answer: Yes, the namespace still exists and remains in Terminating state. Based on the investigation history, the namespace is blocked by finalizers (kubernetes.io/pvc-protection). To resolve this, you would need to manually remove the finalizers using kubectl patch or edit the namespace resource directly.""",
+                "input_tokens": 220, "output_tokens": 95, "total_tokens": 315
+               },
         }
         
         # Create streaming mock for LLM client
@@ -282,10 +309,16 @@ Action Input: {"resource": "namespaces", "name": "stuck-namespace"}""",
                 if tool_name == "kubectl_get":
                     resource = _parameters.get("resource", "pods")
                     name = _parameters.get("name", "")
+                    namespace = _parameters.get("namespace", "")
 
                     if resource == "namespaces" and name == "stuck-namespace":
                         mock_content = Mock()
                         mock_content.text = "stuck-namespace   Terminating   45m"
+                        mock_result.content = [mock_content]
+                    elif resource == "pods" and namespace == "stuck-namespace":
+                        # Chat query for pods in stuck-namespace
+                        mock_content = Mock()
+                        mock_content.text = "No pods found in namespace stuck-namespace"
                         mock_result.content = [mock_content]
                     else:
                         mock_content = Mock()
@@ -517,6 +550,11 @@ Action Input: {"resource": "namespaces", "name": "stuck-namespace"}""",
                     await self._verify_complete_interaction_flow(stages)
 
                     print("✅ COMPREHENSIVE VERIFICATION PASSED!")
+
+                    print("🔍 Step 5: Testing chat functionality...")
+                    await self._test_chat_functionality(e2e_test_client, session_id)
+
+                    print("✅ CHAT FUNCTIONALITY TEST PASSED!")
 
                     return
 
@@ -787,6 +825,480 @@ Action Input: {"resource": "namespaces", "name": "stuck-namespace"}""",
             actual_stage_total_tokens == expected_total_tokens
         ), f"Stage '{stage_name}' total_tokens total mismatch: expected {expected_total_tokens}, got {actual_stage_total_tokens}"
 
+        logger.info(
+            "Stage '%s': Complete interaction flow verified (%d LLM, %d MCP)",
+            stage_name, len(llm_interactions), len(mcp_interactions)
+        )
+
+    async def _test_chat_functionality(self, test_client, session_id: str):
+        """Test chat functionality by creating a chat and sending multiple messages."""
+
+        # Step 0: Check chat availability endpoint
+        logger.info("Testing chat availability check...")
+        
+        availability_response = test_client.get(
+            f"/api/v1/sessions/{session_id}/chat-available"
+        )
+        
+        assert availability_response.status_code == 200, (
+            f"Chat availability check failed with status {availability_response.status_code}: "
+            f"{availability_response.text}"
+        )
+        
+        availability_data = availability_response.json()
+        assert availability_data.get("available") is True, (
+            f"Chat should be available for completed session, but got: {availability_data}"
+        )
+        assert availability_data.get("chat_id") is None, (
+            "Chat ID should be None before chat is created"
+        )
+
+        logger.info("Chat availability verified (available=True, no existing chat)")
+
+        # Step 1: Create chat for the session
+        logger.info("Testing chat creation...")
+        
+        create_chat_response = test_client.post(
+            f"/api/v1/sessions/{session_id}/chat",
+            headers={"X-Forwarded-User": "test-user@example.com"}
+        )
+        
+        assert create_chat_response.status_code == 200, (
+            f"Chat creation failed with status {create_chat_response.status_code}: "
+            f"{create_chat_response.text}"
+        )
+        
+        chat_data = create_chat_response.json()
+        chat_id = chat_data.get("chat_id")
+        
+        assert chat_id is not None, "Chat ID missing from creation response"
+        assert chat_data.get("session_id") == session_id, "Chat session_id mismatch"
+        assert chat_data.get("created_by") == "test-user@example.com", (
+            f"Chat created_by mismatch: expected 'test-user@example.com', "
+            f"got '{chat_data.get('created_by')}'"
+        )
+        
+        logger.info("Chat created successfully: %s", chat_id)
+
+        # Step 1b: Verify chat availability now returns existing chat_id
+        logger.info("Re-checking chat availability after creation...")
+        
+        availability_response2 = test_client.get(
+            f"/api/v1/sessions/{session_id}/chat-available"
+        )
+        
+        assert availability_response2.status_code == 200, (
+            f"Chat availability check failed after creation: {availability_response2.text}"
+        )
+        
+        availability_data2 = availability_response2.json()
+        assert availability_data2.get("available") is True, (
+            "Chat should still be available after creation"
+        )
+        assert availability_data2.get("chat_id") == chat_id, (
+            f"Chat availability should return existing chat_id={chat_id}, "
+            f"got {availability_data2.get('chat_id')}"
+        )
+        
+        logger.info("Chat availability updated (available=True, chat_id=%s)", chat_id)
+
+        # Step 1c: Test GET /api/v1/chats/{chat_id} endpoint
+        logger.info("Testing get chat details endpoint...")
+        
+        get_chat_response = test_client.get(f"/api/v1/chats/{chat_id}")
+        
+        assert get_chat_response.status_code == 200, (
+            f"Get chat details failed with status {get_chat_response.status_code}: "
+            f"{get_chat_response.text}"
+        )
+        
+        get_chat_data = get_chat_response.json()
+        assert get_chat_data.get("chat_id") == chat_id, "Chat ID mismatch"
+        assert get_chat_data.get("session_id") == session_id, "Session ID mismatch"
+        assert get_chat_data.get("message_count") == 0, "Initial message count should be 0"
+
+        logger.info("Chat details retrieved (message_count=0)")
+
+        # Track verified chat stages to avoid re-checking them
+        verified_chat_stage_ids = set()
+
+        # Step 2: Send first chat message and verify response
+        logger.info("Sending first chat message...")
+        
+        message_1_stage = await self._send_and_wait_for_chat_message(
+            test_client=test_client,
+            session_id=session_id,
+            chat_id=chat_id,
+            content="Can you check the pods in the stuck-namespace?",
+            message_label="Message 1",
+            verified_stage_ids=verified_chat_stage_ids
+        )
+        
+        logger.info("Verifying first chat response...")
+        await self._verify_chat_response(
+            chat_stage=message_1_stage,
+            message_key='message_1',
+            expected_conversation=EXPECTED_CHAT_MESSAGE_1_CONVERSATION
+        )
+        verified_chat_stage_ids.add(message_1_stage.get("stage_id"))
+        logger.info("First chat response verified")
+
+        # Step 3: Send second chat message (follow-up) and verify response
+        logger.info("Sending second chat message (follow-up)...")
+        
+        message_2_stage = await self._send_and_wait_for_chat_message(
+            test_client=test_client,
+            session_id=session_id,
+            chat_id=chat_id,
+            content="Does the namespace still exist?",
+            message_label="Message 2",
+            verified_stage_ids=verified_chat_stage_ids
+        )
+        
+        logger.info("Verifying second chat response...")
+        await self._verify_chat_response(
+            chat_stage=message_2_stage,
+            message_key='message_2',
+            expected_conversation=EXPECTED_CHAT_MESSAGE_2_CONVERSATION
+        )
+        verified_chat_stage_ids.add(message_2_stage.get("stage_id"))
+        logger.info("Second chat response verified")
+
+        # Step 4: Test GET /api/v1/chats/{chat_id}/messages endpoint
+        logger.info("Testing get chat message history endpoint...")
+        
+        messages_response = test_client.get(
+            f"/api/v1/chats/{chat_id}/messages?limit=10&offset=0"
+        )
+        
+        assert messages_response.status_code == 200, (
+            f"Get chat messages failed with status {messages_response.status_code}: "
+            f"{messages_response.text}"
+        )
+        
+        messages_data = messages_response.json()
+        assert messages_data.get("chat_id") == chat_id, "Chat ID mismatch in messages response"
+        assert messages_data.get("total_count") == 2, (
+            f"Expected 2 messages in history, got {messages_data.get('total_count')}"
+        )
+        
+        messages = messages_data.get("messages", [])
+        assert len(messages) == 2, f"Expected 2 messages in response, got {len(messages)}"
+        
+        # Verify first message content
+        assert messages[0].get("content") == "Can you check the pods in the stuck-namespace?", (
+            "First message content mismatch"
+        )
+        assert messages[0].get("author") == "test-user@example.com", "First message author mismatch"
+        
+        # Verify second message content
+        assert messages[1].get("content") == "Does the namespace still exist?", (
+            "Second message content mismatch"
+        )
+        assert messages[1].get("author") == "test-user@example.com", "Second message author mismatch"
+
+        logger.info("Chat message history retrieved (2 messages)")
+
+        # Step 5: Verify chat_message_count appears in sessions list
+        logger.info("Testing chat_message_count in sessions list...")
+        
+        sessions_response = test_client.get("/api/v1/history/sessions?page=1&page_size=50")
+        
+        assert sessions_response.status_code == 200, (
+            f"Get sessions failed with status {sessions_response.status_code}: "
+            f"{sessions_response.text}"
+        )
+        
+        sessions_data = sessions_response.json()
+        sessions = sessions_data.get("sessions", [])
+        
+        # Find our session in the list
+        our_session = None
+        for session in sessions:
+            if session.get("session_id") == session_id:
+                our_session = session
+                break
+        
+        assert our_session is not None, f"Session {session_id} not found in sessions list"
+        assert our_session.get("chat_message_count") == 2, (
+            f"Expected chat_message_count=2 for session with 2 messages, "
+            f"got {our_session.get('chat_message_count')}"
+        )
+
+        logger.info("Sessions list includes chat_message_count=2")
+
+        logger.info("Chat functionality test completed (2 messages, all endpoints tested)")
+    
+    async def _send_and_wait_for_chat_message(
+        self,
+        test_client,
+        session_id: str,
+        chat_id: str,
+        content: str,
+        message_label: str = "Message",
+        verified_stage_ids: set = None
+    ):
+        """
+        Send a chat message and wait for the response stage to complete.
+        
+        Args:
+            verified_stage_ids: Set of stage IDs that have already been verified
+                               to avoid matching them again
+        
+        Returns:
+            The completed chat stage for verification
+        """
+        if verified_stage_ids is None:
+            verified_stage_ids = set()
+        
+        # Get current chat stage count before sending message
+        detail_data = E2ETestUtils.get_session_details(test_client, session_id)
+        stages_before = [s for s in detail_data.get("stages", []) 
+                        if s.get("stage_id", "").startswith("chat-response")]
+        num_stages_before = len(stages_before)
+        
+        # Send the message (author comes from auth header, not JSON body)
+        send_message_response = test_client.post(
+            f"/api/v1/chats/{chat_id}/messages",
+            json={"content": content},
+            headers={"X-Forwarded-User": "test-user@example.com"}
+        )
+        
+        assert send_message_response.status_code == 200, (
+            f"{message_label} failed with status {send_message_response.status_code}: "
+            f"{send_message_response.text}"
+        )
+        
+        message_data = send_message_response.json()
+        message_id = message_data.get("message_id")
+        
+        assert message_id is not None, f"{message_label} ID missing from response"
+
+        logger.info("%s sent: %s", message_label, message_id)
+
+        # Wait for a NEW chat stage to appear and complete
+        logger.info("Waiting for %s response...", message_label.lower())
+        
+        max_wait = 15  # seconds (increased for chat processing)
+        poll_interval = 0.5  # seconds
+        
+        chat_stage = None
+        for i in range(int(max_wait / poll_interval)):
+            # Get session details to check chat execution
+            detail_data = E2ETestUtils.get_session_details(test_client, session_id)
+            stages = detail_data.get("stages", [])
+            
+            # Look for NEW chat stages (not already verified)
+            # Search from the end since newer stages are added last
+            for stage in reversed(stages):
+                stage_id = stage.get("stage_id", "")
+                if (stage_id.startswith("chat-response") and
+                    stage_id not in verified_stage_ids and
+                    stage.get("chat_id") == chat_id):
+                    chat_stage = stage
+                    break
+            
+            if chat_stage:
+                if chat_stage.get("status") == "completed":
+                    logger.info("%s response completed in %.1fs", message_label, (i+1) * poll_interval)
+                    break
+                # If found but not completed, continue waiting
+            
+            await asyncio.sleep(poll_interval)
+        else:
+            # Provide more debug info on timeout
+            detail_data = E2ETestUtils.get_session_details(test_client, session_id)
+            stages = detail_data.get("stages", [])
+            chat_stages = [s for s in stages if s.get("stage_id", "").startswith("chat-response")]
+            new_stages = [s for s in chat_stages if s.get("stage_id") not in verified_stage_ids]
+            debug_info = []
+            for cs in new_stages:
+                debug_info.append(
+                    f"stage_id={cs.get('stage_id')}, "
+                    f"chat_id={cs.get('chat_id')}, "
+                    f"status={cs.get('status')}"
+                )
+            raise AssertionError(
+                f"{message_label} response did not complete within {max_wait}s. "
+                f"Started with {num_stages_before} stages, now have {len(chat_stages)} total, "
+                f"{len(new_stages)} new (unverified) stages: {debug_info}"
+            )
+        
+        return chat_stage
+
+    async def _verify_chat_response(
+        self,
+        chat_stage,
+        message_key: str,
+        expected_conversation: dict
+    ):
+        """
+        Verify the structure of a chat response using the same pattern as stage verification.
+        
+        Args:
+            chat_stage: The chat stage execution data from the API
+            message_key: Key to look up expected interactions (e.g., 'message_1', 'message_2')
+            expected_conversation: Expected conversation structure for this message
+        """
+        # Verify basic stage structure
+        assert chat_stage is not None, "Chat stage not found"
+        assert chat_stage.get("agent") == "ChatAgent", (
+            f"Expected ChatAgent, got {chat_stage.get('agent')}"
+        )
+        assert chat_stage.get("status") == "completed", (
+            f"Chat stage not completed: {chat_stage.get('status')}"
+        )
+        
+        # Verify chat-specific fields
+        assert chat_stage.get("chat_id") is not None, "Chat ID missing from stage"
+        assert chat_stage.get("chat_user_message_id") is not None, (
+            "Chat user message ID missing from stage"
+        )
+        
+        # Verify embedded user message data (added in user message display feature)
+        chat_user_message = chat_stage.get("chat_user_message")
+        assert chat_user_message is not None, (
+            "Chat user message data missing from stage - should be embedded"
+        )
+        assert chat_user_message.get("message_id") is not None, "User message ID missing"
+        assert chat_user_message.get("content") is not None, "User message content missing"
+        assert chat_user_message.get("author") == "test-user@example.com", (
+            f"User message author mismatch: expected 'test-user@example.com', "
+            f"got '{chat_user_message.get('author')}'"
+        )
+        assert chat_user_message.get("created_at_us") > 0, "User message timestamp invalid"
+        
+        # Verify the content matches what we expect for each message
+        expected_content_map = {
+            'message_1': "Can you check the pods in the stuck-namespace?",
+            'message_2': "Does the namespace still exist?"
+        }
+        expected_content = expected_content_map.get(message_key)
+        if expected_content:
+            assert chat_user_message.get("content") == expected_content, (
+                f"User message content mismatch for {message_key}: "
+                f"expected '{expected_content}', got '{chat_user_message.get('content')}'"
+            )
+        
+        # Get expected interactions for this message
+        expected_chat = EXPECTED_CHAT_INTERACTIONS[message_key]
+        llm_interactions = chat_stage.get("llm_interactions", [])
+        mcp_interactions = chat_stage.get("mcp_communications", [])
+        
+        # Verify interaction counts
+        assert len(llm_interactions) == expected_chat["llm_count"], (
+            f"Chat {message_key}: Expected {expected_chat['llm_count']} LLM interactions, "
+            f"got {len(llm_interactions)}"
+        )
+        assert len(mcp_interactions) == expected_chat["mcp_count"], (
+            f"Chat {message_key}: Expected {expected_chat['mcp_count']} MCP interactions, "
+            f"got {len(mcp_interactions)}"
+        )
+        
+        # Verify complete interaction flow in chronological order
+        chronological_interactions = chat_stage.get("chronological_interactions", [])
+        assert len(chronological_interactions) == len(expected_chat["interactions"]), (
+            f"Chat {message_key} chronological interaction count mismatch: "
+            f"expected {len(expected_chat['interactions'])}, got {len(chronological_interactions)}"
+        )
+        
+        # Track token totals
+        expected_input_tokens = 0
+        expected_output_tokens = 0
+        expected_total_tokens = 0
+        
+        for i, expected_interaction in enumerate(expected_chat["interactions"]):
+            actual_interaction = chronological_interactions[i]
+            interaction_type = expected_interaction["type"]
+            
+            # Verify the type matches
+            assert actual_interaction["type"] == interaction_type, (
+                f"Chat {message_key} interaction {i+1} type mismatch: "
+                f"expected {interaction_type}, got {actual_interaction['type']}"
+            )
+            
+            details = actual_interaction["details"]
+            assert details["success"] == expected_interaction["success"], (
+                f"Chat {message_key} interaction {i+1} success mismatch"
+            )
+            
+            if interaction_type == "llm":
+                # Verify the actual conversation matches the expected conversation
+                actual_conversation = details["conversation"]
+                actual_messages = actual_conversation["messages"]
+                
+                if "conversation_index" in expected_interaction:
+                    # Use conversation_index to slice from the expected conversation
+                    expected_conversation_index = expected_interaction["conversation_index"]
+                    assert_conversation_messages(
+                        expected_conversation, actual_messages, expected_conversation_index
+                    )
+                elif "conversation" in expected_interaction:
+                    # Use the provided conversation directly
+                    expected_conversation_for_interaction = expected_interaction["conversation"]
+                    expected_message_count = len(expected_conversation_for_interaction["messages"])
+                    assert_conversation_messages(
+                        expected_conversation_for_interaction, actual_messages, expected_message_count
+                    )
+                else:
+                    raise AssertionError(
+                        f"Chat {message_key} interaction {i+1} missing both "
+                        "'conversation_index' and 'conversation' fields"
+                    )
+                
+                # Verify token usage
+                if "input_tokens" in expected_interaction:
+                    assert details["input_tokens"] == expected_interaction["input_tokens"], (
+                        f"Chat {message_key} interaction {i+1} input_tokens mismatch: "
+                        f"expected {expected_interaction['input_tokens']}, got {details['input_tokens']}"
+                    )
+                    assert details["output_tokens"] == expected_interaction["output_tokens"], (
+                        f"Chat {message_key} interaction {i+1} output_tokens mismatch: "
+                        f"expected {expected_interaction['output_tokens']}, got {details['output_tokens']}"
+                    )
+                    assert details["total_tokens"] == expected_interaction["total_tokens"], (
+                        f"Chat {message_key} interaction {i+1} total_tokens mismatch: "
+                        f"expected {expected_interaction['total_tokens']}, got {details['total_tokens']}"
+                    )
+                    
+                    # Accumulate token totals
+                    expected_input_tokens += expected_interaction["input_tokens"]
+                    expected_output_tokens += expected_interaction["output_tokens"]
+                    expected_total_tokens += expected_interaction["total_tokens"]
+                    
+            elif interaction_type == "mcp":
+                assert details["communication_type"] == expected_interaction["communication_type"], (
+                    f"Chat {message_key} interaction {i+1} communication_type mismatch"
+                )
+                assert details["server_name"] == expected_interaction["server_name"], (
+                    f"Chat {message_key} interaction {i+1} server_name mismatch"
+                )
+                
+                # Verify tool name for tool_call interactions
+                if expected_interaction["communication_type"] == "tool_call":
+                    assert details["tool_name"] == expected_interaction["tool_name"], (
+                        f"Chat {message_key} interaction {i+1} tool_name mismatch"
+                    )
+        
+        # Validate stage-level token totals
+        actual_stage_input_tokens = chat_stage.get("stage_input_tokens")
+        actual_stage_output_tokens = chat_stage.get("stage_output_tokens")
+        actual_stage_total_tokens = chat_stage.get("stage_total_tokens")
+        
+        assert actual_stage_input_tokens == expected_input_tokens, (
+            f"Chat {message_key} input_tokens total mismatch: "
+            f"expected {expected_input_tokens}, got {actual_stage_input_tokens}"
+        )
+        assert actual_stage_output_tokens == expected_output_tokens, (
+            f"Chat {message_key} output_tokens total mismatch: "
+            f"expected {expected_output_tokens}, got {actual_stage_output_tokens}"
+        )
+        assert actual_stage_total_tokens == expected_total_tokens, (
+            f"Chat {message_key} total_tokens total mismatch: "
+            f"expected {expected_total_tokens}, got {actual_stage_total_tokens}"
+        )
+        
         print(
-            f"    ✅ Stage '{stage_name}': Complete interaction flow verified ({len(llm_interactions)} LLM, {len(mcp_interactions)} MCP)"
+            f"    ✅ Chat {message_key} validated: {len(llm_interactions)} LLM, "
+            f"{len(mcp_interactions)} MCP interactions"
         )

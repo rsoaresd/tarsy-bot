@@ -5,9 +5,11 @@ This module implements the PromptBuilder using LangChain templates
 for clean, composable prompt generation.
 """
 
+from dataclasses import dataclass
 from typing import List, Optional, TYPE_CHECKING
 from tarsy.utils.logger import get_module_logger
 from tarsy.models.processing_context import ToolWithServer
+from tarsy.models.unified_interactions import LLMConversation, MessageRole
 
 if TYPE_CHECKING:
     from tarsy.models.processing_context import StageContext
@@ -28,6 +30,13 @@ from .templates import (
 )
 
 logger = get_module_logger(__name__)
+
+
+@dataclass
+class ChatExchange:
+    """Structured data for a single chat exchange."""
+    user_question: str
+    conversation: LLMConversation  # Full ReAct conversation for this exchange
 
 
 class PromptBuilder:
@@ -175,6 +184,31 @@ Analyze alerts thoroughly and provide actionable insights based on:
 Always be specific, reference actual data, and provide clear next steps.
 Focus on root cause analysis and sustainable solutions."""
     
+    def get_chat_general_instructions(self) -> str:
+        """Get general instructions specifically for ChatAgent follow-up conversations."""
+        return """## Chat Assistant Instructions
+
+You are an expert Site Reliability Engineer (SRE) assistant helping with follow-up questions about a completed alert investigation.
+
+The user has reviewed the investigation results and has follow-up questions. Your role is to:
+- Provide clear, actionable answers based on the investigation history
+- Use available tools to gather fresh, real-time data when needed
+- Reference specific findings from the original investigation when relevant
+- Maintain the same professional SRE communication style
+- Be concise but thorough in your responses
+
+You have access to the same tools and systems that were used in the original investigation."""
+    
+    def get_chat_instructions(self) -> str:
+        """Get additional instructions for ChatAgent handling follow-up questions."""
+        return """## Response Guidelines
+
+1. **Context Awareness**: Reference the investigation history when it provides relevant context
+2. **Fresh Data**: Use tools to gather current system state if the question requires up-to-date information
+3. **Clarity**: If the question is ambiguous or unclear, ask for clarification in your Final Answer
+4. **Specificity**: Always reference actual data and observations, not assumptions
+5. **Brevity**: Be concise but complete - users have already read the full investigation"""
+    
     def build_mcp_summarization_system_prompt(self, server_name: str, tool_name: str, max_summary_tokens: int) -> str:
         """Build system prompt for MCP result summarization."""
         return MCP_SUMMARIZATION_SYSTEM_TEMPLATE.format(
@@ -192,6 +226,170 @@ Focus on root cause analysis and sustainable solutions."""
             tool_name=tool_name,
             result_text=result_text
         )
+    
+    # ============ Chat Formatting Methods ============
+    
+    def format_investigation_context(self, conversation: LLMConversation) -> str:
+        """
+        Format investigation conversation as clean historical context.
+        
+        Extracts user/assistant messages (skips system instructions) and formats
+        with clear emoji-based section markers for LLM consumption.
+        
+        The formatted history includes:
+        - Initial investigation request (alert data, runbook, available tools)
+        - All ReAct reasoning (Thought/Action cycles)
+        - Tool observations (results)
+        - Final analysis
+        
+        Args:
+            conversation: LLMConversation from LLMInteraction.conversation field
+            
+        Returns:
+            Formatted string with investigation context section
+        """
+        sections = []
+        sections.append("═" * 79)
+        sections.append("📋 INVESTIGATION CONTEXT")
+        sections.append("═" * 79)
+        sections.append("")
+        sections.append("# Original Investigation")
+        sections.append("")
+        
+        for i, msg in enumerate(conversation.messages):
+            # Skip system messages - those are instructions we'll re-add for chat
+            if msg.role == MessageRole.SYSTEM:
+                continue
+            
+            # Format each message with clear headers
+            if msg.role == MessageRole.USER:
+                # User messages in investigation are either:
+                # - Initial prompt (tools + alert + runbook + task)
+                # - Observations (tool results)
+                if i == 1:  # First user message after system
+                    sections.append("### Initial Investigation Request")
+                    sections.append("")
+                    sections.append(msg.content)
+                    sections.append("")
+                else:
+                    # Tool result observation
+                    sections.append("**Observation:**")
+                    sections.append("")
+                    sections.append(msg.content)
+                    sections.append("")
+            
+            elif msg.role == MessageRole.ASSISTANT:
+                # Assistant messages contain Thought/Action/Final Answer
+                sections.append("**Agent Response:**")
+                sections.append("")
+                sections.append(msg.content)
+                sections.append("")
+        
+        return "\n".join(sections)
+    
+    def format_chat_history(self, exchanges: List[ChatExchange]) -> str:
+        """
+        Format previous chat exchanges with full ReAct flows.
+        
+        Each exchange includes:
+        - User's question (clean, from ChatUserMessage)
+        - Complete ReAct conversation (Thought/Action/Observation/Final Answer)
+        
+        Args:
+            exchanges: List of previous chat exchanges (ordered chronologically)
+            
+        Returns:
+            Formatted string with chat history section, or empty string if no exchanges
+        """
+        if not exchanges:
+            return ""
+        
+        sections = []
+        sections.append("")
+        sections.append("═" * 79)
+        sections.append(f"💬 CHAT HISTORY ({len(exchanges)} previous exchange{'s' if len(exchanges) != 1 else ''})")
+        sections.append("═" * 79)
+        sections.append("")
+        
+        for i, exchange in enumerate(exchanges, 1):
+            sections.append(f"## Exchange {i}")
+            sections.append("")
+            sections.append("**USER:**")
+            sections.append(exchange.user_question)
+            sections.append("")
+            
+            # Format the full ReAct conversation
+            # Skip first USER message (contains nested investigation context)
+            # Include all ASSISTANT and subsequent USER (observations) messages
+            first_user_found = False
+            for msg in exchange.conversation.messages:
+                if msg.role == MessageRole.SYSTEM:
+                    continue
+                
+                if msg.role == MessageRole.USER:
+                    if not first_user_found:
+                        # Skip first USER message (has nested context)
+                        first_user_found = True
+                        continue
+                    else:
+                        # Observation message
+                        sections.append("**Observation:**")
+                        sections.append("")
+                        sections.append(msg.content)
+                        sections.append("")
+                
+                elif msg.role == MessageRole.ASSISTANT:
+                    # Assistant response with ReAct reasoning
+                    sections.append("**ASSISTANT:**")
+                    sections.append(msg.content)
+                    sections.append("")
+        
+        return "\n".join(sections)
+    
+    def build_chat_user_message(
+        self,
+        investigation_context: str,
+        user_question: str,
+        chat_history: str = ""
+    ) -> str:
+        """
+        Build complete user message for chat with all sections.
+        
+        Combines sections:
+        1. Investigation context (pre-formatted, may already include chat history)
+        2. Optional chat history (formatted previous exchanges, if provided separately)
+        3. Current task (user's question with instructions)
+        
+        Note: investigation_context may be either:
+        - Just the investigation (when called with separate chat_history), OR
+        - Complete context with investigation + chat history (when called from controller)
+        
+        Args:
+            investigation_context: Formatted investigation context (may include chat history)
+            user_question: Current user question
+            chat_history: Optional formatted previous exchanges (default: empty)
+            
+        Returns:
+            Complete formatted user message for LLM
+        """
+        result = investigation_context
+        result += chat_history  # Already includes separators if non-empty
+        
+        result += f"""
+{"═" * 79}
+🎯 CURRENT TASK
+{"═" * 79}
+
+**Question:** {user_question}
+
+**Your Task:**
+Answer using the ReAct format from your system instructions.
+- Reference investigation history when relevant
+- Use tools to get fresh data if needed
+
+Begin your ReAct reasoning:
+"""
+        return result
     
     # ============ Helper Methods ============
     

@@ -12,14 +12,16 @@ from collections import defaultdict
 from sqlmodel import Session, asc, desc, func, select, and_, or_
 
 from tarsy.models.constants import AlertSessionStatus, StageStatus
-from tarsy.models.db_models import AlertSession, StageExecution
+from tarsy.models.db_models import AlertSession, StageExecution, Chat, ChatUserMessage
 from tarsy.models.history_models import (
     PaginatedSessions, DetailedSession, FilterOptions, TimeRangeOption, PaginationInfo,
-    SessionOverview, DetailedStage, LLMTimelineEvent, MCPTimelineEvent, MCPEventDetails
+    SessionOverview, DetailedStage, LLMTimelineEvent, MCPTimelineEvent, MCPEventDetails,
+    ChatUserMessageData
 )
 from tarsy.models.unified_interactions import LLMInteraction, MCPInteraction
 from tarsy.repositories.base_repository import BaseRepository
 from tarsy.utils.logger import get_logger
+from tarsy.utils.timestamp import now_us
 
 logger = get_logger(__name__)
 
@@ -181,6 +183,26 @@ class HistoryRepository:
             return self.session.exec(statement).all()
         except Exception as e:
             logger.error(f"Failed to get LLM interactions for session {session_id}: {str(e)}")
+            raise
+    
+    def get_llm_interactions_for_stage(self, stage_execution_id: str) -> List[LLMInteraction]:
+        """
+        Get all LLM interactions for a stage execution ordered by timestamp.
+        
+        Args:
+            stage_execution_id: The stage execution identifier
+            
+        Returns:
+            List of LLMInteraction instances ordered by timestamp
+        """
+        try:
+            statement = select(LLMInteraction).where(
+                LLMInteraction.stage_execution_id == stage_execution_id
+            ).order_by(asc(LLMInteraction.timestamp_us))
+            
+            return self.session.exec(statement).all()
+        except Exception as e:
+            logger.error(f"Failed to get LLM interactions for stage {stage_execution_id}: {str(e)}")
             raise
 
 
@@ -425,6 +447,38 @@ class HistoryRepository:
                     } for result in token_results
                 }
                 
+                # Count chat user messages for sessions with chats
+                chat_message_counts = {}
+                try:
+                    from tarsy.models.db_models import Chat, ChatUserMessage
+                    
+                    # First get chat IDs for these sessions
+                    chat_query = select(Chat.session_id, Chat.chat_id).where(
+                        Chat.session_id.in_(session_ids)
+                    )
+                    chat_results = self.session.exec(chat_query).all()
+                    chat_ids_by_session = {result.session_id: result.chat_id for result in chat_results}
+                    
+                    if chat_ids_by_session:
+                        # Count messages for each chat
+                        message_count_query = select(
+                            ChatUserMessage.chat_id,
+                            func.count(ChatUserMessage.message_id).label('count')
+                        ).where(
+                            ChatUserMessage.chat_id.in_(list(chat_ids_by_session.values()))
+                        ).group_by(ChatUserMessage.chat_id)
+                        message_results = self.session.exec(message_count_query).all()
+                        message_counts_by_chat = {result.chat_id: result.count for result in message_results}
+                        
+                        # Map back to session IDs
+                        for session_id, chat_id in chat_ids_by_session.items():
+                            count = message_counts_by_chat.get(chat_id, 0)
+                            if count > 0:
+                                chat_message_counts[session_id] = count
+                except Exception as e:
+                    # Don't fail entire query if chat counting fails
+                    logger.warning(f"Failed to count chat messages for sessions: {e}")
+                
                 # Combine counts for each session
                 for session_id in session_ids:
                     tokens = token_sums.get(session_id, {})
@@ -433,7 +487,8 @@ class HistoryRepository:
                         'mcp_communications': mcp_counts.get(session_id, 0),
                         'input_tokens': tokens.get('input_tokens'),
                         'output_tokens': tokens.get('output_tokens'),
-                        'total_tokens': tokens.get('total_tokens')
+                        'total_tokens': tokens.get('total_tokens'),
+                        'chat_message_count': chat_message_counts.get(session_id)
                     }
             
             session_overviews = []
@@ -473,6 +528,8 @@ class HistoryRepository:
                     
                     # MCP configuration override
                     mcp_selection=alert_session.mcp_selection,
+                    
+                    chat_message_count=session_counts.get('chat_message_count'),
                     
                     # Optional fields that may need calculation elsewhere (defaults from SessionOverview)
                     total_stages=None,
@@ -537,6 +594,22 @@ class HistoryRepository:
             )
             stage_executions_db = self.session.exec(stages_stmt).all()
             
+            # Collect all chat user message IDs from stages
+            message_ids = [
+                stage.chat_user_message_id 
+                for stage in stage_executions_db 
+                if stage.chat_user_message_id
+            ]
+            
+            # Fetch all user messages in bulk if there are any
+            user_messages_map: Dict[str, ChatUserMessage] = {}
+            if message_ids:
+                messages_stmt = select(ChatUserMessage).where(
+                    ChatUserMessage.message_id.in_(message_ids)
+                )
+                user_messages = self.session.exec(messages_stmt).all()
+                user_messages_map = {msg.message_id: msg for msg in user_messages}
+            
             # Group interactions by stage_execution_id
             interactions_by_stage = defaultdict(list)
             
@@ -597,6 +670,17 @@ class HistoryRepository:
                     key=lambda x: x.timestamp_us
                 )
                 
+                # Get user message data if this stage has a chat message
+                chat_user_message_data = None
+                if stage_db.chat_user_message_id and stage_db.chat_user_message_id in user_messages_map:
+                    user_msg = user_messages_map[stage_db.chat_user_message_id]
+                    chat_user_message_data = ChatUserMessageData(
+                        message_id=user_msg.message_id,
+                        content=user_msg.content,
+                        author=user_msg.author,
+                        created_at_us=user_msg.created_at_us
+                    )
+                
                 detailed_stage = DetailedStage(
                     execution_id=stage_db.execution_id,
                     session_id=stage_db.session_id,
@@ -610,6 +694,9 @@ class HistoryRepository:
                     duration_ms=stage_db.duration_ms,
                     stage_output=stage_db.stage_output,
                     error_message=stage_db.error_message,
+                    chat_id=stage_db.chat_id,
+                    chat_user_message_id=stage_db.chat_user_message_id,
+                    chat_user_message=chat_user_message_data,
                     llm_interactions=llm_stage_interactions,
                     mcp_communications=mcp_stage_interactions,
                     llm_interaction_count=len(llm_stage_interactions),
@@ -779,6 +866,18 @@ class HistoryRepository:
             completed_stages = len([stage for stage in stage_executions_db if stage.status == StageStatus.COMPLETED.value])
             failed_stages = len([stage for stage in stage_executions_db if stage.status == StageStatus.FAILED.value])
             
+            # Get chat message count if a chat exists
+            chat_message_count = None
+            try:
+                from tarsy.models.db_models import Chat
+                chat_stmt = select(Chat).where(Chat.session_id == session_id)
+                chat = self.session.exec(chat_stmt).first()
+                if chat:
+                    chat_message_count = self.get_chat_user_message_count(chat.chat_id)
+            except Exception as e:
+                # Don't fail the query if chat counting fails
+                logger.warning(f"Failed to get chat message count for session {session_id}: {e}")
+            
             # Create SessionOverview (lighter weight model for summaries)
             return SessionOverview(
                 # Core identification
@@ -813,7 +912,9 @@ class HistoryRepository:
                 current_stage_index=session.current_stage_index,
                 
                 # MCP configuration override
-                mcp_selection=session.mcp_selection
+                mcp_selection=session.mcp_selection,
+                
+                chat_message_count=chat_message_count
             )
             
         except Exception as e:
@@ -943,4 +1044,138 @@ class HistoryRepository:
         except Exception as e:
             logger.error(f"Failed to delete old sessions: {str(e)}")
             self.session.rollback()
+            raise
+    
+    # ===== CHAT OPERATIONS =====
+    
+    def create_chat(self, chat: Chat) -> Optional[Chat]:
+        """Create new chat record."""
+        try:
+            existing = self.session.exec(
+                select(Chat).where(Chat.session_id == chat.session_id)
+            ).first()
+            if existing:
+                logger.warning(f"Chat already exists for session {chat.session_id}")
+                return existing
+            self.session.add(chat)
+            self.session.commit()
+            self.session.refresh(chat)
+            return chat
+        except Exception as e:
+            logger.error(f"Failed to create chat: {str(e)}")
+            self.session.rollback()
+            return None
+    
+    def get_chat_by_id(self, chat_id: str) -> Optional[Chat]:
+        """Get chat by ID."""
+        return self.session.exec(
+            select(Chat).where(Chat.chat_id == chat_id)
+        ).first()
+    
+    def get_chat_by_session(self, session_id: str) -> Optional[Chat]:
+        """Get chat for a session (if exists)."""
+        return self.session.exec(
+            select(Chat).where(Chat.session_id == session_id)
+        ).first()
+    
+    def update_chat(self, chat: Chat) -> bool:
+        """Update existing chat record."""
+        try:
+            self.session.add(chat)
+            self.session.commit()
+            self.session.refresh(chat)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update chat {chat.chat_id}: {str(e)}")
+            self.session.rollback()
+            return False
+    
+    def create_chat_user_message(self, message: ChatUserMessage) -> Optional[ChatUserMessage]:
+        """Create new chat user message."""
+        try:
+            self.session.add(message)
+            self.session.commit()
+            self.session.refresh(message)
+            return message
+        except Exception as e:
+            logger.error(f"Failed to create chat message: {str(e)}")
+            self.session.rollback()
+            return None
+    
+    def get_stage_executions_for_chat(self, chat_id: str) -> List[StageExecution]:
+        """Get all stage executions for a chat, ordered by timestamp."""
+        statement = select(StageExecution).where(
+            StageExecution.chat_id == chat_id
+        ).order_by(asc(StageExecution.started_at_us))
+        return self.session.exec(statement).all()
+    
+    def get_chat_user_message_count(self, chat_id: str) -> int:
+        """Count user messages in a chat."""
+        try:
+            statement = select(func.count(ChatUserMessage.message_id)).where(
+                ChatUserMessage.chat_id == chat_id
+            )
+            result = self.session.exec(statement).one()
+            # When selecting a single scalar value like func.count(), .one() returns a tuple
+            # Extract the first element and cast to int
+            if isinstance(result, tuple):
+                return int(result[0])
+            # In some cases, the result is already a scalar
+            return int(result)
+        except Exception as e:
+            logger.error(f"Failed to count messages for chat {chat_id}: {str(e)}")
+            return 0
+    
+    def get_chat_user_messages(
+        self,
+        chat_id: str,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[ChatUserMessage]:
+        """Get user messages for a chat with pagination."""
+        try:
+            statement = select(ChatUserMessage).where(
+                ChatUserMessage.chat_id == chat_id
+            ).order_by(
+                asc(ChatUserMessage.created_at_us)
+            ).offset(offset).limit(limit)
+            
+            return list(self.session.exec(statement).all())
+        except Exception as e:
+            logger.error(f"Failed to get messages for chat {chat_id}: {str(e)}")
+            return []
+    
+    # Pod Tracking & Orphan Detection
+    
+    def update_chat_pod_tracking(self, chat_id: str, pod_id: str) -> bool:
+        """Update chat with pod tracking information."""
+        try:
+            chat = self.get_chat_by_id(chat_id)
+            if not chat:
+                return False
+            chat.pod_id = pod_id
+            chat.last_interaction_at = now_us()
+            return self.update_chat(chat)
+        except Exception as e:
+            logger.error(f"Failed to update chat pod tracking: {str(e)}")
+            return False
+    
+    def find_chats_by_pod(self, pod_id: str) -> List[Chat]:
+        """Find chats being processed by a specific pod."""
+        statement = select(Chat).where(
+            Chat.pod_id == pod_id,
+            Chat.last_interaction_at.isnot(None)
+        )
+        return self.session.exec(statement).all()
+    
+    def find_orphaned_chats(self, timeout_threshold_us: int) -> List[Chat]:
+        """Find chats with stale last_interaction_at (orphaned processing)."""
+        try:
+            statement = select(Chat).where(
+                Chat.last_interaction_at.isnot(None),
+                Chat.last_interaction_at < timeout_threshold_us
+            )
+            return self.session.exec(statement).all()
+        except Exception as e:
+            logger.error(f"Failed to find orphaned chats: {str(e)}")
             raise

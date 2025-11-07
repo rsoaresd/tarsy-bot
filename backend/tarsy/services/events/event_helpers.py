@@ -18,6 +18,8 @@ from tarsy.models.event_models import (
     MCPToolListEvent,
     StageStartedEvent,
     StageCompletedEvent,
+    ChatCreatedEvent,
+    ChatUserMessageEvent,
 )
 from tarsy.services.events.channels import EventChannel
 from tarsy.services.events.publisher import publish_event
@@ -237,7 +239,13 @@ async def publish_mcp_tool_list(
 
 
 async def publish_stage_started(
-    session_id: str, stage_id: str, stage_name: str
+    session_id: str, 
+    stage_id: str, 
+    stage_name: str, 
+    chat_id: Optional[str] = None,
+    chat_user_message_id: Optional[str] = None,
+    chat_user_message_content: Optional[str] = None,
+    chat_user_message_author: Optional[str] = None
 ) -> None:
     """
     Publish stage.started event.
@@ -246,12 +254,22 @@ async def publish_stage_started(
         session_id: Session identifier
         stage_id: Stage execution identifier
         stage_name: Human-readable stage name
+        chat_id: Optional chat ID if this is a chat response stage
+        chat_user_message_id: Optional user message ID
+        chat_user_message_content: Optional user message content
+        chat_user_message_author: Optional user message author
     """
     try:
         async_session_factory = get_async_session_factory()
         async with async_session_factory() as session:
             event = StageStartedEvent(
-                session_id=session_id, stage_id=stage_id, stage_name=stage_name
+                session_id=session_id, 
+                stage_id=stage_id, 
+                stage_name=stage_name, 
+                chat_id=chat_id,
+                chat_user_message_id=chat_user_message_id,
+                chat_user_message_content=chat_user_message_content,
+                chat_user_message_author=chat_user_message_author
             )
             await publish_event(
                 session, EventChannel.session_details(session_id), event
@@ -262,7 +280,7 @@ async def publish_stage_started(
 
 
 async def publish_stage_completed(
-    session_id: str, stage_id: str, stage_name: str, status: str
+    session_id: str, stage_id: str, stage_name: str, status: str, chat_id: Optional[str] = None
 ) -> None:
     """
     Publish stage.completed event.
@@ -272,6 +290,7 @@ async def publish_stage_completed(
         stage_id: Stage execution identifier
         stage_name: Human-readable stage name
         status: Stage status (completed/failed/partial)
+        chat_id: Optional chat ID if this is a chat response stage
     """
     try:
         async_session_factory = get_async_session_factory()
@@ -281,6 +300,7 @@ async def publish_stage_completed(
                 stage_id=stage_id,
                 stage_name=stage_name,
                 status=status,
+                chat_id=chat_id,
             )
             await publish_event(
                 session, EventChannel.session_details(session_id), event
@@ -311,6 +331,32 @@ async def publish_cancel_request(session_id: str) -> None:
         logger.warning(f"Failed to publish cancel request: {e}")
 
 
+async def publish_chat_cancel_request(stage_execution_id: str) -> None:
+    """
+    Publish chat execution cancellation request to backend pods.
+    
+    Similar to publish_cancel_request but for chat executions.
+    Uses stage_execution_id instead of session_id.
+    
+    This is published to the 'cancellations' channel which all pods subscribe to.
+    The pod owning the chat task will cancel it.
+    
+    Args:
+        stage_execution_id: Stage execution identifier for the chat response
+    """
+    try:
+        from tarsy.models.event_models import ChatCancelRequestedEvent
+        
+        async_session_factory = get_async_session_factory()
+        async with async_session_factory() as session:
+            event = ChatCancelRequestedEvent(stage_execution_id=stage_execution_id)
+            # Publish to cancellations channel (backend-only)
+            await publish_event(session, EventChannel.CANCELLATIONS, event)
+            logger.info(f"[EVENT] Published chat.cancel_requested for {stage_execution_id}")
+    except Exception as e:
+        logger.warning(f"Failed to publish chat cancel request: {e}")
+
+
 async def publish_session_cancelled(session_id: str) -> None:
     """
     Publish cancellation confirmation to clients.
@@ -332,4 +378,66 @@ async def publish_session_cancelled(session_id: str) -> None:
             logger.info("[EVENT] Published session.cancelled to channels")
     except Exception as e:
         logger.warning(f"Failed to publish session.cancelled event: {e}")
+
+
+async def publish_chat_created(
+    session_id: str,
+    chat_id: str,
+    created_by: str
+) -> None:
+    """
+    Publish chat.created event to session-specific channel.
+    
+    Args:
+        session_id: Session identifier
+        chat_id: Chat identifier
+        created_by: User who created the chat
+    """
+    try:
+        async_session_factory = get_async_session_factory()
+        async with async_session_factory() as session:
+            event = ChatCreatedEvent(
+                session_id=session_id,
+                chat_id=chat_id,
+                created_by=created_by
+            )
+            # Publish to session-specific channel (reuse existing subscription)
+            await publish_event(session, EventChannel.session_details(session_id), event)
+            logger.info(f"[EVENT] Published chat.created for chat {chat_id} to session:{session_id}")
+    except Exception as e:
+        logger.warning(f"Failed to publish chat.created event: {e}")
+
+
+async def publish_chat_user_message(
+    session_id: str,
+    chat_id: str,
+    message_id: str,
+    content: str,
+    author: str
+) -> None:
+    """
+    Publish chat.user_message event to session-specific channel.
+    
+    Args:
+        session_id: Session identifier
+        chat_id: Chat identifier
+        message_id: Message identifier
+        content: Message content
+        author: Message author
+    """
+    try:
+        async_session_factory = get_async_session_factory()
+        async with async_session_factory() as session:
+            event = ChatUserMessageEvent(
+                session_id=session_id,
+                chat_id=chat_id,
+                message_id=message_id,
+                content=content,
+                author=author
+            )
+            # Publish to session-specific channel (reuse existing subscription)
+            await publish_event(session, EventChannel.session_details(session_id), event)
+            logger.debug(f"Published chat.user_message for message {message_id}")
+    except Exception as e:
+        logger.warning(f"Failed to publish chat.user_message event: {e}")
 

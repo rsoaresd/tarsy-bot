@@ -6,13 +6,14 @@ import {
   Button, 
   Alert, 
   AlertTitle,
-  Snackbar
+  Snackbar,
+  Collapse,
+  IconButton
 } from '@mui/material';
 import { 
   Psychology, 
   ContentCopy, 
-  ExpandMore, 
-  ExpandLess,
+  ExpandMore,
   AutoAwesome 
 } from '@mui/icons-material';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
@@ -65,11 +66,19 @@ Please review the session details or contact support if this is unexpected.`;
  * Renders AI analysis markdown content with expand/collapse functionality and copy-to-clipboard feature
  * Optimized for live updates
  */
-function FinalAnalysisCard({ analysis, sessionStatus, errorMessage }: FinalAnalysisCardProps) {
+function FinalAnalysisCard({ analysis, sessionStatus, errorMessage, collapseCounter = 0 }: FinalAnalysisCardProps) {
   const [analysisExpanded, setAnalysisExpanded] = useState<boolean>(false);
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [prevAnalysis, setPrevAnalysis] = useState<string | null>(null);
   const [isNewlyUpdated, setIsNewlyUpdated] = useState<boolean>(false);
+
+  // Auto-collapse when collapseCounter changes (e.g., when Jump to Chat is clicked)
+  useEffect(() => {
+    if (collapseCounter > 0) {
+      console.log('📦 Auto-collapsing Final Analysis (Jump to Chat clicked)');
+      setAnalysisExpanded(false);
+    }
+  }, [collapseCounter]);
 
   // Auto-expand when analysis first becomes available or changes significantly
   // Only show "Updated" indicator during active processing, not for historical sessions
@@ -149,13 +158,23 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage }: FinalAnaly
   // Check if this is a fake analysis (for styling purposes)
   const isFakeAnalysis = !analysis && isTerminalSessionStatus(sessionStatus);
 
-  const isLongAnalysis = displayAnalysis.length > 1000;
-  const shouldShowExpandButton = isLongAnalysis && !analysisExpanded;
-
   return (
     <>
       <Paper sx={{ p: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        {/* Collapsible Header */}
+        <Box 
+          sx={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            mb: analysisExpanded ? 2 : 0,
+            cursor: 'pointer',
+            '&:hover': {
+              opacity: 0.8
+            }
+          }}
+          onClick={() => setAnalysisExpanded(!analysisExpanded)}
+        >
           <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Psychology color="primary" />
             Final AI Analysis
@@ -190,55 +209,68 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage }: FinalAnaly
               </Box>
             )}
           </Typography>
-          <Button
-            startIcon={<ContentCopy />}
-            variant="outlined"
-            size="small"
-            onClick={() => handleCopyAnalysis(displayAnalysis)}
-          >
-            Copy {isFakeAnalysis ? 'Message' : 'Analysis'}
-          </Button>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Button
+              startIcon={<ContentCopy />}
+              variant="outlined"
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCopyAnalysis(displayAnalysis);
+              }}
+            >
+              Copy {isFakeAnalysis ? 'Message' : 'Analysis'}
+            </Button>
+            <IconButton 
+              size="small"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAnalysisExpanded(!analysisExpanded);
+              }}
+              sx={{ 
+                transition: 'transform 0.3s ease-in-out',
+                transform: analysisExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+              }}
+            >
+              <ExpandMore />
+            </IconButton>
+          </Box>
         </Box>
 
-        {/* AI-Generated Content Warning - only show for real analysis */}
-        {!isFakeAnalysis && (
-          <Alert 
-            severity="info" 
-            icon={<AutoAwesome />}
-            sx={{ mb: 2 }}
-          >
-            <Box>
-              <Typography variant="body1" sx={{ fontWeight: 600, mb: 0.5, fontSize: '1rem' }}>
-                AI-Generated Content
+        {/* Collapsible Content */}
+        <Collapse in={analysisExpanded} timeout={400}>
+          {/* AI-Generated Content Warning - only show for real analysis */}
+          {!isFakeAnalysis && (
+            <Alert 
+              severity="info" 
+              icon={<AutoAwesome />}
+              sx={{ mb: 2 }}
+            >
+              <Box>
+                <Typography variant="body1" sx={{ fontWeight: 600, mb: 0.5, fontSize: '1rem' }}>
+                  AI-Generated Content
+                </Typography>
+                <Typography variant="body1" sx={{ fontSize: '0.95rem' }}>
+                  Always review AI generated content prior to use.
+                </Typography>
+              </Box>
+            </Alert>
+          )}
+          
+          {/* Status indicator for fake analysis */}
+          {isFakeAnalysis && (
+            <Alert 
+              severity="warning" 
+              sx={{ mb: 2 }}
+            >
+              <Typography variant="body2">
+                This session did not complete successfully.
               </Typography>
-              <Typography variant="body1" sx={{ fontSize: '0.95rem' }}>
-                Always review AI generated content prior to use.
-              </Typography>
-            </Box>
-          </Alert>
-        )}
-        
-        {/* Status indicator for fake analysis */}
-        {isFakeAnalysis && (
-          <Alert 
-            severity="warning" 
-            sx={{ mb: 2 }}
-          >
-            <Typography variant="body2">
-              This session did not complete successfully.
-            </Typography>
-          </Alert>
-        )}
+            </Alert>
+          )}
 
-        {/* Analysis Content with Expand/Collapse */}
-        <Box sx={{ position: 'relative' }}>
-          <Box 
-            sx={{ 
-              maxHeight: analysisExpanded ? 'none' : isLongAnalysis ? '400px' : 'none',
-              overflow: 'hidden',
-              transition: 'max-height 0.3s ease-in-out'
-            }}
-          >
+          {/* Analysis Content */}
+          <Box sx={{ position: 'relative' }}>
             <Paper 
               variant="outlined" 
               sx={{ 
@@ -427,55 +459,16 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage }: FinalAnaly
             </Paper>
           </Box>
 
-          {/* Fade overlay and expand button when collapsed */}
-          {shouldShowExpandButton && (
-            <>
-              <Box
-                sx={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  height: '80px',
-                  background: 'linear-gradient(transparent, white)',
-                  pointerEvents: 'none'
-                }}
-              />
-              <Box sx={{ textAlign: 'center', mt: 1 }}>
-                <Button
-                  variant="text"
-                  startIcon={<ExpandMore />}
-                  onClick={() => setAnalysisExpanded(true)}
-                >
-                  Show Full Analysis
-                </Button>
-              </Box>
-            </>
+          {/* Error message for failed sessions with real analysis (not fake) */}
+          {sessionStatus === 'failed' && errorMessage && !isFakeAnalysis && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              <AlertTitle>Session completed with errors</AlertTitle>
+              <Typography variant="body2">
+                {errorMessage}
+              </Typography>
+            </Alert>
           )}
-
-          {/* Collapse button when expanded */}
-          {analysisExpanded && isLongAnalysis && (
-            <Box sx={{ textAlign: 'center', mt: 1 }}>
-              <Button
-                variant="text"
-                startIcon={<ExpandLess />}
-                onClick={() => setAnalysisExpanded(false)}
-              >
-                Show Less
-              </Button>
-            </Box>
-          )}
-        </Box>
-
-        {/* Error message for failed sessions with real analysis (not fake) */}
-        {sessionStatus === 'failed' && errorMessage && !isFakeAnalysis && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            <AlertTitle>Session completed with errors</AlertTitle>
-            <Typography variant="body2">
-              {errorMessage}
-            </Typography>
-          </Alert>
-        )}
+        </Collapse>
       </Paper>
 
       {/* Copy success snackbar */}

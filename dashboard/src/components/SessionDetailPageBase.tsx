@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
+import {
   Container, 
   Typography, 
   Box, 
@@ -13,18 +13,22 @@ import {
   FormControlLabel,
   ToggleButton,
   ToggleButtonGroup,
-  IconButton
+  IconButton,
+  Button
 } from '@mui/material';
 import { Psychology, BugReport } from '@mui/icons-material';
 import SharedHeader from './SharedHeader';
 import VersionFooter from './VersionFooter';
 import FloatingSubmitAlertFab from './FloatingSubmitAlertFab';
+import ChatPanel from './Chat/ChatPanel';
 import { websocketService } from '../services/websocketService';
 import { useSession } from '../contexts/SessionContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useChatState } from '../hooks/useChatState';
 import type { DetailedSession } from '../types';
 import { useAdvancedAutoScroll } from '../hooks/useAdvancedAutoScroll';
 import { isTerminalSessionEvent } from '../utils/eventTypes';
-import { isActiveSessionStatus } from '../utils/statusConstants';
+import { isActiveSessionStatus, isTerminalSessionStatus } from '../utils/statusConstants';
 
 // Lazy load shared components
 const SessionHeader = lazy(() => import('./SessionHeader'));
@@ -106,11 +110,37 @@ function SessionDetailPageBase({
     refreshSessionStages
   } = useSession(sessionId);
 
+  // Auth context for user information
+  const { user } = useAuth();
+
+  // Chat state management (EP-0027)
+  const {
+    chat,
+    isAvailable: chatAvailable,
+    createChat,
+    sendMessage,
+    cancelExecution,
+    loading: chatLoading,
+    error: chatError,
+    sendingMessage,
+    activeExecutionId,
+    canceling,
+  } = useChatState(sessionId || '', session?.status);
+
   // Auto-scroll settings - only enable by default for active sessions
   const [autoScrollEnabled, setAutoScrollEnabled] = useState<boolean>(() => {
     // Initialize based on session status if available
     return session ? isActiveSessionStatus(session.status) : false;
   });
+
+  // Chat expansion state - use counter to force collapse every time (not boolean)
+  const [collapseCounter, setCollapseCounter] = useState(0);
+  
+  // Track if there's an active chat stage in progress (for disabling chat input)
+  const [chatStageInProgress, setChatStageInProgress] = useState<boolean>(false);
+  
+  // Trigger to force chat panel expansion (e.g., from "Jump to Chat" button)
+  const [shouldExpandChat, setShouldExpandChat] = useState(false);
   
   // Track previous session status to detect transitions
   const prevStatusRef = useRef<string | undefined>(undefined);
@@ -153,6 +183,28 @@ function SessionDetailPageBase({
       }
     }
   }, [session?.status]);
+  
+  // Enable auto-scroll when chat becomes active (even in terminal sessions)
+  useEffect(() => {
+    const isChatActive = sendingMessage || chatStageInProgress || activeExecutionId !== null;
+    
+    if (isChatActive && !autoScrollEnabled) {
+      // Chat activity detected - enable auto-scroll
+      if (disableTimeoutRef.current) {
+        clearTimeout(disableTimeoutRef.current);
+        disableTimeoutRef.current = null;
+      }
+      setAutoScrollEnabled(true);
+      
+      // Scroll to bottom immediately so useAdvancedAutoScroll can track properly
+      setTimeout(() => {
+        window.scrollTo({ 
+          top: document.documentElement.scrollHeight, 
+          behavior: 'smooth' 
+        });
+      }, 300);
+    }
+  }, [sendingMessage, chatStageInProgress, activeExecutionId, autoScrollEnabled]);
   
   // Perform initial scroll to bottom for active sessions
   useEffect(() => {
@@ -200,14 +252,19 @@ function SessionDetailPageBase({
   }, [viewType]);
 
 
-  // Ref to hold latest session to avoid stale closures in WebSocket handlers
+  // Refs to hold latest values to avoid stale closures in WebSocket handlers
   const sessionRef = useRef<DetailedSession | null>(null);
+  const chatRef = useRef<any>(null);
   const lastUpdateRef = useRef<number>(0);
   const updateThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+  
+  useEffect(() => {
+    chatRef.current = chat;
+  }, [chat]);
 
   // Throttled update function to prevent UI overload
   const throttledUpdate = (updateFn: () => void, delay: number = 500) => {
@@ -233,6 +290,31 @@ function SessionDetailPageBase({
     }
   };
 
+  // Track chat stage progress for disabling chat input
+  useEffect(() => {
+    if (!sessionId) return;
+    
+    const handleStageEvent = (event: any) => {
+      // Only track chat stages (those with chat_id)
+      if (!event.chat_id) return;
+      
+      if (event.type === 'stage.started') {
+        console.log('💬 Chat stage started - disabling chat input');
+        setChatStageInProgress(true);
+      } else if (event.type === 'stage.completed' || event.type === 'stage.failed') {
+        console.log('💬 Chat stage ended - enabling chat input');
+        setChatStageInProgress(false);
+      }
+    };
+    
+    const unsubscribe = websocketService.subscribeToChannel(
+      `session:${sessionId}`,
+      handleStageEvent
+    );
+    
+    return () => unsubscribe();
+  }, [sessionId]);
+
   // WebSocket setup for real-time updates (catchup events handle race conditions)
   useEffect(() => {
     if (!sessionId) return;
@@ -252,6 +334,14 @@ function SessionDetailPageBase({
       console.log(`📡 ${viewType} view received update:`, update.type);
       
       const eventType = update.type || '';
+      
+      // Handle chat events (EP-0027)
+      if (eventType === 'chat.created' || eventType === 'chat.user_message') {
+        console.log('💬 Chat event received:', eventType);
+        // Chat state will be updated through the API response
+        // No need to refresh session data for chat events
+        return;
+      }
       
       // Use pattern matching for robust event handling
       if (eventType.startsWith('session.')) {
@@ -291,8 +381,11 @@ function SessionDetailPageBase({
       }
       else if (eventType.startsWith('llm.') || eventType.startsWith('mcp.')) {
         // LLM/MCP interaction events (llm.interaction, mcp.tool_call, mcp.list_tools)
-        // Only update if session is active (in progress, pending, or canceling)
-        if (sessionRef.current?.status && isActiveSessionStatus(sessionRef.current.status)) {
+        // Update if session is active OR if there's an active chat on a terminal session
+        const hasActiveChat = chatRef.current !== null;
+        const isActive = sessionRef.current?.status && isActiveSessionStatus(sessionRef.current.status);
+        
+        if (isActive || hasActiveChat) {
           console.log('🔄 Activity update, using partial refresh');
           
           // Always update summary for real-time statistics (lightweight)
@@ -558,14 +651,76 @@ function SessionDetailPageBase({
               </Alert>
             )}
 
+            {/* Chat Panel - Only shown for terminated sessions (completed, failed, cancelled) */}
+            {/* Positioned here (after timeline, before final analysis) for better UX */}
+            {isTerminalSessionStatus(session.status) && (
+              <Box id="chat-panel">
+                <ChatPanel
+                  chat={chat}
+                  isAvailable={chatAvailable}
+                  onCreateChat={createChat}
+                  onSendMessage={async (content) => {
+                    await sendMessage(content, user?.email || 'anonymous');
+                  }}
+                  onCancelExecution={cancelExecution}
+                  loading={chatLoading}
+                  error={chatError}
+                  sendingMessage={sendingMessage}
+                  chatStageInProgress={chatStageInProgress}
+                  canCancel={!!activeExecutionId}
+                  canceling={canceling}
+                  forceExpand={shouldExpandChat}
+                  onCollapseAnalysis={() => setCollapseCounter(prev => prev + 1)}
+                />
+              </Box>
+            )}
+
             {/* Final AI Analysis - Lazy loaded */}
+            {/* Auto-collapses when Jump to Chat is clicked (via collapseCounter) */}
             <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
               <FinalAnalysisCard 
                 analysis={session.final_analysis}
                 sessionStatus={session.status}
                 errorMessage={session.error_message}
+                collapseCounter={collapseCounter}
               />
             </Suspense>
+
+            {/* Jump to Chat button - shown after Final Analysis when chat is available */}
+            {isTerminalSessionStatus(session.status) && (chat || chatAvailable) && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                <Button
+                  variant="outlined"
+                  size="large"
+                  onClick={() => {
+                    // Increment counter to force Final Analysis collapse every time
+                    setCollapseCounter(prev => prev + 1);
+                    
+                    // Trigger chat expansion (will only expand if not already expanded)
+                    setShouldExpandChat(true);
+                    setTimeout(() => setShouldExpandChat(false), 500);
+                    
+                    // Always scroll to the very bottom of the page
+                    // Wait for Final Analysis collapse animation (400ms) + buffer
+                    setTimeout(() => {
+                      window.scrollTo({ 
+                        top: document.documentElement.scrollHeight, 
+                        behavior: 'smooth' 
+                      });
+                    }, 500);
+                  }}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    fontSize: '1rem',
+                    py: 1.5,
+                    px: 4,
+                  }}
+                >
+                  💬 Jump to Follow-up Chat
+                </Button>
+              </Box>
+            )}
           </Box>
         )}
 
