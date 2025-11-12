@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, forwardRef } from 'react';
 import { 
   Paper, 
   Typography, 
@@ -16,6 +16,7 @@ import {
   ExpandMore,
   AutoAwesome 
 } from '@mui/icons-material';
+import { alpha } from '@mui/material/styles';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import type { FinalAnalysisCardProps } from '../types';
 import CopyButton from './CopyButton';
@@ -66,7 +67,7 @@ Please review the session details or contact support if this is unexpected.`;
  * Renders AI analysis markdown content with expand/collapse functionality and copy-to-clipboard feature
  * Optimized for live updates
  */
-function FinalAnalysisCard({ analysis, sessionStatus, errorMessage, collapseCounter = 0 }: FinalAnalysisCardProps) {
+const FinalAnalysisCard = forwardRef<HTMLDivElement, FinalAnalysisCardProps>(({ analysis, sessionStatus, errorMessage, collapseCounter = 0, expandCounter = 0 }, ref) => {
   const [analysisExpanded, setAnalysisExpanded] = useState<boolean>(false);
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [prevAnalysis, setPrevAnalysis] = useState<string | null>(null);
@@ -75,10 +76,16 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage, collapseCoun
   // Auto-collapse when collapseCounter changes (e.g., when Jump to Chat is clicked)
   useEffect(() => {
     if (collapseCounter > 0) {
-      console.log('📦 Auto-collapsing Final Analysis (Jump to Chat clicked)');
       setAnalysisExpanded(false);
     }
   }, [collapseCounter]);
+
+  // Auto-expand when expandCounter changes (e.g., when Jump to Final Analysis is clicked)
+  useEffect(() => {
+    if (expandCounter > 0) {
+      setAnalysisExpanded(true);
+    }
+  }, [expandCounter]);
 
   // Auto-expand when analysis first becomes available or changes significantly
   // Only show "Updated" indicator during active processing, not for historical sessions
@@ -93,14 +100,12 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage, collapseCoun
         Math.abs(analysis.length - prevAnalysis.length) > 100;
       
       if (isFirstTime) {
-        console.log('🎯 Final analysis first received, auto-expanding');
         setAnalysisExpanded(true);
         // Only show "Updated" indicator if session is actively processing
         if (isActiveSession) {
           setIsNewlyUpdated(true);
         }
       } else if (isSignificantChange) {
-        console.log('🎯 Final analysis significantly updated');
         // Only show "Updated" indicator if session is actively processing
         if (isActiveSession) {
           setIsNewlyUpdated(true);
@@ -160,7 +165,7 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage, collapseCoun
 
   return (
     <>
-      <Paper sx={{ p: 3 }}>
+      <Paper ref={ref} sx={{ p: 3 }}>
         {/* Collapsible Header */}
         <Box 
           sx={{ 
@@ -175,9 +180,26 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage, collapseCoun
           }}
           onClick={() => setAnalysisExpanded(!analysisExpanded)}
         >
-          <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Psychology color="primary" />
-            Final AI Analysis
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box
+              sx={{
+                width: 40,
+                height: 40,
+                borderRadius: '50%',
+                bgcolor: (theme) => alpha(theme.palette.primary.main, 0.15),
+                border: '2px solid',
+                borderColor: 'primary.main',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Psychology sx={{ fontSize: 24, color: 'primary.main' }} />
+            </Box>
+            <Typography variant="h6">
+              Final AI Analysis
+            </Typography>
             {isNewlyUpdated && (
               <Box
                 sx={{
@@ -208,7 +230,7 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage, collapseCoun
                 ✨ Updated
               </Box>
             )}
-          </Typography>
+          </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Button
               startIcon={<ContentCopy />}
@@ -228,7 +250,7 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage, collapseCoun
                 setAnalysisExpanded(!analysisExpanded);
               }}
               sx={{ 
-                transition: 'transform 0.3s ease-in-out',
+                transition: 'transform 0.4s',
                 transform: analysisExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
               }}
             >
@@ -481,6 +503,8 @@ function FinalAnalysisCard({ analysis, sessionStatus, errorMessage, collapseCoun
       />
     </>
   );
-}
+});
+
+FinalAnalysisCard.displayName = 'FinalAnalysisCard';
 
 export default FinalAnalysisCard; 

@@ -16,7 +16,7 @@ import {
   IconButton,
   Button
 } from '@mui/material';
-import { Psychology, BugReport } from '@mui/icons-material';
+import { Psychology, BugReport, KeyboardDoubleArrowDown, KeyboardDoubleArrowUp } from '@mui/icons-material';
 import SharedHeader from './SharedHeader';
 import VersionFooter from './VersionFooter';
 import FloatingSubmitAlertFab from './FloatingSubmitAlertFab';
@@ -136,6 +136,9 @@ function SessionDetailPageBase({
   // Chat expansion state - use counter to force collapse every time (not boolean)
   const [collapseCounter, setCollapseCounter] = useState(0);
   
+  // Final Analysis expansion state - use counter to force expand every time (not boolean)
+  const [expandCounter, setExpandCounter] = useState(0);
+  
   // Track if there's an active chat stage in progress (for disabling chat input)
   const [chatStageInProgress, setChatStageInProgress] = useState<boolean>(false);
   
@@ -144,6 +147,9 @@ function SessionDetailPageBase({
   
   // Track previous session status to detect transitions
   const prevStatusRef = useRef<string | undefined>(undefined);
+  
+  // Ref for Final Analysis Card (for scrolling)
+  const finalAnalysisRef = useRef<HTMLDivElement>(null);
   const disableTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasPerformedInitialScrollRef = useRef<boolean>(false);
   
@@ -627,6 +633,45 @@ function SessionDetailPageBase({
               <OriginalAlertCard alertData={session.alert_data} />
             </Suspense>
 
+            {/* Jump to Final Analysis button - shown at top for quick navigation to conclusion */}
+            {session.final_analysis && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', my: 1.5 }}>
+                <Button
+                  variant="text"
+                  size="medium"
+                  onClick={() => {
+                    // Increment counter to force Final Analysis expansion
+                    setExpandCounter(prev => prev + 1);
+                    
+                    // Scroll to Final Analysis with offset for header
+                    // Wait for expansion animation (400ms) + buffer (100ms)
+                    setTimeout(() => {
+                      if (finalAnalysisRef.current) {
+                        const yOffset = -20; // Offset for better visual positioning
+                        const y = finalAnalysisRef.current.getBoundingClientRect().top + window.pageYOffset + yOffset;
+                        window.scrollTo({ top: y, behavior: 'smooth' });
+                      }
+                    }, 500);
+                  }}
+                  startIcon={<KeyboardDoubleArrowDown />}
+                  endIcon={<KeyboardDoubleArrowDown />}
+                  sx={{
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    fontSize: '0.95rem',
+                    py: 1,
+                    px: 3,
+                    color: 'primary.main',
+                    '&:hover': {
+                      backgroundColor: 'action.hover',
+                    },
+                  }}
+                >
+                  Jump to Final Analysis
+                </Button>
+              </Box>
+            )}
+
             {/* Timeline Content - Conditional based on view type */}
             {session.stages && session.stages.length > 0 ? (
               <Suspense fallback={timelineSkeleton}>
@@ -677,21 +722,24 @@ function SessionDetailPageBase({
 
             {/* Final AI Analysis - Lazy loaded */}
             {/* Auto-collapses when Jump to Chat is clicked (via collapseCounter) */}
+            {/* Auto-expands when Jump to Final Analysis is clicked (via expandCounter) */}
             <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
               <FinalAnalysisCard 
+                ref={finalAnalysisRef}
                 analysis={session.final_analysis}
                 sessionStatus={session.status}
                 errorMessage={session.error_message}
                 collapseCounter={collapseCounter}
+                expandCounter={expandCounter}
               />
             </Suspense>
 
             {/* Jump to Chat button - shown after Final Analysis when chat is available */}
             {isTerminalSessionStatus(session.status) && (chat || chatAvailable) && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
                 <Button
-                  variant="outlined"
-                  size="large"
+                  variant="text"
+                  size="medium"
                   onClick={() => {
                     // Increment counter to force Final Analysis collapse every time
                     setCollapseCounter(prev => prev + 1);
@@ -709,15 +757,21 @@ function SessionDetailPageBase({
                       });
                     }, 500);
                   }}
+                  startIcon={<KeyboardDoubleArrowUp />}
+                  endIcon={<KeyboardDoubleArrowUp />}
                   sx={{
                     textTransform: 'none',
                     fontWeight: 600,
-                    fontSize: '1rem',
-                    py: 1.5,
-                    px: 4,
+                    fontSize: '0.95rem',
+                    py: 1,
+                    px: 3,
+                    color: 'primary.main',
+                    '&:hover': {
+                      backgroundColor: 'action.hover',
+                    },
                   }}
                 >
-                  💬 Jump to Follow-up Chat
+                  Jump to Follow-up Chat
                 </Button>
               </Box>
             )}
