@@ -9,6 +9,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+from ...models.unified_interactions import LLMConversation, LLMMessage, MessageRole
 from ...models.unified_interactions import MessageRole
 from ...config.settings import get_settings
 from ..parsers.react_parser import ReActParser
@@ -125,6 +126,87 @@ class IterationController(ABC):
         # This ensures we always show something even if parsing fails
         return analysis_result
 
+    async def extract_resume(
+        self, 
+        analysis_result: str, 
+        context: 'StageContext'
+    ) -> str:
+        """
+        Create AI-powered 2-3 line resume of analysis result.
+        
+        Args:
+            analysis_result: Full analysis text from execute_analysis_loop
+            context: StageContext containing all stage processing data
+            
+        Returns:
+            2-3 line AI-generated resume
+        """
+        if not analysis_result:
+            return "No analysis result available"
+        
+        # Create summarization prompt
+        resume_prompt = f"""Please create a concise 2-3 line resume of the following technical analysis:
+
+    {analysis_result}
+
+    Requirements:
+    - Maximum 2-3 sentences
+    - Focus on key findings and conclusions
+    - Use clear, non-technical language where possible
+    - Highlight the most important insights
+
+    Resume:"""
+
+        try:
+            # The agent's llm_client is actually an LLMManager
+            llm_manager = context.agent.llm_client if hasattr(context.agent, 'llm_client') else None
+            
+            if not llm_manager:
+                # Fallback to simple text extraction
+                return self._extract_simple_resume(analysis_result)
+            
+            
+            # Create system message first (required by validation)
+            system_message = LLMMessage(
+                role=MessageRole.SYSTEM, 
+                content="You are a helpful assistant that creates concise summaries."
+            )
+
+            # Create user message with the prompt
+            user_message = LLMMessage(
+                role=MessageRole.USER, 
+                content=resume_prompt
+            )
+
+            # Create conversation with both messages
+            conversation = LLMConversation(messages=[system_message, user_message])
+            
+            # Generate AI resume using LLMManager interface
+            response_conversation = await llm_manager.generate_response(
+                conversation=conversation,
+                session_id=context.session_id,
+                stage_execution_id=context.agent.get_current_stage_execution_id(),
+                max_tokens=150,
+                interaction_type="summarization"
+            )
+            
+            # Extract the assistant's response
+            assistant_message = response_conversation.get_latest_assistant_message()
+            if not assistant_message:
+                raise Exception("No assistant response received for resume generation")
+            
+            resume_response = assistant_message.content
+            
+            # Clean up the response
+            resume = resume_response.strip()
+            if resume.startswith("Resume:"):
+                resume = resume[8:].strip()
+                
+            return resume
+            
+        except Exception as e:
+            self.logger.warning(f"AI resume generation failed: {e}")
+            return "error generating resume"
 
 class ReactController(IterationController):
     """
