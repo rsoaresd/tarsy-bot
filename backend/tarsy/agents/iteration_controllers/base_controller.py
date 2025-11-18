@@ -126,7 +126,7 @@ class IterationController(ABC):
         # This ensures we always show something even if parsing fails
         return analysis_result
 
-    async def extract_resume(
+    async def generate_resume(
         self, 
         analysis_result: str, 
         context: 'StageContext'
@@ -144,26 +144,11 @@ class IterationController(ABC):
         if not analysis_result:
             return "No analysis result available"
         
-        # Create summarization prompt
-        resume_prompt = f"""Please create a concise 1-2 line resume of the following technical analysis:
-
-    {analysis_result}
-
-    Requirements:
-    - Maximum 1-2 sentences
-    - Focus on key findings and conclusions
-    - Use clear, non-technical language where possible
-    - Highlight the most important insights
-
-    Resume:"""
-
         try:
+            resume_prompt = context.agent.prompt_builder.build_resume_prompt(analysis_result)
+
             # The agent's llm_client is actually an LLMManager
             llm_manager = context.agent.llm_client if hasattr(context.agent, 'llm_client') else None
-            
-            if not llm_manager:
-                raise ValueError("LLM manager is required for resume generation but not available")
-            
             
             # Create system message first (required by validation)
             system_message = LLMMessage(

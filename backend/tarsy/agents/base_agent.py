@@ -204,7 +204,7 @@ class BaseAgent(ABC):
                 context=stage_context
             )
             
-            resume = await self._iteration_controller.extract_resume(
+            resume = await self._iteration_controller.generate_resume(
                 analysis_result=analysis_result,
                 context=stage_context
             )
