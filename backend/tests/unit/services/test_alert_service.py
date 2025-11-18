@@ -1612,13 +1612,12 @@ class TestAlertServiceSlackIntegration:
         mock_slack.send_alert_notification = AsyncMock(return_value=True)
         
         # Mock successful chain execution
-        with patch.object(service, '_execute_chain_stages') as mock_execute_stages:
+        with patch.object(service, '_execute_chain_stages', new_callable=AsyncMock) as mock_execute_stages:
             mock_execute_stages.return_value = ChainExecutionResult(
                 status=ChainStatus.COMPLETED,
                 timestamp_us=now_us(),  # Add this required field
                 final_analysis="Test analysis",
                 resume="Test resume",
-                session_id="test-session"
             )
             
             # Mock other dependencies
@@ -1645,7 +1644,6 @@ class TestAlertServiceSlackIntegration:
             # Verify Slack notification was called
             mock_slack.send_alert_notification.assert_called_once_with(
                 alert_type=sample_chain_context.processing_alert.alert_type,
-                status="completed",
                 analysis="Test resume",
                 session_id=sample_chain_context.session_id,
             )
@@ -1684,7 +1682,6 @@ class TestAlertServiceSlackIntegration:
             # Verify Slack notification was called for failure
             mock_slack.send_alert_notification.assert_called_once_with(
                 alert_type=sample_chain_context.processing_alert.alert_type,
-                status="failed",
                 error="Alert processing failed: Processing failed",
                 session_id=sample_chain_context.session_id
             )

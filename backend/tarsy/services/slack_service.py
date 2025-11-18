@@ -2,7 +2,7 @@
 Slack Notification Service
 
 Handles sending notifications to Slack channel for alert processing events.
-Supports webhooks and provides formatted messages for different alert statuses.
+Supports webhooks and provides formatted messages.
 """
 
 from typing import Dict, Any, Optional
@@ -51,7 +51,6 @@ class SlackService:
     async def send_alert_notification(
         self,
         alert_type: str,
-        status: str,
         analysis: Optional[str] = None,
         error: Optional[str] = None,
         session_id: Optional[str] = None,
@@ -62,7 +61,6 @@ class SlackService:
         
         Args:
             alert_type: Type of alert processed
-            status: Status of processing ('completed', 'failed', 'error')
             analysis: Analysis result (for successful processing)
             error: Error message (for failed processing)
             session_id: Session ID for tracking
@@ -79,7 +77,6 @@ class SlackService:
             # Format message based on status
             message = self._format_alert_message(
                 alert_type=alert_type,
-                status=status,
                 analysis=analysis,
                 error=error,
                 session_id=session_id,
@@ -90,7 +87,7 @@ class SlackService:
             success = await self._send_to_slack(message)
             
             if success:
-                logger.info(f"Slack notification sent for {alert_type} alert ({status})")
+                logger.info(f"Slack notification sent for {alert_type} alert")
             else:
                 logger.warning(f"Failed to send Slack notification for {alert_type} alert")
             
@@ -103,7 +100,6 @@ class SlackService:
     def _format_alert_message(
         self,
         alert_type: str,
-        status: str,
         analysis: Optional[str] = None,
         error: Optional[str] = None,
         session_id: Optional[str] = None,
@@ -114,7 +110,6 @@ class SlackService:
         
         Args:
             alert_type: Type of alert
-            status: Processing status
             analysis: Analysis result
             error: Error message
             session_id: Session ID
@@ -132,7 +127,7 @@ class SlackService:
         # Build the main alert text - always show as firing
         text_parts = []
         text_parts.append("🚒 *Firing*:")
-        text_parts.append(self._format_alert_details(alert_type, alert_data, "firing"))
+        text_parts.append(self._format_alert_details(alert_type, alert_data))
         
         # Add analysis or error if available
         if analysis:
@@ -170,7 +165,6 @@ class SlackService:
         self, 
         alert_type: str, 
         alert_data: Optional[Dict[str, Any]], 
-        alert_status: str
     ) -> str:
         """
         Format individual alert details in Alertmanager style.
@@ -178,7 +172,6 @@ class SlackService:
         Args:
             alert_type: Type of alert
             alert_data: Alert data dictionary
-            alert_status: Status of the alert (firing/resolved)
             
         Returns:
             Formatted alert details string

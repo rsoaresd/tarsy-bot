@@ -132,25 +132,25 @@ class IterationController(ABC):
         context: 'StageContext'
     ) -> str:
         """
-        Create AI-powered 2-3 line resume of analysis result.
+        Create AI-powered 1-2 line resume of analysis result.
         
         Args:
             analysis_result: Full analysis text from execute_analysis_loop
             context: StageContext containing all stage processing data
             
         Returns:
-            2-3 line AI-generated resume
+            1-2 line AI-generated resume
         """
         if not analysis_result:
             return "No analysis result available"
         
         # Create summarization prompt
-        resume_prompt = f"""Please create a concise 2-3 line resume of the following technical analysis:
+        resume_prompt = f"""Please create a concise 1-2 line resume of the following technical analysis:
 
     {analysis_result}
 
     Requirements:
-    - Maximum 2-3 sentences
+    - Maximum 1-2 sentences
     - Focus on key findings and conclusions
     - Use clear, non-technical language where possible
     - Highlight the most important insights
@@ -162,8 +162,7 @@ class IterationController(ABC):
             llm_manager = context.agent.llm_client if hasattr(context.agent, 'llm_client') else None
             
             if not llm_manager:
-                # Fallback to simple text extraction
-                return self._extract_simple_resume(analysis_result)
+                raise ValueError("LLM manager is required for resume generation but not available")
             
             
             # Create system message first (required by validation)
@@ -205,8 +204,7 @@ class IterationController(ABC):
             return resume
             
         except Exception as e:
-            self.logger.warning(f"AI resume generation failed: {e}")
-            return "error generating resume"
+            return None
 
 class ReactController(IterationController):
     """

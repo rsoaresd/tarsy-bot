@@ -983,7 +983,7 @@ class TestExtractResume:
         assert len(conversation.messages) == 2
         assert conversation.messages[0].role == MessageRole.SYSTEM
         assert conversation.messages[1].role == MessageRole.USER
-        assert "Please create a concise 2-3 line resume" in conversation.messages[1].content
+        assert "Please create a concise 1-2 line resume" in conversation.messages[1].content
 
         # Check other parameters
         assert call_args[1]['session_id'] == "test-session-123"
@@ -1014,13 +1014,9 @@ class TestExtractResume:
         # Remove llm_client from agent
         mock_context.agent.llm_client = None
 
-        # Mock the fallback method
-        controller._extract_simple_resume = Mock(return_value="Simple fallback resume")
-
         result = await controller.extract_resume("Some analysis", mock_context)
 
-        assert result == "Simple fallback resume"
-        controller._extract_simple_resume.assert_called_once_with("Some analysis")
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_extract_resume_no_assistant_response(self, controller, mock_context):
@@ -1033,7 +1029,7 @@ class TestExtractResume:
 
         result = await controller.extract_resume("Some analysis", mock_context)
 
-        assert result == "error generating resume"
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_extract_resume_llm_exception(self, controller, mock_context):
@@ -1043,7 +1039,7 @@ class TestExtractResume:
 
         result = await controller.extract_resume("Some analysis", mock_context)
 
-        assert result == "error generating resume"
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_extract_resume_empty_analysis(self, controller, mock_context):

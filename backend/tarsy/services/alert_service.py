@@ -378,7 +378,6 @@ class AlertService:
                 if self.slack_service.enabled:
                     await self.slack_service.send_alert_notification(
                         alert_type=chain_context.processing_alert.alert_type,
-                        status=AlertSessionStatus.COMPLETED.value,
                         analysis=chain_result.resume,
                         session_id=chain_context.session_id
                     )
@@ -411,7 +410,6 @@ class AlertService:
                 if self.slack_service.enabled:
                     await self.slack_service.send_alert_notification(
                         alert_type=chain_context.processing_alert.alert_type,
-                        status=AlertSessionStatus.FAILED.value,
                         error=error_msg,
                         session_id=chain_context.session_id
                     )
@@ -432,7 +430,6 @@ class AlertService:
             if self.slack_service.enabled:
                     await self.slack_service.send_alert_notification(
                         alert_type=chain_context.processing_alert.alert_type,
-                        status=AlertSessionStatus.FAILED.value,
                         error=error_msg,
                         session_id=chain_context.session_id
                     )
@@ -836,11 +833,16 @@ class AlertService:
             timestamp_us = now_us()
 
             resume=self.extract_resume(chain_context)
+
+            if resume is None and overall_status == ChainStatus.COMPLETED:
+                logger.error("Chain completed but failed to generate resume - this is unexpected")
+                if not chain_error:
+                    chain_error = "Chain completed but resume generation failed"
             
             return ChainExecutionResult(
                 status=overall_status,
                 final_analysis=final_analysis if overall_status == ChainStatus.COMPLETED else None,
-                resume=resume if overall_status == ChainStatus.COMPLETED else None,
+                resume=resume,
                 error=chain_error if overall_status == ChainStatus.FAILED else None,
                 timestamp_us=timestamp_us
             )
@@ -1396,7 +1398,7 @@ class AlertService:
         except Exception as e:
             logger.warning(f"Failed to update stage execution as started: {str(e)}")
     
-    def extract_resume(self, chain_context: ChainContext) -> str:
+    def extract_resume(self, chain_context: ChainContext) -> Optional[str]:
         """
         Extract resume (resume) from agent execution results.
         
@@ -1420,7 +1422,6 @@ class AlertService:
                 logger.info(f"Found resume from stage '{stage_name}' (fallback): {stage_result.resume[:100]}...")
                 return stage_result.resume
         
-        # Final fallback: use result_summary if no AI resume available
         logger.warning("No AI-generated resume found, using result_summary fallback")
         return None
 
