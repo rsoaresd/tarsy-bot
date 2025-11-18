@@ -10,7 +10,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from ...models.unified_interactions import LLMConversation, LLMMessage, MessageRole
-from ...models.unified_interactions import MessageRole
 from ...config.settings import get_settings
 from ..parsers.react_parser import ReActParser
 
@@ -145,7 +144,7 @@ class IterationController(ABC):
             return "No analysis result available"
         
         try:
-            resume_prompt = context.agent.prompt_builder.build_resume_prompt(analysis_result)
+            resume_prompt = context.agent._prompt_builder.build_resume_prompt(analysis_result)
 
             # The agent's llm_client is actually an LLMManager
             llm_manager = context.agent.llm_client if hasattr(context.agent, 'llm_client') else None
