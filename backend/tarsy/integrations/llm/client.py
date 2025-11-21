@@ -18,11 +18,12 @@ from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 from langchain_openai import ChatOpenAI
 from langchain_xai import ChatXAI
 from langchain_anthropic import ChatAnthropic
+from google.ai.generativelanguage_v1beta.types import Tool as GoogleTool
 
 from tarsy.config.settings import Settings
 from tarsy.hooks.hook_context import llm_interaction_context
 from tarsy.models.constants import LLMInteractionType, StreamingEventType
-from tarsy.models.llm_models import LLMProviderConfig
+from tarsy.models.llm_models import LLMProviderConfig, LLMProviderType
 from tarsy.models.unified_interactions import LLMConversation, MessageRole
 from tarsy.utils.logger import get_module_logger
 from tarsy.utils.error_details import extract_error_details
@@ -119,11 +120,11 @@ def _create_vertexai_client(temp, api_key, model, disable_ssl_verification=False
     return ChatAnthropicVertex(**client_kwargs)
 
 LLM_PROVIDERS = {
-    "openai": _create_openai_client,
-    "google": _create_google_client,
-    "xai": _create_xai_client,
-    "anthropic": _create_anthropic_client,
-    "vertexai": _create_vertexai_client
+    LLMProviderType.OPENAI.value: _create_openai_client,
+    LLMProviderType.GOOGLE.value: _create_google_client,
+    LLMProviderType.XAI.value: _create_xai_client,
+    LLMProviderType.ANTHROPIC.value: _create_anthropic_client,
+    LLMProviderType.VERTEXAI.value: _create_vertexai_client
 }
 
 
@@ -142,6 +143,7 @@ class LLMClient:
         self.settings = settings  # Store settings for feature flag access
         self.available: bool = False
         self._sqlite_warning_logged: bool = False
+        self.google_search_tool: Optional[GoogleTool] = None  # Store Google Search tool for Gemini models
         self._initialize_client()
     
     def _initialize_client(self):
@@ -150,7 +152,7 @@ class LLMClient:
             # Map provider name to provider type for LLM_PROVIDERS
             provider_type = self.config.type  # Direct field access on BaseModel
             
-            if provider_type in LLM_PROVIDERS:
+            if provider_type.value in LLM_PROVIDERS:
                 if not self.api_key:
                     logger.warning(f"No API key provided for {self.provider_name}")
                     self.available = False
@@ -161,17 +163,30 @@ class LLMClient:
                     logger.warning(f"SSL verification is DISABLED for {self.provider_name} - use with caution!")
                 
                 base_url = self.config.base_url
-                self.llm_client = LLM_PROVIDERS[provider_type](
+                self.llm_client = LLM_PROVIDERS[provider_type.value](
                     self.temperature, 
                     self.api_key, 
                     self.model,
                     disable_ssl_verification,
                     base_url
                 )
+                
+                # Initialize Google Search tool for Google/Gemini models (if enabled)
+                if (
+                    provider_type == LLMProviderType.GOOGLE
+                    and self.config.enable_native_search
+                ):
+                    try:
+                        self.google_search_tool = GoogleTool(google_search={})
+                        logger.info(f"Successfully initialized Google Search tool for {self.provider_name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to initialize Google Search tool for {self.provider_name}: {e}")
+                        # Don't fail client initialization if tool creation fails
+                
                 self.available = True
                 logger.info(f"Successfully initialized {self.provider_name} with LangChain")
             else:
-                logger.error(f"Unknown LLM provider type: {provider_type} for provider: {self.provider_name}")
+                logger.error(f"Unknown LLM provider type: {provider_type.value} for provider: {self.provider_name}")
                 self.available = False
         except Exception as e:
             logger.error(f"Failed to initialize {self.provider_name}: {str(e)}")
@@ -275,12 +290,23 @@ class LLMClient:
                     if max_tokens is not None:
                         config["max_tokens"] = max_tokens
                     
+                    # Prepare tools for Gemini models
+                    # Tools must be passed as a keyword argument, not in config dict
+                    # Defensive check: Only include tools for Google providers
+                    tools_kwarg = {}
+                    if (
+                        self.google_search_tool is not None
+                        and self.config.type == LLMProviderType.GOOGLE
+                    ):
+                        tools_kwarg["tools"] = [self.google_search_tool]
+                        logger.info(f"Including Google Search tool for {self.provider_name}")
+                    
                     # Aggregate chunks for usage metadata (OpenAI stream_usage=True approach)
                     aggregate_chunk = None
                     
                     # Wrap streaming with timeout protection (Python 3.11+)
                     async with asyncio.timeout(timeout_seconds):
-                        async for chunk in self.llm_client.astream(langchain_messages, config=config):
+                        async for chunk in self.llm_client.astream(langchain_messages, config=config, **tools_kwarg):
                             # Aggregate chunks by adding them together
                             # This properly accumulates usage_metadata across all chunks
                             aggregate_chunk = chunk if aggregate_chunk is None else aggregate_chunk + chunk

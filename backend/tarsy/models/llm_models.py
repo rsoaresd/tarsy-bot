@@ -5,13 +5,24 @@ This module defines type definitions for LLM provider configurations,
 including supported provider types and configuration structures.
 """
 
-from typing import Literal, Optional
+from enum import Enum
+from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 
-# Supported LLM provider types
-ProviderType = Literal["openai", "google", "xai", "anthropic", "vertexai"]
+class LLMProviderType(str, Enum):
+    """Supported LLM provider types."""
+    
+    OPENAI = "openai"
+    GOOGLE = "google"
+    XAI = "xai"
+    ANTHROPIC = "anthropic"
+    VERTEXAI = "vertexai"
+
+
+# Type alias for backward compatibility
+ProviderType = LLMProviderType
 
 
 class LLMProviderConfig(BaseModel):
@@ -55,6 +66,10 @@ class LLMProviderConfig(BaseModel):
         gt=0,
         description="Maximum tokens for tool results truncation"
     )
+    enable_native_search: bool = Field(
+        default=False,
+        description="Enable native search grounding (currently Google-only: enables Google Search for Gemini models)"
+    )
     
     # Runtime fields (added by Settings.get_llm_config())
     api_key: Optional[str] = Field(
@@ -66,13 +81,20 @@ class LLMProviderConfig(BaseModel):
         description="Runtime SSL verification setting"
     )
     
-    @field_validator("type")
+    @field_validator("type", mode="before")
     @classmethod
-    def validate_provider_type(cls, v: str) -> str:
-        """Validate that provider type is supported."""
-        if v not in ["openai", "google", "xai", "anthropic", "vertexai"]:
-            raise ValueError(f"Unsupported provider type: {v}. Must be one of: openai, google, xai, anthropic, vertexai")
-        return v
+    def validate_provider_type(cls, v: str | LLMProviderType) -> LLMProviderType:
+        """Validate that provider type is supported and convert to enum."""
+        # Convert to string for validation
+        value = v.value if isinstance(v, LLMProviderType) else str(v)
+        
+        # Validate against enum values
+        supported = [e.value for e in LLMProviderType]
+        if value not in supported:
+            raise ValueError(f"Unsupported provider type: {value}. Must be one of: {', '.join(supported)}")
+        
+        # Return enum instance
+        return LLMProviderType(value)
     
     @field_validator("model")
     @classmethod

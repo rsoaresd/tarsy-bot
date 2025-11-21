@@ -1645,3 +1645,229 @@ class TestLLMClientFinalAnswerDetection:
             
             # Last message is thought, so should return False
             assert client._contains_final_answer(conversation) is False
+
+
+@pytest.mark.unit
+class TestLLMClientGoogleSearchTool:
+    """Test Google Search tool initialization and usage in LLMClient."""
+
+    def test_google_search_tool_initialized_when_enabled_for_google_provider(self) -> None:
+        """Test that Google Search tool is initialized when enabled for Google provider."""
+        config = create_test_config(
+            type="google",
+            model="gemini-2.5-flash",
+            enable_native_search=True
+        )
+        
+        with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
+            mock_google.return_value = Mock()
+            
+            client = LLMClient("google", config)
+            
+            assert client.google_search_tool is not None
+            assert client.available is True
+
+    def test_google_search_tool_not_initialized_when_disabled_for_google_provider(self) -> None:
+        """Test that Google Search tool is not initialized when disabled (default)."""
+        config = create_test_config(
+            type="google",
+            model="gemini-2.5-flash",
+            enable_native_search=False
+        )
+        
+        with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
+            mock_google.return_value = Mock()
+            
+            client = LLMClient("google", config)
+            
+            assert client.google_search_tool is None
+            assert client.available is True
+
+    def test_google_search_tool_not_initialized_when_no_config_specified(self) -> None:
+        """Test that Google Search tool defaults to None when enable_native_search not specified."""
+        config = create_test_config(
+            type="google",
+            model="gemini-2.5-flash"
+            # enable_native_search not specified, should default to False
+        )
+        
+        with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
+            mock_google.return_value = Mock()
+            
+            client = LLMClient("google", config)
+            
+            assert client.google_search_tool is None
+
+    @pytest.mark.parametrize(
+        "provider_type",
+        ["openai", "xai", "anthropic", "vertexai"],
+    )
+    def test_google_search_tool_not_initialized_for_non_google_providers(
+        self, provider_type: str
+    ) -> None:
+        """Test that Google Search tool is not initialized for non-Google providers."""
+        config = create_test_config(
+            type=provider_type,
+            enable_native_search=True  # Even if enabled, should not init for non-Google
+        )
+        
+        # Mock the appropriate client based on provider type
+        mock_clients = {
+            "openai": 'tarsy.integrations.llm.client.ChatOpenAI',
+            "xai": 'tarsy.integrations.llm.client.ChatXAI',
+            "anthropic": 'tarsy.integrations.llm.client.ChatAnthropic',
+            "vertexai": 'tarsy.integrations.llm.client.ChatAnthropicVertex'
+        }
+        
+        with patch(mock_clients[provider_type]) as mock_client:
+            mock_client.return_value = Mock()
+            
+            client = LLMClient(provider_type, config)
+            
+            assert client.google_search_tool is None
+            assert client.available is True
+
+    def test_google_search_tool_initialization_failure_does_not_break_client(self) -> None:
+        """Test that Google Search tool initialization failure doesn't prevent client creation."""
+        config = create_test_config(
+            type="google",
+            model="gemini-2.5-flash",
+            enable_native_search=True
+        )
+        
+        with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google, \
+             patch('tarsy.integrations.llm.client.GoogleTool', side_effect=Exception("Tool init failed")):
+            mock_google.return_value = Mock()
+            
+            # Client creation should succeed even if tool init fails
+            client = LLMClient("google", config)
+            
+            # Tool should be None after failed initialization
+            assert client.google_search_tool is None
+            # Client should still be available
+            assert client.available is True
+
+    @pytest.mark.asyncio
+    async def test_generate_response_includes_google_search_tool_when_enabled(self) -> None:
+        """Test that astream is called with google_search_tool when enable_native_search=True."""
+        config = create_test_config(
+            type="google",
+            model="gemini-2.5-flash",
+            enable_native_search=True,
+            api_key="test-key",
+        )
+
+        with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
+            mock_llm_client = AsyncMock()
+            # Use create_stream_side_effect helper for consistent mock streaming
+            mock_llm_client.astream = Mock(
+                side_effect=create_stream_side_effect("Search-backed response")
+            )
+            mock_google.return_value = mock_llm_client
+
+            client = LLMClient("google", config)
+            conversation = LLMConversation(
+                messages=[
+                    LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                    LLMMessage(role=MessageRole.USER, content="Question"),
+                ]
+            )
+
+            with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_ctx:
+                ctx = AsyncMock()
+                ctx.get_request_id.return_value = "req-google-tools"
+                mock_ctx.return_value.__aenter__.return_value = ctx
+
+                await client.generate_response(conversation, "session-id")
+
+            # Verify astream was called with tools kwarg containing the search tool
+            call = mock_llm_client.astream.call_args
+            assert "tools" in call.kwargs, "Expected 'tools' kwarg when enable_native_search=True"
+            assert call.kwargs["tools"] == [client.google_search_tool]
+
+    @pytest.mark.asyncio
+    async def test_generate_response_omits_tools_when_search_disabled(self) -> None:
+        """Test that astream is called without tools kwarg when enable_native_search=False."""
+        config = create_test_config(
+            type="google",
+            model="gemini-2.5-flash",
+            enable_native_search=False,
+            api_key="test-key",
+        )
+
+        with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
+            mock_llm_client = AsyncMock()
+            mock_llm_client.astream = Mock(
+                side_effect=create_stream_side_effect("Plain response")
+            )
+            mock_google.return_value = mock_llm_client
+
+            client = LLMClient("google", config)
+            conversation = LLMConversation(
+                messages=[
+                    LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                    LLMMessage(role=MessageRole.USER, content="Question"),
+                ]
+            )
+
+            with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_ctx:
+                ctx = AsyncMock()
+                ctx.get_request_id.return_value = "req-google-no-tools"
+                mock_ctx.return_value.__aenter__.return_value = ctx
+
+                await client.generate_response(conversation, "session-id")
+
+            # Verify astream was called WITHOUT tools kwarg
+            call = mock_llm_client.astream.call_args
+            assert "tools" not in call.kwargs, "Expected no 'tools' kwarg when enable_native_search=False"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "provider_type,mock_client_path",
+        [
+            ("openai", "tarsy.integrations.llm.client.ChatOpenAI"),
+            ("anthropic", "tarsy.integrations.llm.client.ChatAnthropic"),
+            ("xai", "tarsy.integrations.llm.client.ChatXAI"),
+        ],
+    )
+    async def test_generate_response_never_passes_tools_for_non_google_providers(
+        self, provider_type: str, mock_client_path: str
+    ) -> None:
+        """Test that tools are never passed to astream for non-Google providers, even if google_search_tool is set."""
+        config = create_test_config(
+            type=provider_type,
+            api_key="test-key",
+        )
+
+        with patch(mock_client_path) as mock_provider:
+            mock_llm_client = AsyncMock()
+            mock_llm_client.astream = Mock(
+                side_effect=create_stream_side_effect("Response without tools")
+            )
+            mock_provider.return_value = mock_llm_client
+
+            client = LLMClient(provider_type, config)
+            
+            # Defensive test: Manually set google_search_tool to simulate edge case
+            # The defensive check in generate_response should prevent it from being used
+            with patch('tarsy.integrations.llm.client.GoogleTool') as mock_tool:
+                mock_tool.return_value = Mock()
+                client.google_search_tool = mock_tool.return_value
+            
+            conversation = LLMConversation(
+                messages=[
+                    LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                    LLMMessage(role=MessageRole.USER, content="Question"),
+                ]
+            )
+
+            with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_ctx:
+                ctx = AsyncMock()
+                ctx.get_request_id.return_value = f"req-{provider_type}-no-tools"
+                mock_ctx.return_value.__aenter__.return_value = ctx
+
+                await client.generate_response(conversation, "session-id")
+
+            # Verify astream was called WITHOUT tools kwarg, even though google_search_tool was set
+            call = mock_llm_client.astream.call_args
+            assert "tools" not in call.kwargs, f"Expected no 'tools' kwarg for {provider_type} provider"
