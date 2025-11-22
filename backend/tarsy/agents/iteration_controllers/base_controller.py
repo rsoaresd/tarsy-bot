@@ -27,6 +27,26 @@ class IterationController(ABC):
     without conditional logic scattered throughout the BaseAgent.
     """
     
+    def _get_native_tools_override(self, context: 'StageContext'):
+        """
+        Extract native tools override from processing context.
+        
+        Args:
+            context: StageContext containing processing alert with optional native tools config
+            
+        Returns:
+            NativeToolsConfig if specified in alert, None otherwise
+        """
+        alert = getattr(context.chain_context, "processing_alert", None)
+        if not alert:
+            return None
+        
+        mcp = getattr(alert, "mcp", None)
+        if not mcp:
+            return None
+        
+        return getattr(mcp, "native_tools", None)
+    
     @abstractmethod
     def needs_mcp_tools(self) -> bool:
         """
@@ -201,10 +221,14 @@ class ReactController(IterationController):
                     nonlocal conversation, last_interaction_failed, consecutive_timeout_failures
                     
                     # 3. Call LLM with current conversation
+                    # Extract native tools override from context (if specified)
+                    native_tools_override = self._get_native_tools_override(context)
+                    
                     conversation_result = await self.llm_client.generate_response(
                         conversation=conversation,
                         session_id=context.session_id,
-                        stage_execution_id=context.agent.get_current_stage_execution_id()
+                        stage_execution_id=context.agent.get_current_stage_execution_id(),
+                        native_tools_override=native_tools_override
                     )
                     
                     # 4. Extract and parse assistant response
@@ -225,8 +249,21 @@ class ReactController(IterationController):
                     if parsed_response.is_final_answer:
                         self.logger.info("ReAct analysis completed with final answer")
                         return self._build_final_result(conversation_result, parsed_response.final_answer)
+                    
+                    # 6. Handle unknown tool (tool name doesn't match available tools)
+                    elif parsed_response.is_unknown_tool:
+                        self.logger.warning(f"Unknown tool attempted: {parsed_response.action}")
                         
-                    # 6. Handle tool action
+                        # Format error observation using ReActParser (lists all available tools)
+                        error_observation = ReActParser.format_unknown_tool_error(
+                            parsed_response.error_message,
+                            context.available_tools.tools
+                        )
+                        
+                        conversation_result.append_observation(f"Observation: {error_observation}")
+                        self.logger.debug("Unknown tool error observation added to conversation")
+                        
+                    # 7. Handle tool action
                     elif parsed_response.has_action:
                         try:
                             self.logger.debug(f"ReAct Action: {parsed_response.action} with input: {parsed_response.action_input[:100] if parsed_response.action_input else 'None'}...")
@@ -259,7 +296,7 @@ class ReactController(IterationController):
                             else:
                                 consecutive_timeout_failures = 0  # Reset on non-timeout errors
                             
-                    # 7. Handle malformed response
+                    # 8. Handle malformed response
                     else:
                         self.logger.warning("ReAct response is malformed - removing it and sending format correction")
                         

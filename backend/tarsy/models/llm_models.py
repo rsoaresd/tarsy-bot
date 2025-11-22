@@ -6,7 +6,7 @@ including supported provider types and configuration structures.
 """
 
 from enum import Enum
-from typing import Optional
+from typing import Dict, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -19,6 +19,14 @@ class LLMProviderType(str, Enum):
     XAI = "xai"
     ANTHROPIC = "anthropic"
     VERTEXAI = "vertexai"
+
+
+class GoogleNativeTool(str, Enum):
+    """Supported Google/Gemini native tools."""
+    
+    GOOGLE_SEARCH = "google_search"
+    CODE_EXECUTION = "code_execution"
+    URL_CONTEXT = "url_context"
 
 
 # Type alias for backward compatibility
@@ -66,9 +74,10 @@ class LLMProviderConfig(BaseModel):
         gt=0,
         description="Maximum tokens for tool results truncation"
     )
-    enable_native_search: bool = Field(
-        default=False,
-        description="Enable native search grounding (currently Google-only: enables Google Search for Gemini models)"
+    native_tools: Optional[Dict[str, bool]] = Field(
+        default=None,
+        description="Native tool configuration for Google/Gemini models (GoogleNativeTool enum values). "
+                    "Default: google_search and url_context enabled, code_execution disabled"
     )
     
     # Runtime fields (added by Settings.get_llm_config())
@@ -113,3 +122,80 @@ class LLMProviderConfig(BaseModel):
         if not v.isupper():
             raise ValueError("API key environment variable should be uppercase")
         return v.strip()
+    
+    @field_validator("native_tools", mode="before")
+    @classmethod
+    def validate_native_tools(cls, v: Optional[Dict[str, bool]]) -> Optional[Dict[str, bool]]:
+        """Validate native_tools configuration.
+        
+        Validates that tool names are recognized and values are boolean.
+        Supported tools defined in GoogleNativeTool enum.
+        """
+        if v is None:
+            return None
+        
+        if not isinstance(v, dict):
+            raise ValueError(f"native_tools must be a dictionary, got: {type(v).__name__}")
+        
+        # Get supported tool names from enum
+        supported_tools = {tool.value for tool in GoogleNativeTool}
+        
+        # Validate all provided tools are recognized
+        for tool_name in v:
+            if tool_name not in supported_tools:
+                raise ValueError(
+                    f"Unsupported native tool: {tool_name}. "
+                    f"Must be one of: {', '.join(sorted(supported_tools))}"
+                )
+        
+        # Validate all values are boolean (strict check before Pydantic coercion)
+        for tool_name, enabled in v.items():
+            if not isinstance(enabled, bool):
+                raise ValueError(
+                    f"Native tool '{tool_name}' value must be boolean, got: {type(enabled).__name__}"
+                )
+        
+        return v
+    
+    def get_native_tool_status(self, tool_name: str) -> bool:
+        """Get native tool status with secure defaults.
+        
+        Args:
+            tool_name: Name of the tool (use GoogleNativeTool enum values)
+            
+        Returns:
+            True if tool is enabled (or should be enabled by default), False otherwise
+            
+        Raises:
+            ValueError: If tool_name is not a recognized GoogleNativeTool value
+            
+        Default behavior when native_tools is None:
+            - google_search → True (enabled by default)
+            - url_context → True (enabled by default)
+            - code_execution → False (disabled by default for security)
+            
+        Default behavior when native_tools dict exists but tool not listed:
+            - google_search → True (enabled by default)
+            - url_context → True (enabled by default)
+            - code_execution → False (disabled by default for security)
+            
+        Explicit values always override defaults:
+            - If tool explicitly set to False → False (tool disabled)
+            - If tool explicitly set to True → True (tool enabled)
+        """
+        # Validate tool_name is recognized
+        supported_tools = {tool.value for tool in GoogleNativeTool}
+        if tool_name not in supported_tools:
+            raise ValueError(
+                f"Unknown native tool: {tool_name}. "
+                f"Must be one of: {', '.join(sorted(supported_tools))}"
+            )
+        
+        if self.native_tools is None:
+            # Default: code_execution disabled, others enabled
+            return tool_name != GoogleNativeTool.CODE_EXECUTION.value
+        
+        # When native_tools dict is present, use same defaults for missing keys
+        if tool_name == GoogleNativeTool.CODE_EXECUTION.value:
+            return self.native_tools.get(tool_name, False)  # Default to False for code_execution
+        return self.native_tools.get(tool_name, True)  # Default to True for other tools

@@ -7,7 +7,7 @@ separate runtime/database model hierarchies and manual conversions.
 """
 
 import uuid
-from typing import List, Optional
+from typing import Dict, List, Optional
 from enum import Enum
 from sqlmodel import Column, Field, SQLModel, Index
 from sqlalchemy import JSON, String, TypeDecorator, ForeignKey
@@ -140,10 +140,24 @@ class LLMInteraction(SQLModel, table=True):
         description="Complete conversation object with messages and metadata"
     )
     
-    # NEW: Token usage tracking fields
+    # Token usage tracking fields
     input_tokens: Optional[int] = Field(None, ge=0, description="Input/prompt tokens")
     output_tokens: Optional[int] = Field(None, ge=0, description="Output/completion tokens")  
     total_tokens: Optional[int] = Field(None, ge=0, description="Total tokens used")
+    
+    # Response metadata from aggregated streaming chunks
+    response_metadata: Optional[dict] = Field(
+        None,
+        sa_column=Column(JSON),
+        description="Complete response metadata including grounding sources, tool usage, etc."
+    )
+    
+    # Native tools configuration (Google/Gemini only)
+    native_tools_config: Optional[Dict[str, bool]] = Field(
+        None,
+        sa_column=Column(JSON),
+        description="Native tool configuration at time of interaction (Google/Gemini only)"
+    )
     
     # Interaction type for categorization and UI rendering
     interaction_type: str = Field(

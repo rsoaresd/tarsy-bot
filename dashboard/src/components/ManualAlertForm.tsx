@@ -40,6 +40,27 @@ import MCPSelection from './MCPSelection/MCPSelection';
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 /**
+ * Filter out servers with empty tool arrays from MCP selection config
+ * Backend treats tools: [] as invalid, so we remove those servers
+ */
+const filterMCPSelection = (config: MCPSelectionConfig | undefined): MCPSelectionConfig | undefined => {
+  if (!config) return undefined;
+  
+  const filteredServers = config.servers.filter(server => {
+    // Keep servers with null (all tools) or non-empty arrays
+    return server.tools === null || (Array.isArray(server.tools) && server.tools.length > 0);
+  });
+  
+  // If all servers were filtered out, return undefined (no override)
+  if (filteredServers.length === 0) return undefined;
+  
+  return {
+    ...config,
+    servers: filteredServers
+  };
+};
+
+/**
  * Default runbook option constant
  */
 const DEFAULT_RUNBOOK = 'Default Runbook';
@@ -213,7 +234,7 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
   // Common fields
   const [alertType, setAlertType] = useState('');
   const [runbook, setRunbook] = useState<string | null>(DEFAULT_RUNBOOK);
-  const [mcpSelection, setMcpSelection] = useState<MCPSelectionConfig | null>(null);
+  const [mcpSelection, setMcpSelection] = useState<MCPSelectionConfig | undefined>(undefined);
   
   // Mode selection (0 = Structured, 1 = Text) - Default to Text
   const [mode, setMode] = useState(1);
@@ -430,9 +451,11 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
         alertData.runbook = runbook;
       }
 
-      // Add MCP selection if configured
-      if (mcpSelection && mcpSelection.servers.length > 0) {
-        alertData.mcp = mcpSelection;
+      // Add MCP selection if configured (only when user made changes from defaults)
+      // Filter out servers with no tools selected (tools: [])
+      const filteredMCP = filterMCPSelection(mcpSelection);
+      if (filteredMCP !== undefined) {
+        alertData.mcp = filteredMCP;
       }
 
       // Submit alert
@@ -451,7 +474,7 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
         { id: generateId(), key: 'namespace', value: '' },
         { id: generateId(), key: 'message', value: '' }
       ]);
-      setMcpSelection(null);
+      setMcpSelection(undefined);
 
     } catch (error: any) {
       console.error('Error submitting alert:', error);
@@ -515,9 +538,11 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
         alertData.runbook = runbook;
       }
 
-      // Add MCP selection if configured
-      if (mcpSelection && mcpSelection.servers.length > 0) {
-        alertData.mcp = mcpSelection;
+      // Add MCP selection if configured (only when user made changes from defaults)
+      // Filter out servers with no tools selected (tools: [])
+      const filteredMCP2 = filterMCPSelection(mcpSelection);
+      if (filteredMCP2 !== undefined) {
+        alertData.mcp = filteredMCP2;
       }
 
       // Submit alert
@@ -533,7 +558,7 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
 
       // Clear form on successful submission
       setFreeText('');
-      setMcpSelection(null);
+      setMcpSelection(undefined);
 
     } catch (error: any) {
       console.error('Error submitting alert:', error);
@@ -740,6 +765,7 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = ({ onAlertSubmitted }) =
             value={mcpSelection}
             onChange={setMcpSelection}
             disabled={loading}
+            alertType={alertType}
           />
 
           {/* M3 Tabs Section */}

@@ -162,6 +162,47 @@ export interface LLMEventDetails {
   tool_calls: any | null;
   tool_results: any | null;
   mcp_event_id?: string | null;  // For summarization - links to the tool call being summarized
+  
+  // Native tools fields (Google/Gemini only)
+  native_tools_config?: NativeToolsConfig | null;
+  response_metadata?: Record<string, any> | null;
+}
+
+// Native tools usage types (parsed from response_metadata on frontend)
+export interface GoogleSearchUsage {
+  queries: string[];
+  query_count: number;
+  search_entry_point?: Record<string, any>;
+}
+
+export interface URLContextUsage {
+  urls: Array<{ uri: string; title: string }>;
+  url_count: number;
+}
+
+export interface CodeBlock {
+  code: string;
+  language?: string;
+}
+
+export interface OutputBlock {
+  output: string;
+  outcome?: string; // 'ok', 'error', etc.
+}
+
+export interface CodeExecutionUsage {
+  code_blocks: number;
+  output_blocks: number;
+  detected: boolean;
+  // Actual code and output content
+  code_block_contents?: CodeBlock[];
+  output_block_contents?: OutputBlock[];
+}
+
+export interface NativeToolsUsage {
+  google_search?: GoogleSearchUsage;
+  url_context?: URLContextUsage;
+  code_execution?: CodeExecutionUsage;
 }
 
 // MCP event details
@@ -634,8 +675,16 @@ export interface MCPServerSelection {
   tools?: string[] | null; // null or undefined = all tools, array = specific tools
 }
 
+// Native tools configuration for Google/Gemini models
+export interface NativeToolsConfig {
+  google_search?: boolean;
+  code_execution?: boolean;
+  url_context?: boolean;
+}
+
 export interface MCPSelectionConfig {
   servers: MCPServerSelection[];
+  native_tools?: NativeToolsConfig; // Optional per-session native tools override
 }
 
 // MCP Discovery API types

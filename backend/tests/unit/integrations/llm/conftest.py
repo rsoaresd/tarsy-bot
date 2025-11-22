@@ -88,7 +88,7 @@ def create_test_config(provider_type: str = "openai", **overrides):
         "api_key_env": "OPENAI_API_KEY",
         "temperature": 0.7,
         "api_key": "test-api-key",
-        "enable_native_search": False,  # Default to False for backward compatibility
+        # native_tools not set by default, uses secure defaults (code_execution disabled, others enabled)
     }
     defaults.update(overrides)
     return LLMProviderConfig(**defaults)

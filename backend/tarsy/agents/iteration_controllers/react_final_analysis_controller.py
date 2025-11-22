@@ -70,13 +70,17 @@ class ReactFinalAnalysisController(IterationController):
         # Capture stage execution ID once for reuse
         stage_execution_id = context.agent.get_current_stage_execution_id()
         
+        # Extract native tools override from context (if specified)
+        native_tools_override = self._get_native_tools_override(context)
+        
         # Generate response and get the latest assistant message content
         try:
             updated_conversation = await self.llm_client.generate_response(
                 conversation, 
                 context.session_id, 
                 stage_execution_id,
-                interaction_type=LLMInteractionType.FINAL_ANALYSIS.value
+                interaction_type=LLMInteractionType.FINAL_ANALYSIS.value,
+                native_tools_override=native_tools_override
             )
             latest_message = updated_conversation.get_latest_assistant_message()
             

@@ -5,13 +5,15 @@ Tests the unified LLM client that handles communication with different
 LLM providers using LangChain and the new typed hook system.
 """
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from tarsy.hooks.hook_context import llm_interaction_context
 from tarsy.integrations.llm.client import LLM_PROVIDERS, LLMClient, LLMManager
-from tarsy.models.llm_models import LLMProviderConfig
+from tarsy.models.llm_models import GoogleNativeTool, LLMProviderConfig
 from tarsy.models.unified_interactions import LLMMessage, LLMConversation, MessageRole
 
 # Import shared test helpers from conftest
@@ -1648,15 +1650,18 @@ class TestLLMClientFinalAnswerDetection:
 
 
 @pytest.mark.unit
-class TestLLMClientGoogleSearchTool:
-    """Test Google Search tool initialization and usage in LLMClient."""
+class TestLLMClientNativeTools:
+    """Test native tools initialization and usage in LLMClient."""
 
-    def test_google_search_tool_initialized_when_enabled_for_google_provider(self) -> None:
-        """Test that Google Search tool is initialized when enabled for Google provider."""
+    def test_native_tools_initialized_when_configured_for_google_provider(self) -> None:
+        """Test that native tools are initialized when configured for Google provider.
+        
+        Note: Missing tools in config default to enabled, so url_context will also be initialized.
+        """
         config = create_test_config(
             type="google",
             model="gemini-2.5-flash",
-            enable_native_search=True
+            native_tools={GoogleNativeTool.GOOGLE_SEARCH.value: True, GoogleNativeTool.CODE_EXECUTION.value: True}
         )
         
         with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
@@ -1664,15 +1669,18 @@ class TestLLMClientGoogleSearchTool:
             
             client = LLMClient("google", config)
             
-            assert client.google_search_tool is not None
+            assert client.native_tools[GoogleNativeTool.GOOGLE_SEARCH.value] is not None
+            assert client.native_tools[GoogleNativeTool.CODE_EXECUTION.value] is not None
+            # URL_CONTEXT not in config, but defaults to enabled
+            assert client.native_tools[GoogleNativeTool.URL_CONTEXT.value] is not None
             assert client.available is True
 
-    def test_google_search_tool_not_initialized_when_disabled_for_google_provider(self) -> None:
-        """Test that Google Search tool is not initialized when disabled (default)."""
+    def test_native_tools_disabled_when_explicitly_set_to_false(self) -> None:
+        """Test that native tools are not initialized when explicitly disabled."""
         config = create_test_config(
             type="google",
             model="gemini-2.5-flash",
-            enable_native_search=False
+            native_tools={GoogleNativeTool.GOOGLE_SEARCH.value: False, GoogleNativeTool.CODE_EXECUTION.value: False, GoogleNativeTool.URL_CONTEXT.value: False}
         )
         
         with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
@@ -1680,15 +1688,17 @@ class TestLLMClientGoogleSearchTool:
             
             client = LLMClient("google", config)
             
-            assert client.google_search_tool is None
+            assert client.native_tools[GoogleNativeTool.GOOGLE_SEARCH.value] is None
+            assert client.native_tools[GoogleNativeTool.CODE_EXECUTION.value] is None
+            assert client.native_tools[GoogleNativeTool.URL_CONTEXT.value] is None
             assert client.available is True
 
-    def test_google_search_tool_not_initialized_when_no_config_specified(self) -> None:
-        """Test that Google Search tool defaults to None when enable_native_search not specified."""
+    def test_native_tools_use_secure_defaults_when_not_configured(self) -> None:
+        """Test that native tools use secure defaults when native_tools not specified."""
         config = create_test_config(
             type="google",
             model="gemini-2.5-flash"
-            # enable_native_search not specified, should default to False
+            # native_tools not specified, should use secure defaults
         )
         
         with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
@@ -1696,19 +1706,22 @@ class TestLLMClientGoogleSearchTool:
             
             client = LLMClient("google", config)
             
-            assert client.google_search_tool is None
+            # Secure defaults: google_search and url_context enabled, code_execution disabled
+            assert client.native_tools['google_search'] is not None
+            assert client.native_tools['code_execution'] is None  # Disabled by default
+            assert client.native_tools['url_context'] is not None
 
     @pytest.mark.parametrize(
         "provider_type",
         ["openai", "xai", "anthropic", "vertexai"],
     )
-    def test_google_search_tool_not_initialized_for_non_google_providers(
+    def test_native_tools_not_initialized_for_non_google_providers(
         self, provider_type: str
     ) -> None:
-        """Test that Google Search tool is not initialized for non-Google providers."""
+        """Test that native tools are not initialized for non-Google providers."""
         config = create_test_config(
             type=provider_type,
-            enable_native_search=True  # Even if enabled, should not init for non-Google
+            native_tools={GoogleNativeTool.GOOGLE_SEARCH.value: True}  # Even if configured, should not init for non-Google
         )
         
         # Mock the appropriate client based on provider type
@@ -1724,45 +1737,53 @@ class TestLLMClientGoogleSearchTool:
             
             client = LLMClient(provider_type, config)
             
-            assert client.google_search_tool is None
+            assert client.native_tools[GoogleNativeTool.GOOGLE_SEARCH.value] is None
+            assert client.native_tools[GoogleNativeTool.CODE_EXECUTION.value] is None
+            assert client.native_tools[GoogleNativeTool.URL_CONTEXT.value] is None
             assert client.available is True
 
-    def test_google_search_tool_initialization_failure_does_not_break_client(self) -> None:
-        """Test that Google Search tool initialization failure doesn't prevent client creation."""
+    def test_native_tools_initialization_failure_does_not_break_client(self) -> None:
+        """Test that native tool initialization failure doesn't prevent client creation."""
         config = create_test_config(
             type="google",
             model="gemini-2.5-flash",
-            enable_native_search=True
+            native_tools={GoogleNativeTool.GOOGLE_SEARCH.value: True}
         )
         
         with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google, \
-             patch('tarsy.integrations.llm.client.GoogleTool', side_effect=Exception("Tool init failed")):
+             patch('tarsy.integrations.llm.client.google_genai_types.Tool', side_effect=Exception("Tool init failed")):
             mock_google.return_value = Mock()
             
             # Client creation should succeed even if tool init fails
             client = LLMClient("google", config)
             
-            # Tool should be None after failed initialization
-            assert client.google_search_tool is None
+            # Tools should be None after failed initialization
+            assert client.native_tools[GoogleNativeTool.GOOGLE_SEARCH.value] is None
+            assert client.native_tools[GoogleNativeTool.CODE_EXECUTION.value] is None
+            assert client.native_tools[GoogleNativeTool.URL_CONTEXT.value] is None
             # Client should still be available
             assert client.available is True
 
     @pytest.mark.asyncio
-    async def test_generate_response_includes_google_search_tool_when_enabled(self) -> None:
-        """Test that astream is called with google_search_tool when enable_native_search=True."""
+    async def test_generate_response_includes_native_tools_when_configured(self) -> None:
+        """Test that native tools are bound to model when configured."""
         config = create_test_config(
             type="google",
             model="gemini-2.5-flash",
-            enable_native_search=True,
+            native_tools={GoogleNativeTool.GOOGLE_SEARCH.value: True, GoogleNativeTool.CODE_EXECUTION.value: True},
             api_key="test-key",
         )
 
         with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
             mock_llm_client = AsyncMock()
-            # Use create_stream_side_effect helper for consistent mock streaming
-            mock_llm_client.astream = Mock(
-                side_effect=create_stream_side_effect("Search-backed response")
+            mock_bound_client = AsyncMock()
+            
+            # Set up astream for the bound client to return an async generator
+            mock_bound_client.astream = Mock(
+                side_effect=create_stream_side_effect("Tools-backed response")
             )
+            # Set up bind to return the bound client
+            mock_llm_client.bind = Mock(return_value=mock_bound_client)
             mock_google.return_value = mock_llm_client
 
             client = LLMClient("google", config)
@@ -1780,18 +1801,20 @@ class TestLLMClientGoogleSearchTool:
 
                 await client.generate_response(conversation, "session-id")
 
-            # Verify astream was called with tools kwarg containing the search tool
-            call = mock_llm_client.astream.call_args
-            assert "tools" in call.kwargs, "Expected 'tools' kwarg when enable_native_search=True"
-            assert call.kwargs["tools"] == [client.google_search_tool]
+            # Verify bind was called with tools
+            assert mock_llm_client.bind.called, "Expected bind() to be called when native_tools configured"
+            bind_call = mock_llm_client.bind.call_args
+            assert "tools" in bind_call.kwargs, "Expected 'tools' kwarg in bind() call"
+            # Verify astream was called on the bound client
+            assert mock_bound_client.astream.called, "Expected astream() to be called on bound client"
 
     @pytest.mark.asyncio
-    async def test_generate_response_omits_tools_when_search_disabled(self) -> None:
-        """Test that astream is called without tools kwarg when enable_native_search=False."""
+    async def test_generate_response_omits_tools_when_all_disabled(self) -> None:
+        """Test that astream is called without bind when all native tools are disabled."""
         config = create_test_config(
             type="google",
             model="gemini-2.5-flash",
-            enable_native_search=False,
+            native_tools={GoogleNativeTool.GOOGLE_SEARCH.value: False, GoogleNativeTool.CODE_EXECUTION.value: False, GoogleNativeTool.URL_CONTEXT.value: False},
             api_key="test-key",
         )
 
@@ -1817,9 +1840,8 @@ class TestLLMClientGoogleSearchTool:
 
                 await client.generate_response(conversation, "session-id")
 
-            # Verify astream was called WITHOUT tools kwarg
-            call = mock_llm_client.astream.call_args
-            assert "tools" not in call.kwargs, "Expected no 'tools' kwarg when enable_native_search=False"
+            # Verify astream was called directly (no bind when no tools)
+            assert mock_llm_client.astream.called
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1833,7 +1855,7 @@ class TestLLMClientGoogleSearchTool:
     async def test_generate_response_never_passes_tools_for_non_google_providers(
         self, provider_type: str, mock_client_path: str
     ) -> None:
-        """Test that tools are never passed to astream for non-Google providers, even if google_search_tool is set."""
+        """Test that tools are never passed to astream for non-Google providers, even if native_tools is set."""
         config = create_test_config(
             type=provider_type,
             api_key="test-key",
@@ -1841,6 +1863,7 @@ class TestLLMClientGoogleSearchTool:
 
         with patch(mock_client_path) as mock_provider:
             mock_llm_client = AsyncMock()
+            # Use Mock (not AsyncMock) for astream with side_effect to return async generator
             mock_llm_client.astream = Mock(
                 side_effect=create_stream_side_effect("Response without tools")
             )
@@ -1848,11 +1871,10 @@ class TestLLMClientGoogleSearchTool:
 
             client = LLMClient(provider_type, config)
             
-            # Defensive test: Manually set google_search_tool to simulate edge case
-            # The defensive check in generate_response should prevent it from being used
-            with patch('tarsy.integrations.llm.client.GoogleTool') as mock_tool:
-                mock_tool.return_value = Mock()
-                client.google_search_tool = mock_tool.return_value
+            # Defensive test: Manually set native_tools to simulate edge case
+            # The defensive check in generate_response should prevent them from being used
+            mock_tool = Mock()
+            client.native_tools[GoogleNativeTool.GOOGLE_SEARCH.value] = mock_tool
             
             conversation = LLMConversation(
                 messages=[
@@ -1868,6 +1890,191 @@ class TestLLMClientGoogleSearchTool:
 
                 await client.generate_response(conversation, "session-id")
 
-            # Verify astream was called WITHOUT tools kwarg, even though google_search_tool was set
+            # Verify astream was called WITHOUT tools kwarg, even though native_tools was set
             call = mock_llm_client.astream.call_args
             assert "tools" not in call.kwargs, f"Expected no 'tools' kwarg for {provider_type} provider"
+
+    @pytest.mark.asyncio
+    async def test_native_tools_config_stored_in_interaction(self) -> None:
+        """Test that native tools config is captured in LLM interaction."""
+        config = create_test_config(
+            type="google",
+            model="gemini-2.5-flash",
+            native_tools={GoogleNativeTool.GOOGLE_SEARCH.value: True, GoogleNativeTool.CODE_EXECUTION.value: False, GoogleNativeTool.URL_CONTEXT.value: True},
+            api_key="test-key",
+        )
+        
+        with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
+            mock_llm_client = AsyncMock()
+            mock_bound_client = AsyncMock()
+            
+            # Set up astream for the bound client to return an async generator
+            mock_bound_client.astream = Mock(
+                side_effect=create_stream_side_effect("Test response")
+            )
+            # Set up bind to return the bound client
+            mock_llm_client.bind = Mock(return_value=mock_bound_client)
+            mock_google.return_value = mock_llm_client
+            
+            client = LLMClient("google", config)
+            conversation = LLMConversation(messages=[
+                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                LLMMessage(role=MessageRole.USER, content="Test question")
+            ])
+            
+            # Mock hook context to capture interaction
+            captured_interaction = None
+            original_context = llm_interaction_context
+            
+            @asynccontextmanager
+            async def mock_context(*args, **kwargs):
+                async with original_context(*args, **kwargs) as ctx:
+                    nonlocal captured_interaction
+                    captured_interaction = ctx.interaction
+                    yield ctx
+            
+            with patch('tarsy.integrations.llm.client.llm_interaction_context', mock_context):
+                await client.generate_response(conversation, "test-session")
+            
+            # Verify native_tools_config was captured
+            assert captured_interaction is not None
+            assert captured_interaction.native_tools_config == {
+                GoogleNativeTool.GOOGLE_SEARCH.value: True,
+                GoogleNativeTool.CODE_EXECUTION.value: False,
+                GoogleNativeTool.URL_CONTEXT.value: True
+            }
+
+    @pytest.mark.asyncio
+    async def test_native_tools_config_is_none_for_non_google_providers(self) -> None:
+        """Test that native_tools_config is None for non-Google providers."""
+        config = create_test_config(
+            type="openai",
+            model="gpt-4",
+            api_key="test-key",
+        )
+        
+        with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
+            mock_instance = AsyncMock()
+            
+            # Mock streaming response
+            mock_instance.astream = Mock(
+                side_effect=create_stream_side_effect("Test response")
+            )
+            mock_openai.return_value = mock_instance
+            
+            client = LLMClient("openai", config)
+            conversation = LLMConversation(messages=[
+                LLMMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                LLMMessage(role=MessageRole.USER, content="Test question")
+            ])
+            
+            # Mock hook context to capture interaction
+            captured_interaction = None
+            original_context = llm_interaction_context
+            
+            @asynccontextmanager
+            async def mock_context(*args, **kwargs):
+                async with original_context(*args, **kwargs) as ctx:
+                    nonlocal captured_interaction
+                    captured_interaction = ctx.interaction
+                    yield ctx
+            
+            with patch('tarsy.integrations.llm.client.llm_interaction_context', mock_context):
+                await client.generate_response(conversation, "test-session")
+            
+            # Verify native_tools_config is None for non-Google providers
+            assert captured_interaction is not None
+            assert captured_interaction.native_tools_config is None
+
+
+@pytest.mark.unit
+class TestLLMClientChunkAggregation:
+    """Test chunk aggregation and metadata extraction helpers."""
+    
+    @pytest.mark.asyncio
+    async def test_aggregate_chunks_preserves_metadata(self):
+        """Test that chunk aggregation preserves response metadata."""
+        from langchain_core.messages import AIMessageChunk
+        from .metadata_helpers import aggregate_chunks
+        
+        # Create mock chunks with metadata
+        chunk1 = AIMessageChunk(content="Hello", response_metadata={})
+        chunk2 = AIMessageChunk(content=" world", response_metadata={})
+        chunk3 = AIMessageChunk(
+            content="!",
+            response_metadata={
+                'finish_reason': 'stop',
+                'grounding_metadata': {'web_search_queries': ['test query']}
+            }
+        )
+        
+        # Test aggregation
+        final = aggregate_chunks([chunk1, chunk2, chunk3])
+        
+        assert final is not None
+        assert final.content == "Hello world!"
+        assert 'grounding_metadata' in final.response_metadata
+        assert final.response_metadata['finish_reason'] == 'stop'
+        assert final.response_metadata['grounding_metadata']['web_search_queries'] == ['test query']
+    
+    @pytest.mark.asyncio
+    async def test_aggregate_chunks_empty_list(self):
+        """Test that aggregate_chunks handles empty list gracefully."""
+        from .metadata_helpers import aggregate_chunks
+        
+        final = aggregate_chunks([])
+        
+        assert final is None
+    
+    def test_extract_tool_usage_summary_google_search(self):
+        """Test extraction of Google Search tool usage from metadata."""
+        from .metadata_helpers import extract_tool_usage_summary
+        
+        metadata = {
+            'grounding_metadata': {
+                'web_search_queries': ['query1', 'query2'],
+                'search_entry_point': {'rendered_content': '...'}
+            }
+        }
+        
+        summary = extract_tool_usage_summary(metadata)
+        
+        assert summary is not None
+        assert 'google_search' in summary
+        assert summary['google_search']['query_count'] == 2
+        assert summary['google_search']['queries'] == ['query1', 'query2']
+    
+    def test_extract_tool_usage_summary_url_context(self):
+        """Test extraction of URL Context tool usage from metadata."""
+        from .metadata_helpers import extract_tool_usage_summary
+        
+        metadata = {
+            'grounding_metadata': {
+                'grounding_chunks': [
+                    {
+                        'web': {
+                            'uri': 'https://example.com',
+                            'title': 'Example Page'
+                        }
+                    }
+                ],
+                'web_search_queries': []  # No search queries means URL context
+            }
+        }
+        
+        summary = extract_tool_usage_summary(metadata)
+        
+        assert summary is not None
+        assert 'url_context' in summary
+        assert summary['url_context']['url_count'] == 1
+        assert summary['url_context']['urls'][0]['uri'] == 'https://example.com'
+        assert summary['url_context']['urls'][0]['title'] == 'Example Page'
+    
+    def test_extract_tool_usage_summary_no_tools(self):
+        """Test extraction returns None when no tools were used."""
+        from .metadata_helpers import extract_tool_usage_summary
+        
+        metadata = {}
+        summary = extract_tool_usage_summary(metadata)
+        
+        assert summary is None

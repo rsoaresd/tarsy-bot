@@ -1,6 +1,21 @@
 """
 Unified LLM client implementation using LangChain.
 Handles all LLM providers through LangChain's abstraction.
+
+HYBRID APPROACH FOR GOOGLE/GEMINI NATIVE TOOLS:
+-----------------------------------------------
+For Google/Gemini models, we use a hybrid approach combining:
+1. LangChain's ChatGoogleGenerativeAI for multi-provider abstraction
+2. NEW google.genai.types for tool definitions (modern format)
+3. .bind() method to attach tools to model (not passed to astream)
+
+This approach enables:
+- Tool combination support (GoogleNativeTool enum: GOOGLE_SEARCH, CODE_EXECUTION, URL_CONTEXT)
+- Modern tool format matching Google's official documentation
+- Full LangChain compatibility across all providers
+
+Note: LangChain's older protobuf-based approach (v1beta) does NOT support
+tool combination. The NEW SDK types (google.genai.types) are required.
 """
 
 import asyncio
@@ -18,15 +33,21 @@ from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 from langchain_openai import ChatOpenAI
 from langchain_xai import ChatXAI
 from langchain_anthropic import ChatAnthropic
-from google.ai.generativelanguage_v1beta.types import Tool as GoogleTool
+from google.genai import types as google_genai_types  # Google SDK types for tool definitions
 
 from tarsy.config.settings import Settings
 from tarsy.hooks.hook_context import llm_interaction_context
 from tarsy.models.constants import LLMInteractionType, StreamingEventType
-from tarsy.models.llm_models import LLMProviderConfig, LLMProviderType
+from tarsy.models.llm_models import GoogleNativeTool, LLMProviderConfig, LLMProviderType
+from tarsy.models.mcp_selection_models import NativeToolsConfig
 from tarsy.models.unified_interactions import LLMConversation, MessageRole
 from tarsy.utils.logger import get_module_logger
 from tarsy.utils.error_details import extract_error_details
+
+# Apply url_context patch for Gemini models
+# This enables url_context tool support which is not yet natively supported in LangChain
+from tarsy.integrations.llm.gemini_url_context_patch import apply_url_context_patch
+apply_url_context_patch()
 
 # Suppress SSL warnings when SSL verification is disabled
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -36,6 +57,12 @@ logger = get_module_logger(__name__)
 
 # Setup separate logger for LLM communications
 llm_comm_logger = get_module_logger("llm.communications")
+
+# Constants for Google code execution response parts
+# These part types are returned by Google's native code execution tool
+# See: https://ai.google.dev/gemini-api/docs/code-execution
+CODE_EXECUTION_PART_EXECUTABLE = 'executable_code'
+CODE_EXECUTION_PART_RESULT = 'code_execution_result'
 
 
 # LLM Providers mapping using LangChain
@@ -143,7 +170,12 @@ class LLMClient:
         self.settings = settings  # Store settings for feature flag access
         self.available: bool = False
         self._sqlite_warning_logged: bool = False
-        self.google_search_tool: Optional[GoogleTool] = None  # Store Google Search tool for Gemini models
+        # Store native tools for Google/Gemini models (GoogleNativeTool enum values)
+        self.native_tools: Dict[str, Optional[google_genai_types.Tool]] = {
+            GoogleNativeTool.GOOGLE_SEARCH.value: None,
+            GoogleNativeTool.CODE_EXECUTION.value: None,
+            GoogleNativeTool.URL_CONTEXT.value: None
+        }
         self._initialize_client()
     
     def _initialize_client(self):
@@ -171,17 +203,10 @@ class LLMClient:
                     base_url
                 )
                 
-                # Initialize Google Search tool for Google/Gemini models (if enabled)
-                if (
-                    provider_type == LLMProviderType.GOOGLE
-                    and self.config.enable_native_search
-                ):
-                    try:
-                        self.google_search_tool = GoogleTool(google_search={})
-                        logger.info(f"Successfully initialized Google Search tool for {self.provider_name}")
-                    except Exception as e:
-                        logger.warning(f"Failed to initialize Google Search tool for {self.provider_name}: {e}")
-                        # Don't fail client initialization if tool creation fails
+                # Initialize native tools for Google/Gemini models
+                # Uses Google AI SDK types (google.genai.types) for tool definition format
+                if provider_type == LLMProviderType.GOOGLE:
+                    self._initialize_native_tools()
                 
                 self.available = True
                 logger.info(f"Successfully initialized {self.provider_name} with LangChain")
@@ -191,6 +216,139 @@ class LLMClient:
         except Exception as e:
             logger.error(f"Failed to initialize {self.provider_name}: {str(e)}")
             self.available = False
+
+    def _initialize_native_tools(self):
+        """Initialize Google/Gemini native tools based on config.
+        
+        Supports three native tools (GoogleNativeTool enum):
+        - GOOGLE_SEARCH: Web search capability (enabled by default)
+        - CODE_EXECUTION: Python code execution in sandbox (disabled by default)
+        - URL_CONTEXT: URL grounding for specific web pages (enabled by default)
+        
+        Default behavior when not configured:
+        - google_search and url_context are enabled
+        - code_execution is disabled for security reasons
+        """
+        enabled_tools = []
+        
+        try:
+            # Google Search tool
+            if self.config.get_native_tool_status(GoogleNativeTool.GOOGLE_SEARCH.value):
+                self.native_tools[GoogleNativeTool.GOOGLE_SEARCH.value] = google_genai_types.Tool(
+                    google_search=google_genai_types.GoogleSearch()
+                )
+                enabled_tools.append(GoogleNativeTool.GOOGLE_SEARCH.value)
+        except Exception as e:
+            logger.warning(f"Failed to initialize {GoogleNativeTool.GOOGLE_SEARCH.value} tool for {self.provider_name}: {e}")
+        
+        try:
+            # Code Execution tool
+            if self.config.get_native_tool_status(GoogleNativeTool.CODE_EXECUTION.value):
+                self.native_tools[GoogleNativeTool.CODE_EXECUTION.value] = google_genai_types.Tool(
+                    code_execution={}
+                )
+                enabled_tools.append(GoogleNativeTool.CODE_EXECUTION.value)
+        except Exception as e:
+            logger.warning(f"Failed to initialize {GoogleNativeTool.CODE_EXECUTION.value} tool for {self.provider_name}: {e}")
+        
+        try:
+            # URL Context tool
+            if self.config.get_native_tool_status(GoogleNativeTool.URL_CONTEXT.value):
+                self.native_tools[GoogleNativeTool.URL_CONTEXT.value] = google_genai_types.Tool(
+                    url_context={}
+                )
+                enabled_tools.append(GoogleNativeTool.URL_CONTEXT.value)
+        except Exception as e:
+            logger.warning(f"Failed to initialize {GoogleNativeTool.URL_CONTEXT.value} tool for {self.provider_name}: {e}")
+        
+        if enabled_tools:
+            logger.info(f"Successfully initialized native tools for {self.provider_name}: {enabled_tools}")
+        else:
+            logger.info(f"No native tools enabled for {self.provider_name}")
+
+    def _apply_native_tools_override(
+        self,
+        override: NativeToolsConfig
+    ) -> Dict[str, Optional[google_genai_types.Tool]]:
+        """
+        Apply per-session native tools override with tri-state semantics.
+        
+        Creates a temporary tools dictionary based on the override configuration.
+        
+        **Tri-state behavior per tool:**
+        - `None`: Use provider default configuration
+        - `True`: Explicitly enable (override provider default)
+        - `False`: Explicitly disable (override provider default)
+        
+        Args:
+            override: Session-level native tools configuration
+            
+        Returns:
+            Dictionary of native tools with override applied (tool_name -> Tool or None)
+        """
+        overridden_tools = {
+            GoogleNativeTool.GOOGLE_SEARCH.value: None,
+            GoogleNativeTool.CODE_EXECUTION.value: None,
+            GoogleNativeTool.URL_CONTEXT.value: None
+        }
+        
+        enabled_tools = []
+        enabled_from_defaults = []
+        
+        # Google Search tool
+        should_enable_search = override.google_search if override.google_search is not None else \
+                               self.config.get_native_tool_status(GoogleNativeTool.GOOGLE_SEARCH.value)
+        
+        if should_enable_search:
+            try:
+                overridden_tools[GoogleNativeTool.GOOGLE_SEARCH.value] = google_genai_types.Tool(
+                    google_search=google_genai_types.GoogleSearch()
+                )
+                enabled_tools.append(GoogleNativeTool.GOOGLE_SEARCH.value)
+                if override.google_search is None:
+                    enabled_from_defaults.append(GoogleNativeTool.GOOGLE_SEARCH.value)
+            except Exception as e:
+                logger.warning(f"Failed to create {GoogleNativeTool.GOOGLE_SEARCH.value} tool override: {e}")
+        
+        # Code Execution tool
+        should_enable_code = override.code_execution if override.code_execution is not None else \
+                             self.config.get_native_tool_status(GoogleNativeTool.CODE_EXECUTION.value)
+        
+        if should_enable_code:
+            try:
+                overridden_tools[GoogleNativeTool.CODE_EXECUTION.value] = google_genai_types.Tool(
+                    code_execution={}
+                )
+                enabled_tools.append(GoogleNativeTool.CODE_EXECUTION.value)
+                if override.code_execution is None:
+                    enabled_from_defaults.append(GoogleNativeTool.CODE_EXECUTION.value)
+            except Exception as e:
+                logger.warning(f"Failed to create {GoogleNativeTool.CODE_EXECUTION.value} tool override: {e}")
+        
+        # URL Context tool
+        should_enable_url = override.url_context if override.url_context is not None else \
+                            self.config.get_native_tool_status(GoogleNativeTool.URL_CONTEXT.value)
+        
+        if should_enable_url:
+            try:
+                overridden_tools[GoogleNativeTool.URL_CONTEXT.value] = google_genai_types.Tool(
+                    url_context={}
+                )
+                enabled_tools.append(GoogleNativeTool.URL_CONTEXT.value)
+                if override.url_context is None:
+                    enabled_from_defaults.append(GoogleNativeTool.URL_CONTEXT.value)
+            except Exception as e:
+                logger.warning(f"Failed to create {GoogleNativeTool.URL_CONTEXT.value} tool override: {e}")
+        
+        log_msg = f"Applied native tools override for {self.provider_name}: enabled={enabled_tools}"
+        if enabled_from_defaults:
+            log_msg += f" (from provider defaults: {enabled_from_defaults})"
+        disabled = [name for name, tool in overridden_tools.items() if tool is None]
+        if disabled:
+            log_msg += f", disabled={disabled}"
+        logger.info(log_msg)
+        
+        return overridden_tools
 
     def _convert_conversation_to_langchain(self, conversation: LLMConversation) -> List:
         """Convert typed conversation to LangChain message objects."""
@@ -212,8 +370,9 @@ class LLMClient:
         max_tokens: Optional[int] = None,
         interaction_type: Optional[str] = None,
         max_retries: int = 3,
-        timeout_seconds: int = 60,
-        mcp_event_id: Optional[str] = None
+        timeout_seconds: int = 120,
+        mcp_event_id: Optional[str] = None,
+        native_tools_override: Optional[NativeToolsConfig] = None
     ) -> LLMConversation:
         """
         Generate response with streaming to WebSocket.
@@ -222,7 +381,7 @@ class LLMClient:
         Event publishing automatically disabled in SQLite/dev mode via publish_transient.
         
         Includes retry logic:
-        - Timeout protection (default: 60s)
+        - Timeout protection (default: 120s, increased for code execution scenarios)
         - Rate limit retry with exponential backoff
         - Timeout retry with increasing delays
         - Empty response handling
@@ -235,8 +394,13 @@ class LLMClient:
             interaction_type: Optional interaction type (investigation, summarization, final_analysis).
                             If None, auto-detects based on response content.
             max_retries: Maximum number of retry attempts (default: 3)
-            timeout_seconds: Timeout for LLM streaming call (default: 60s)
+            timeout_seconds: Timeout for LLM streaming call (default: 120s).
+                           Increased from 60s to accommodate code execution which can take up to
+                           30s per execution plus multiple regeneration rounds (up to 5x).
             mcp_event_id: Optional MCP event ID if summarizing a tool result
+            native_tools_override: Optional per-session native tools configuration override.
+                                 When specified, completely replaces provider's default native tools
+                                 settings for this request (Google/Gemini only).
         
         Returns:
             Updated conversation with assistant response appended
@@ -252,8 +416,26 @@ class LLMClient:
             'temperature': self.temperature
         }
         
+        # Prepare native tools config for audit trail (Google/Gemini only)
+        # Apply session-level override if provided
+        native_tools_config = None
+        active_native_tools = self.native_tools  # Default to provider config
+        
+        if self.config.type == LLMProviderType.GOOGLE:
+            # Apply override if provided (session-level takes precedence)
+            if native_tools_override is not None:
+                active_native_tools = self._apply_native_tools_override(native_tools_override)
+                logger.info(f"Using session-level native tools override for {session_id}")
+            
+            # Capture effective config for audit trail
+            native_tools_config = {
+                GoogleNativeTool.GOOGLE_SEARCH.value: bool(active_native_tools[GoogleNativeTool.GOOGLE_SEARCH.value]),
+                GoogleNativeTool.CODE_EXECUTION.value: bool(active_native_tools[GoogleNativeTool.CODE_EXECUTION.value]),
+                GoogleNativeTool.URL_CONTEXT.value: bool(active_native_tools[GoogleNativeTool.URL_CONTEXT.value])
+            }
+        
         # Use typed hook context for clean data flow
-        async with llm_interaction_context(session_id, request_data, stage_execution_id) as ctx:
+        async with llm_interaction_context(session_id, request_data, stage_execution_id, native_tools_config) as ctx:
             # Get request ID for logging  
             request_id = ctx.get_request_id()
 
@@ -290,28 +472,43 @@ class LLMClient:
                     if max_tokens is not None:
                         config["max_tokens"] = max_tokens
                     
-                    # Prepare tools for Gemini models
-                    # Tools must be passed as a keyword argument, not in config dict
-                    # Defensive check: Only include tools for Google providers
-                    tools_kwarg = {}
-                    if (
-                        self.google_search_tool is not None
-                        and self.config.type == LLMProviderType.GOOGLE
-                    ):
-                        tools_kwarg["tools"] = [self.google_search_tool]
-                        logger.info(f"Including Google Search tool for {self.provider_name}")
+                    # HYBRID APPROACH: Bind native tools to model using Google AI SDK types
+                    # Tools are converted to dicts and bound to the model, not passed to astream()
+                    # Supports multiple tools: GoogleNativeTool enum (GOOGLE_SEARCH, CODE_EXECUTION, URL_CONTEXT)
+                    # Uses active_native_tools which may be overridden at session level
+                    llm_with_tools = self.llm_client
+                    code_execution_enabled = False
+                    
+                    if self.config.type == LLMProviderType.GOOGLE:
+                        # Collect all enabled native tools (from active config which may be overridden)
+                        active_tools = [tool for tool in active_native_tools.values() if tool is not None]
+                        # Check if code execution is specifically enabled
+                        code_execution_enabled = active_native_tools.get(GoogleNativeTool.CODE_EXECUTION.value) is not None
+                        
+                        if active_tools:
+                            try:
+                                # Convert all Google AI SDK tools to dicts and bind to model
+                                tools_as_dicts = [t.model_dump(exclude_none=True) for t in active_tools]
+                                llm_with_tools = self.llm_client.bind(tools=tools_as_dicts)
+                                tool_names = [k for k, v in active_native_tools.items() if v is not None]
+                                logger.info(f"Bound native tools to {self.provider_name} model: {tool_names}")
+                            except Exception as e:
+                                logger.error(f"Failed to bind native tools: {e}, continuing without tools")
+                                llm_with_tools = self.llm_client
                     
                     # Aggregate chunks for usage metadata (OpenAI stream_usage=True approach)
                     aggregate_chunk = None
                     
                     # Wrap streaming with timeout protection (Python 3.11+)
                     async with asyncio.timeout(timeout_seconds):
-                        async for chunk in self.llm_client.astream(langchain_messages, config=config, **tools_kwarg):
+                        async for chunk in llm_with_tools.astream(langchain_messages, config=config):
                             # Aggregate chunks by adding them together
                             # This properly accumulates usage_metadata across all chunks
                             aggregate_chunk = chunk if aggregate_chunk is None else aggregate_chunk + chunk
                             
-                            token = self._extract_token_content(chunk)
+                            # Extract token content, filtering out code execution parts if enabled
+                            # This preserves ReAct format by only accumulating text content
+                            token = self._extract_token_content(chunk, filter_code_execution=code_execution_enabled)
                             accumulated_content += token
                             
                             # Detect start of "Thought:" streaming (disabled during summarization)
@@ -493,6 +690,41 @@ class LLMClient:
                     # Store usage metadata (from aggregated chunks or callback)
                     self._store_usage_metadata(ctx, callback, chunk_usage)
                     
+                    # Extract complete response metadata from aggregated chunk
+                    if aggregate_chunk and hasattr(aggregate_chunk, 'response_metadata'):
+                        ctx.interaction.response_metadata = aggregate_chunk.response_metadata
+                        try:
+                            keys = list(aggregate_chunk.response_metadata.keys()) if aggregate_chunk.response_metadata else []
+                            logger.debug(f"Captured response metadata with keys: {keys if keys else 'none'}")
+                        except (TypeError, AttributeError):
+                            # Handle cases where response_metadata is not a dict (e.g., in tests)
+                            logger.debug("Captured response metadata (keys unavailable)")
+                    
+                    # For Google code execution, extract structured parts from chunk content
+                    # ONLY extract if code execution is actually enabled to avoid unnecessary processing
+                    # Google returns parts with types defined in CODE_EXECUTION_PART_* constants
+                    # See: https://ai.google.dev/gemini-api/docs/code-execution
+                    if code_execution_enabled and aggregate_chunk and hasattr(aggregate_chunk, 'content'):
+                        content = aggregate_chunk.content
+                        if isinstance(content, list):
+                            # Extract parts array from list content
+                            parts = []
+                            for item in content:
+                                if isinstance(item, dict):
+                                    parts.append(item)
+                                elif hasattr(item, '__dict__'):
+                                    # Convert object to dict
+                                    parts.append(vars(item))
+                            
+                            # Add parts to response_metadata if we found any structured content
+                            if parts:
+                                if ctx.interaction.response_metadata is None:
+                                    ctx.interaction.response_metadata = {}
+                                if not isinstance(ctx.interaction.response_metadata, dict):
+                                    ctx.interaction.response_metadata = {}
+                                ctx.interaction.response_metadata['parts'] = parts
+                                logger.debug(f"Captured {len(parts)} structured parts from content for code execution")
+                    
                     # Finalize conversation and interaction
                     self._finalize_conversation(ctx, conversation, accumulated_content, interaction_type, mcp_event_id)
                     
@@ -580,17 +812,20 @@ class LLMClient:
         """Return the maximum tool result tokens for the current provider."""
         return self.provider_config.max_tool_result_tokens  # Already an int with BaseModel validation
     
-    def _extract_token_content(self, chunk: Any) -> str:
+    def _extract_token_content(self, chunk: Any, filter_code_execution: bool = False) -> str:
         """
         Extract string content from LLM chunk, handling various provider formats.
         
         Some providers return lists of content blocks that need to be flattened.
+        When filter_code_execution is True, filters out executable_code and 
+        code_execution_result parts to preserve ReAct format.
         
         Args:
             chunk: Raw chunk from LLM stream
+            filter_code_execution: If True, skip code execution parts (for Google native tool)
             
         Returns:
-            String content extracted from chunk
+            String content extracted from chunk (text only when filtering)
         """
         token = (chunk.content if hasattr(chunk, "content") else str(chunk)) or ""
         
@@ -598,17 +833,30 @@ class LLMClient:
         if isinstance(token, list):
             token_str = ""
             for block in token:
+                # Skip code execution parts if filtering is enabled
+                # These parts are captured in metadata but shouldn't be in streamed content
+                if filter_code_execution:
+                    if isinstance(block, dict):
+                        # Skip code execution parts using constants
+                        if CODE_EXECUTION_PART_EXECUTABLE in block or CODE_EXECUTION_PART_RESULT in block:
+                            continue
+                    elif hasattr(block, CODE_EXECUTION_PART_EXECUTABLE) or hasattr(block, CODE_EXECUTION_PART_RESULT):
+                        continue
+                
+                # Extract text content
                 if isinstance(block, str):
                     token_str += block
                 elif isinstance(block, dict) and 'text' in block:
                     token_str += block['text'] or ""
                 elif hasattr(block, 'text'):
                     token_str += block.text or ""
-                else:
+                elif not filter_code_execution:
+                    # Only stringify unknown blocks if not filtering
                     token_str += str(block)
             return token_str
         
-        return token
+        # Defensive str() coercion for future-proofing against potential library API shifts
+        return str(token) if not isinstance(token, str) else token
     
     def _store_usage_metadata(
         self, 
@@ -888,7 +1136,8 @@ class LLMManager:
                               provider: str = None,
                               max_tokens: Optional[int] = None,
                               interaction_type: Optional[str] = None,
-                              mcp_event_id: Optional[str] = None) -> LLMConversation:
+                              mcp_event_id: Optional[str] = None,
+                              native_tools_override: Optional[NativeToolsConfig] = None) -> LLMConversation:
         """Generate a response using the specified or default LLM provider.
         
         Args:
@@ -900,6 +1149,7 @@ class LLMManager:
             interaction_type: Optional interaction type (investigation, summarization, final_analysis).
                             If None, auto-detects based on response content.
             mcp_event_id: Optional MCP event ID if summarizing a tool result
+            native_tools_override: Optional per-session native tools configuration override
             
         Returns:
             Updated LLMConversation with new assistant message appended
@@ -909,7 +1159,15 @@ class LLMManager:
             available = list(self.clients.keys())
             raise Exception(f"LLM provider not available. Available: {available}")
 
-        return await client.generate_response(conversation, session_id, stage_execution_id, max_tokens, interaction_type, mcp_event_id=mcp_event_id)
+        return await client.generate_response(
+            conversation, 
+            session_id, 
+            stage_execution_id, 
+            max_tokens, 
+            interaction_type, 
+            mcp_event_id=mcp_event_id,
+            native_tools_override=native_tools_override
+        )
 
     def list_available_providers(self) -> List[str]:
         """List available LLM providers."""
