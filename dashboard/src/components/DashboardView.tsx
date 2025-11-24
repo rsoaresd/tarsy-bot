@@ -82,6 +82,19 @@ function DashboardView() {
   const activeReconnectionRef = useRef(false);
   const historicalReconnectionRef = useRef(false);
 
+  // Refs to track current state for stale update detection in async callbacks
+  // These allow us to compare request-time values against current values
+  const filtersRef = useRef(filters);
+  const paginationRef = useRef(pagination);
+  const sortStateRef = useRef(sortState);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    filtersRef.current = filters;
+    paginationRef.current = pagination;
+    sortStateRef.current = sortState;
+  }, [filters, pagination, sortState]);
+
   // Clean up throttling timeout on unmount
   useEffect(() => {
     return () => {
@@ -158,10 +171,10 @@ function DashboardView() {
             ? filters.status 
             : TERMINAL_SESSION_STATUSES
         };
-        response = await apiClient.getFilteredSessions(historicalFilters, pagination.page, pagination.pageSize);
+        response = await apiClient.getFilteredSessions(historicalFilters, pagination.page, pagination.pageSize, sortState.field, sortState.direction);
       } else {
         // Use the original historical API (completed + failed + cancelled sessions only)
-        response = await apiClient.getHistoricalSessions(pagination.page, pagination.pageSize);
+        response = await apiClient.getHistoricalSessions(pagination.page, pagination.pageSize, sortState.field, sortState.direction);
       }
       
       setHistoricalAlerts(response.sessions);
@@ -194,10 +207,12 @@ function DashboardView() {
       return;
     }
 
-    // Capture current filters and pagination at request time to detect stale updates
+    // Capture current filters, pagination, and sort state at request time to detect stale updates
     const requestFilters = { ...filters };
     const requestPage = pagination.page;
     const requestPageSize = pagination.pageSize;
+    const requestSortField = sortState.field;
+    const requestSortDirection = sortState.direction;
 
     // Check if filters are currently active
     const hasActiveFilters = Boolean(
@@ -228,19 +243,22 @@ function DashboardView() {
             ? requestFilters.status 
             : TERMINAL_SESSION_STATUSES
         };
-        response = await apiClient.getFilteredSessionsWithRetry(historicalFilters, requestPage, requestPageSize);
+        response = await apiClient.getFilteredSessionsWithRetry(historicalFilters, requestPage, requestPageSize, requestSortField, requestSortDirection);
       } else {
         // When no filters are active, use retry API for unfiltered historical sessions
         console.log('📋 Reconnection sync without filters - using retry API');
-        response = await apiClient.getHistoricalSessionsWithRetry(requestPage, requestPageSize);
+        response = await apiClient.getHistoricalSessionsWithRetry(requestPage, requestPageSize, requestSortField, requestSortDirection);
       }
       
-      // Only update state if filters and pagination haven't changed since request started
+      // Only update state if filters, pagination, and sort state haven't changed since request started
       // This prevents race conditions where a newer request might be overwritten by an older one
-      const filtersUnchanged = JSON.stringify(filters) === JSON.stringify(requestFilters);
-      const paginationUnchanged = pagination.page === requestPage && pagination.pageSize === requestPageSize;
+      // We use refs here because the closure captures values at callback creation time,
+      // but we need to compare against the CURRENT state at response time
+      const filtersUnchanged = JSON.stringify(filtersRef.current) === JSON.stringify(requestFilters);
+      const paginationUnchanged = paginationRef.current.page === requestPage && paginationRef.current.pageSize === requestPageSize;
+      const sortUnchanged = sortStateRef.current.field === requestSortField && sortStateRef.current.direction === requestSortDirection;
       
-      if (filtersUnchanged && paginationUnchanged) {
+      if (filtersUnchanged && paginationUnchanged && sortUnchanged) {
         setHistoricalAlerts(response.sessions);
         setFilteredCount(response.pagination.total_items);
         
@@ -254,7 +272,7 @@ function DashboardView() {
         
         console.log('✅ Historical sessions synced after reconnection');
       } else {
-        console.log('⚠️  Skipping state update - filters or pagination changed during request');
+        console.log('⚠️  Skipping state update - filters, pagination, or sort state changed during request');
       }
       
     } catch (err) {
@@ -270,12 +288,24 @@ function DashboardView() {
     filters,
     pagination.page,
     pagination.pageSize,
+    sortState.field,
+    sortState.direction,
     setHistoricalLoading,
     setHistoricalError,
     setHistoricalAlerts,
     setFilteredCount,
     setPagination
-  ]); // Include all external dependencies: filters, pagination values, and setState functions
+  ]); // Include all external dependencies: filters, pagination, sort state, and setState functions
+
+  // Stable refs for WebSocket handlers to avoid effect churn
+  // These refs ensure WebSocket subscriptions remain stable while handlers always call latest versions
+  const fetchActiveAlertsWithRetryRef = useRef(fetchActiveAlertsWithRetry);
+  const fetchHistoricalAlertsWithRetryRef = useRef(fetchHistoricalAlertsWithRetry);
+
+  useEffect(() => {
+    fetchActiveAlertsWithRetryRef.current = fetchActiveAlertsWithRetry;
+    fetchHistoricalAlertsWithRetryRef.current = fetchHistoricalAlertsWithRetry;
+  }, [fetchActiveAlertsWithRetry, fetchHistoricalAlertsWithRetry]);
 
   // Throttled refresh function to prevent excessive API calls
   const throttledRefresh = useCallback(() => {
@@ -416,7 +446,7 @@ function DashboardView() {
     );
 
     fetchHistoricalAlerts(hasActiveFilters);
-  }, [pagination.page, pagination.pageSize, sortState]);
+  }, [pagination.page, pagination.pageSize, sortState.field, sortState.direction]);
 
   // Set up WebSocket event handlers for real-time updates
   useEffect(() => {
@@ -436,8 +466,8 @@ function DashboardView() {
         console.log('✅ WebSocket connected - real-time updates active');
         // Sync with backend state after reconnection (handles backend restarts)
         console.log('🔄 WebSocket reconnected - syncing dashboard with backend state');
-        fetchActiveAlertsWithRetry();
-        fetchHistoricalAlertsWithRetry();
+        fetchActiveAlertsWithRetryRef.current();
+        fetchHistoricalAlertsWithRetryRef.current();
       } else {
         console.log('❌ WebSocket disconnected - use manual refresh buttons');
       }
@@ -465,7 +495,7 @@ function DashboardView() {
       unsubscribeUpdate();
       unsubscribeConnection();
     };
-  }, [fetchActiveAlertsWithRetry, fetchHistoricalAlertsWithRetry]);
+  }, []); // Empty deps - effect only runs once on mount, refs ensure handlers are always current
 
   // Handle session click with same-tab navigation
   const handleSessionClick = (sessionId: string) => {
