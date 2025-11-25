@@ -268,6 +268,7 @@ export KUBECONFIG=/path/to/your/kubeconfig
 - `GET /api/v1/history/sessions/{session_id}` - Get detailed session with chronological timeline
 - `GET /api/v1/history/sessions/{session_id}/final-analysis` - Get final analysis with optional LLM conversation history
   - Query params: `include_conversation=true` (analysis conversation), `include_chat_conversation=true` (chat conversation)
+- `GET /api/v1/history/sessions/{id}/final-analysis-summary` - Get final analysis summary content for any session (returns null if not available)
 - `POST /api/v1/history/sessions/{session_id}/resume` - Resume a paused session from where it left off. Session must be in `PAUSED` state
 - `POST /api/v1/history/sessions/{session_id}/cancel` - Cancel an active or paused session. Session must not be in a terminal state (COMPLETED, FAILED, CANCELLED)
 

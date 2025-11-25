@@ -427,3 +427,10 @@ class FinalAnalysisResponse(BaseModel):
         default=None,
         description="LLM conversation history from the last chat exchange, if chat exists (optional, requested via query param)"
     )
+
+
+class FinalAnalysisSummaryResponse(BaseModel):
+    """Response for session final analysis summary endpoint."""
+    final_analysis_summary: Optional[str] = Field(description="Summary of the final analysis for external notifications (e.g., Slack), null if not available")
+    session_id: str = Field(description="Session identifier")
+    status: AlertSessionStatus = Field(description="Current session status")

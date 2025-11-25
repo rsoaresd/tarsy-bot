@@ -530,3 +530,18 @@ Begin your ReAct reasoning:
             else:
                 flattened_history.append(str(item))
         return flattened_history
+
+    def build_summary_prompt(self, final_analysis: str) -> str:
+        """Build prompt for generating summary of an incident analysis."""
+        return f"""Generate a 1-2 line summary of this incident analysis.
+
+CRITICAL RULES:
+- Only summarize what is EXPLICITLY stated in the analysis
+- Do NOT infer future actions or recommendations not mentioned
+- Do NOT add your own conclusions
+- Focus on: what happened, current status, and ONLY stated next steps
+
+Analysis to summarize:
+{final_analysis}
+
+Summary (1-2 lines, facts only):"""

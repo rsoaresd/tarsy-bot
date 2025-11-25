@@ -608,6 +608,10 @@ class TestAlertServiceHistoryIntegration:
         """Create AlertService with history integration."""
         # Create AlertService directly with mock settings
         service = AlertService(mock_settings)
+
+        mock_summary = AsyncMock()
+        mock_summary.generate_summary.return_value = "Test analysis"
+        service.final_analysis_summary = mock_summary
         
         # Mock LLM manager to appear available
         service.llm_manager.is_available = Mock(return_value=True)
@@ -1058,6 +1062,124 @@ class TestHistoryAPIIntegration:
             
             try:
                 response = client.get(f"/api/v1/history/sessions/{session_id}/final-analysis")
+                
+                # Verify error response
+                assert response.status_code == expected_status_code
+                
+                error_data = response.json()
+                assert "detail" in error_data
+                assert expected_error_content.lower() in error_data["detail"].lower()
+                
+                # Verify service was called correctly (except for some error cases)
+                if expected_status_code != 500 or "Internal error" not in str(mock_side_effect):
+                    mock_history_service_for_api.get_session.assert_called_once_with(session_id)
+                
+            finally:
+                # Clean up for next iteration
+                app.dependency_overrides.clear()
+                mock_history_service_for_api.reset_mock()
+
+    @pytest.mark.integration
+    def test_api_final_analysis_summary_integration_scenarios(self, client, mock_history_service_for_api):
+        """Test final analysis summary API endpoint integration with multiple scenarios."""
+        from tarsy.models.constants import AlertSessionStatus
+        from tarsy.models.db_models import AlertSession
+        from tests.utils import SessionFactory
+        
+        # Define test scenarios
+        test_scenarios = [
+            # (session_suffix, status, final_analysis_summary)
+            ("with-content", AlertSessionStatus.COMPLETED, "Brief summary of the analysis"),
+            ("no-content", AlertSessionStatus.IN_PROGRESS, None),
+            ("failed-no-summary", AlertSessionStatus.FAILED, None),
+            ("pending-no-summary", AlertSessionStatus.PENDING, None),
+            ("completed-empty-summary", AlertSessionStatus.COMPLETED, ""),
+            ("completed-detailed-summary", AlertSessionStatus.COMPLETED, 
+             "**Security Alert**: Data breach detected. Systems isolated, incident response initiated. Full forensic analysis pending."),
+        ]
+        
+        from tarsy.controllers.history_controller import get_history_service
+        
+        for session_suffix, status, final_analysis_summary in test_scenarios:
+            session_id = f"integration-session-{session_suffix}"
+            
+            # Create test session
+            mock_session = AlertSession(
+                session_id=session_id,
+                alert_type="TestAlert",
+                agent_type="TestAgent",
+                status=status.value,
+                started_at_us=now_us() - 600000000,  # 10 minutes ago
+                completed_at_us=now_us() - 60000000 if status in [AlertSessionStatus.COMPLETED, AlertSessionStatus.FAILED] else None,
+                alert_data={"test": "data", "environment": "integration"},
+                chain_id=f"integration-chain-{session_suffix}",
+                final_analysis="Full analysis content here",
+                final_analysis_summary=final_analysis_summary
+            )
+            
+            # Mock the get_session method
+            mock_history_service_for_api.get_session.return_value = mock_session
+            
+            # Override FastAPI dependency
+            app.dependency_overrides[get_history_service] = lambda: mock_history_service_for_api
+            
+            try:
+                response = client.get(f"/api/v1/history/sessions/{session_id}/final-analysis-summary")
+                
+                # Verify response status
+                assert response.status_code == 200
+                
+                data = response.json()
+                
+                # Verify response structure
+                assert "final_analysis_summary" in data
+                assert "session_id" in data
+                assert "status" in data
+                
+                # Verify content
+                assert data["session_id"] == session_id
+                assert data["status"] == status.value
+                assert data["final_analysis_summary"] == final_analysis_summary
+                
+                # Verify specific content for detailed summary
+                if final_analysis_summary and "Security Alert" in final_analysis_summary:
+                    assert "Data breach detected" in data["final_analysis_summary"]
+                    assert "incident response" in data["final_analysis_summary"]
+                
+                # Verify service was called correctly
+                mock_history_service_for_api.get_session.assert_called_once_with(session_id)
+                
+            finally:
+                # Clean up for next iteration
+                app.dependency_overrides.clear()
+                mock_history_service_for_api.reset_mock()
+    
+    @pytest.mark.integration
+    def test_api_final_analysis_summary_error_scenarios(self, client, mock_history_service_for_api):
+        """Test final analysis summary API endpoint error scenarios."""
+        from tarsy.controllers.history_controller import get_history_service
+        
+        # Define error test scenarios
+        error_scenarios = [
+            # (session_id, mock_return_value, mock_side_effect, expected_status_code, expected_error_content)
+            ("non-existent-session", None, None, 404, "not found"),
+            ("service-error-session", None, RuntimeError("Database unavailable"), 503, "service unavailable"),
+            ("internal-error-session", None, Exception("Internal error"), 500, "Failed to retrieve"),
+        ]
+        
+        for session_id, mock_return_value, mock_side_effect, expected_status_code, expected_error_content in error_scenarios:
+            # Configure mock
+            if mock_side_effect:
+                mock_history_service_for_api.get_session.side_effect = mock_side_effect
+            else:
+                mock_history_service_for_api.get_session.return_value = mock_return_value
+                mock_history_service_for_api.get_session.side_effect = None
+            
+            # Override FastAPI dependency
+            app.dependency_overrides[get_history_service] = lambda: mock_history_service_for_api
+            
+            try:
+                response = client.get(f"/api/v1/history/sessions/{session_id}/final-analysis-summary")
                 
                 # Verify error response
                 assert response.status_code == expected_status_code
