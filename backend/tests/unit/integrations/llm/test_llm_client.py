@@ -165,9 +165,9 @@ class TestLLMClientInitialization:
             
             assert client.provider_name == "openai"
             assert client.available == True
+            # Temperature not set - uses model's default
             mock_openai.assert_called_once_with(
                 model="gpt-4",
-                temperature=0.7,
                 api_key="test-api-key",
                 stream_usage=True
             )
@@ -183,9 +183,9 @@ class TestLLMClientInitialization:
             
             assert client.provider_name == "google"
             assert client.available == True
+            # Temperature not set - uses model's default
             mock_google.assert_called_once_with(
                 model="gpt-4",
-                temperature=0.7,
                 google_api_key="test-api-key"
             )
     
@@ -200,10 +200,10 @@ class TestLLMClientInitialization:
             
             assert client.provider_name == "xai"
             assert client.available == True
+            # Temperature not set - uses model's default
             mock_xai.assert_called_once_with(
                 model="gpt-4",
-                api_key="test-api-key",
-                temperature=0.7
+                api_key="test-api-key"
             )
     
     def test_initialization_anthropic_success(self, mock_config):
@@ -217,10 +217,10 @@ class TestLLMClientInitialization:
             
             assert client.provider_name == "anthropic"
             assert client.available == True
+            # Temperature not set - uses model's default
             mock_anthropic.assert_called_once_with(
                 model="gpt-4",
-                api_key="test-api-key",
-                temperature=0.7
+                api_key="test-api-key"
             )
     
     def test_initialization_vertexai_success_with_location(self, mock_config):
@@ -238,11 +238,11 @@ class TestLLMClientInitialization:
             
             assert client.provider_name == "vertexai"
             assert client.available == True
+            # Temperature not set - uses model's default
             mock_vertexai.assert_called_once_with(
                 model_name="claude-sonnet-4-5@20250929",
                 project="my-project",
-                location="us-east5",
-                temperature=0.7
+                location="us-east5"
             )
     
     def test_initialization_vertexai_success_default_location(self, mock_config):
@@ -260,11 +260,11 @@ class TestLLMClientInitialization:
             
             assert client.provider_name == "vertexai"
             assert client.available == True
+            # Temperature not set - uses model's default
             mock_vertexai.assert_called_once_with(
                 model_name="claude-sonnet-4-5@20250929",
                 project="my-project",
-                location="us-east5",  # Default location
-                temperature=0.7
+                location="us-east5"  # Default location
             )
     
     def test_initialization_unknown_provider(self):
@@ -279,26 +279,50 @@ class TestLLMClientInitialization:
             )
     
     def test_initialization_with_defaults(self):
-        """Test initialization with minimal config uses BaseModel defaults."""
-        # Create config with only required fields to test BaseModel defaults
+        """Test initialization with minimal config uses model defaults (no temperature set)."""
+        # Create config with only required fields - temperature defaults to None
         config = LLMProviderConfig(
             type="openai",
             model="gpt-4", 
             api_key_env="OPENAI_API_KEY",
             api_key="test-key"
-            # Uses BaseModel defaults: temperature=0.1
+            # temperature not set - uses model's default
         )
         
         with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
             mock_openai.return_value = Mock()
             
-            client = LLMClient("openai", config)
+            _client = LLMClient("openai", config)
             
+            # Temperature should NOT be in the call - model uses its own default
             mock_openai.assert_called_once_with(
-                model="gpt-4",  # model from config
-                temperature=0.1,     # BaseModel default temperature
+                model="gpt-4",
                 api_key="test-key",
-                stream_usage=True    # Enabled for token tracking
+                stream_usage=True
+            )
+    
+    def test_initialization_with_explicit_temperature(self):
+        """Test initialization with explicit temperature passes it to provider."""
+        # Create config with explicit temperature
+        config = LLMProviderConfig(
+            type="openai",
+            model="gpt-4", 
+            api_key_env="OPENAI_API_KEY",
+            api_key="test-key",
+            temperature=0.5  # Explicitly set
+        )
+        
+        with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
+            mock_openai.return_value = Mock()
+            
+            _client = LLMClient("openai", config)
+            
+            # Temperature SHOULD be in the call when explicitly set
+            mock_openai.assert_called_once_with(
+                model="gpt-4",
+                temperature=0.5,
+                api_key="test-key",
+                stream_usage=True
             )
     
     def test_initialization_handles_langchain_error(self, mock_config):
@@ -447,6 +471,7 @@ class TestLLMClientResponseGeneration:
         async def mock_stream_with_list():
             mock_chunk = Mock()
             mock_chunk.content = ["First part", " Second part", " Third part"]
+            mock_chunk.response_metadata = None  # Prevent metadata injection
             yield mock_chunk
         
         # Side effect function that accepts astream signature but ignores params
@@ -468,6 +493,9 @@ class TestLLMClientResponseGeneration:
             with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
                 mock_ctx = AsyncMock()
                 mock_ctx.get_request_id.return_value = "req-123"
+                # Properly configure interaction mock to have no response_metadata
+                mock_ctx.interaction = Mock()
+                mock_ctx.interaction.response_metadata = None
                 mock_context.return_value.__aenter__.return_value = mock_ctx
                 
                 result = await client.generate_response(conversation, "test-session-123")
@@ -486,6 +514,7 @@ class TestLLMClientResponseGeneration:
                 {"type": "text", "text": "Block 1"},
                 {"type": "text", "text": " Block 2"}
             ]
+            mock_chunk.response_metadata = None  # Prevent metadata injection
             yield mock_chunk
         
         # Side effect function that accepts astream signature but ignores params
@@ -507,6 +536,9 @@ class TestLLMClientResponseGeneration:
             with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
                 mock_ctx = AsyncMock()
                 mock_ctx.get_request_id.return_value = "req-124"
+                # Properly configure interaction mock to have no response_metadata
+                mock_ctx.interaction = Mock()
+                mock_ctx.interaction.response_metadata = None
                 mock_context.return_value.__aenter__.return_value = mock_ctx
                 
                 result = await client.generate_response(conversation, "test-session")
@@ -526,6 +558,7 @@ class TestLLMClientResponseGeneration:
             
             mock_chunk = Mock()
             mock_chunk.content = [block1, block2]
+            mock_chunk.response_metadata = None  # Prevent metadata injection
             yield mock_chunk
         
         # Side effect function that accepts astream signature but ignores params
@@ -547,6 +580,9 @@ class TestLLMClientResponseGeneration:
             with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
                 mock_ctx = AsyncMock()
                 mock_ctx.get_request_id.return_value = "req-125"
+                # Properly configure interaction mock to have no response_metadata
+                mock_ctx.interaction = Mock()
+                mock_ctx.interaction.response_metadata = None
                 mock_context.return_value.__aenter__.return_value = mock_ctx
                 
                 result = await client.generate_response(conversation, "test-session")
@@ -568,6 +604,7 @@ class TestLLMClientResponseGeneration:
                 block_with_text,
                 {"other": "fallback"}  # Should fallback to str()
             ]
+            mock_chunk.response_metadata = None  # Prevent metadata injection
             yield mock_chunk
         
         # Side effect function that accepts astream signature but ignores params
@@ -589,6 +626,9 @@ class TestLLMClientResponseGeneration:
             with patch('tarsy.integrations.llm.client.llm_interaction_context') as mock_context:
                 mock_ctx = AsyncMock()
                 mock_ctx.get_request_id.return_value = "req-126"
+                # Properly configure interaction mock to have no response_metadata
+                mock_ctx.interaction = Mock()
+                mock_ctx.interaction.response_metadata = None
                 mock_context.return_value.__aenter__.return_value = mock_ctx
                 
                 result = await client.generate_response(conversation, "test-session")
@@ -738,7 +778,7 @@ class TestLLMClientSSLAndBaseURL:
         )
         
         with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
-            client = LLMClient("openai", config)
+            _client = LLMClient("openai", config)
             
             # Verify base_url was passed to ChatOpenAI
             call_args = mock_openai.call_args[1]
@@ -754,7 +794,7 @@ class TestLLMClientSSLAndBaseURL:
         )
         
         with patch('tarsy.integrations.llm.client.ChatGoogleGenerativeAI') as mock_google:
-            client = LLMClient("google", config)
+            _client = LLMClient("google", config)
             
             # Verify base_url was not passed to Google client
             call_args = mock_google.call_args[1]
@@ -1464,7 +1504,7 @@ class TestLLMManager:
         mock_settings.llm_provider = "google-default"
         
         # Act
-        result = llm_manager.get_max_tool_result_tokens()
+        _result = llm_manager.get_max_tool_result_tokens()
         
         # Assert - should use google-default client's limit
         google_client = llm_manager.get_client("google-default")
@@ -2078,3 +2118,324 @@ class TestLLMClientChunkAggregation:
         summary = extract_tool_usage_summary(metadata)
         
         assert summary is None
+
+
+@pytest.mark.unit
+class TestFinalizeConversationMetadataInjection:
+    """Test metadata injection in _finalize_conversation method."""
+    
+    def test_metadata_injected_when_present(self):
+        """Test that response metadata is injected as observation when present."""
+        from unittest.mock import Mock
+        from tarsy.integrations.llm.client import LLMClient
+        from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
+        
+        # Create a test conversation
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message"),
+            LLMMessage(role=MessageRole.USER, content="User message"),
+        ])
+        
+        # Create mock context with response metadata
+        mock_ctx = Mock()
+        mock_ctx.interaction = Mock()
+        mock_ctx.interaction.response_metadata = {
+            'grounding_metadata': {
+                'web_search_queries': ['test query'],
+                'grounding_chunks': [
+                    {'web': {'uri': 'https://example.com', 'title': 'Example'}}
+                ]
+            }
+        }
+        
+        # Create client and call _finalize_conversation
+        config = create_test_config()
+        with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
+            mock_openai.return_value = Mock()
+            client = LLMClient("openai", config)
+            
+            client._finalize_conversation(
+                ctx=mock_ctx,
+                conversation=conversation,
+                accumulated_content="Test response",
+                interaction_type=None
+            )
+        
+        # Verify assistant message was added
+        assert len(conversation.messages) == 4  # system + user + assistant + metadata observation
+        assert conversation.messages[2].role == MessageRole.ASSISTANT
+        assert conversation.messages[2].content == "Test response"
+        
+        # Verify metadata observation was added
+        assert conversation.messages[3].role == MessageRole.USER
+        assert "[Response Metadata]" in conversation.messages[3].content
+        assert "grounding_metadata" in conversation.messages[3].content
+        assert "web_search_queries" in conversation.messages[3].content
+        assert "test query" in conversation.messages[3].content
+    
+    def test_no_metadata_injection_when_none(self):
+        """Test that no observation is added when response_metadata is None."""
+        from unittest.mock import Mock
+        from tarsy.integrations.llm.client import LLMClient
+        from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
+        
+        # Create a test conversation
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message"),
+            LLMMessage(role=MessageRole.USER, content="User message"),
+        ])
+        
+        # Create mock context without response metadata
+        mock_ctx = Mock()
+        mock_ctx.interaction = Mock()
+        mock_ctx.interaction.response_metadata = None
+        
+        # Create client and call _finalize_conversation
+        config = create_test_config()
+        with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
+            mock_openai.return_value = Mock()
+            client = LLMClient("openai", config)
+            
+            client._finalize_conversation(
+                ctx=mock_ctx,
+                conversation=conversation,
+                accumulated_content="Test response",
+                interaction_type=None
+            )
+        
+        # Verify only assistant message was added (no metadata observation)
+        assert len(conversation.messages) == 3  # system + user + assistant
+        assert conversation.messages[2].role == MessageRole.ASSISTANT
+        assert conversation.messages[2].content == "Test response"
+    
+    def test_no_metadata_injection_when_empty_dict(self):
+        """Test that no observation is added when response_metadata is empty dict."""
+        from unittest.mock import Mock
+        from tarsy.integrations.llm.client import LLMClient
+        from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
+        
+        # Create a test conversation
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message"),
+            LLMMessage(role=MessageRole.USER, content="User message"),
+        ])
+        
+        # Create mock context with empty response metadata
+        mock_ctx = Mock()
+        mock_ctx.interaction = Mock()
+        mock_ctx.interaction.response_metadata = {}
+        
+        # Create client and call _finalize_conversation
+        config = create_test_config()
+        with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
+            mock_openai.return_value = Mock()
+            client = LLMClient("openai", config)
+            
+            client._finalize_conversation(
+                ctx=mock_ctx,
+                conversation=conversation,
+                accumulated_content="Test response",
+                interaction_type=None
+            )
+        
+        # Empty dict is falsy, so no metadata observation should be added
+        assert len(conversation.messages) == 3  # system + user + assistant
+    
+    def test_metadata_json_serialization_handles_complex_structures(self):
+        """Test that complex metadata structures are properly serialized."""
+        from unittest.mock import Mock
+        from tarsy.integrations.llm.client import LLMClient
+        from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
+        
+        # Create a test conversation
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message"),
+            LLMMessage(role=MessageRole.USER, content="User message"),
+        ])
+        
+        # Create mock context with complex nested metadata
+        # Note: Only grounding_metadata and parts are considered "valuable" and will be injected
+        mock_ctx = Mock()
+        mock_ctx.interaction = Mock()
+        mock_ctx.interaction.response_metadata = {
+            'finish_reason': 'stop',  # Will be filtered out (not valuable)
+            'grounding_metadata': {
+                'web_search_queries': ['query1', 'query2'],
+                'grounding_chunks': [
+                    {
+                        'web': {
+                            'uri': 'https://kubernetes.io/docs',
+                            'title': 'Kubernetes Documentation'
+                        }
+                    },
+                    {
+                        'web': {
+                            'uri': 'https://example.com/debugging',
+                            'title': 'Debugging Guide'
+                        }
+                    }
+                ],
+                'grounding_supports': [
+                    {'segment': {'startIndex': 0, 'endIndex': 50}, 'confidenceScores': [0.95]}
+                ]
+            },
+            'usage_metadata': {  # Will be filtered out (not valuable)
+                'prompt_tokens': 100,
+                'completion_tokens': 50,
+                'total_tokens': 150
+            }
+        }
+        
+        # Create client and call _finalize_conversation
+        config = create_test_config()
+        with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
+            mock_openai.return_value = Mock()
+            client = LLMClient("openai", config)
+            
+            client._finalize_conversation(
+                ctx=mock_ctx,
+                conversation=conversation,
+                accumulated_content="Test response",
+                interaction_type=None
+            )
+        
+        # Verify metadata observation contains only valuable content (grounding_metadata)
+        metadata_msg = conversation.messages[3]
+        assert "[Response Metadata]" in metadata_msg.content
+        assert "```json" in metadata_msg.content
+        assert "kubernetes.io" in metadata_msg.content
+        assert "confidenceScores" in metadata_msg.content
+        # Non-valuable fields should be filtered out
+        assert "total_tokens" not in metadata_msg.content
+        assert "finish_reason" not in metadata_msg.content
+    
+    def test_metadata_json_serialization_with_non_serializable_types(self):
+        """Test that non-JSON-serializable types are handled via default=str."""
+        from unittest.mock import Mock
+        from datetime import datetime
+        from tarsy.integrations.llm.client import LLMClient
+        from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
+        
+        # Create a test conversation
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message"),
+            LLMMessage(role=MessageRole.USER, content="User message"),
+        ])
+        
+        # Create mock context with non-serializable metadata (datetime) inside valuable key
+        test_datetime = datetime(2025, 11, 26, 12, 0, 0)
+        mock_ctx = Mock()
+        mock_ctx.interaction = Mock()
+        mock_ctx.interaction.response_metadata = {
+            'grounding_metadata': {
+                'search_time': test_datetime,  # Non-serializable type inside valuable key
+                'web_search_queries': ['test query']
+            }
+        }
+        
+        # Create client and call _finalize_conversation
+        config = create_test_config()
+        with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
+            mock_openai.return_value = Mock()
+            client = LLMClient("openai", config)
+            
+            # Should not raise - datetime should be converted via default=str
+            client._finalize_conversation(
+                ctx=mock_ctx,
+                conversation=conversation,
+                accumulated_content="Test response",
+                interaction_type=None
+            )
+        
+        # Verify metadata observation was added without error
+        assert len(conversation.messages) == 4
+        metadata_msg = conversation.messages[3]
+        assert "2025-11-26" in metadata_msg.content  # datetime converted to string
+        assert "test query" in metadata_msg.content
+    
+    def test_no_metadata_injection_for_non_valuable_metadata(self):
+        """Test that metadata without valuable keys (grounding_metadata, parts) is not injected."""
+        from unittest.mock import Mock
+        from tarsy.integrations.llm.client import LLMClient
+        from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
+        
+        # Create a test conversation
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message"),
+            LLMMessage(role=MessageRole.USER, content="User message"),
+        ])
+        
+        # Create mock context with only non-valuable metadata
+        # This is the exact example from the user - should NOT be injected
+        mock_ctx = Mock()
+        mock_ctx.interaction = Mock()
+        mock_ctx.interaction.response_metadata = {
+            'safety_ratings': [],
+            'model_provider': 'google_genai',
+            'finish_reason': 'stop',
+            'usage_metadata': {'total_tokens': 100}
+        }
+        
+        # Create client and call _finalize_conversation
+        config = create_test_config()
+        with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
+            mock_openai.return_value = Mock()
+            client = LLMClient("openai", config)
+            
+            client._finalize_conversation(
+                ctx=mock_ctx,
+                conversation=conversation,
+                accumulated_content="Test response",
+                interaction_type=None
+            )
+        
+        # Verify NO metadata observation was added (only assistant message)
+        assert len(conversation.messages) == 3  # system + user + assistant
+        assert conversation.messages[2].role == MessageRole.ASSISTANT
+        assert conversation.messages[2].content == "Test response"
+    
+    def test_metadata_injection_with_parts_for_code_execution(self):
+        """Test that metadata with 'parts' key (code execution) is injected."""
+        from unittest.mock import Mock
+        from tarsy.integrations.llm.client import LLMClient
+        from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
+        
+        # Create a test conversation
+        conversation = LLMConversation(messages=[
+            LLMMessage(role=MessageRole.SYSTEM, content="System message"),
+            LLMMessage(role=MessageRole.USER, content="User message"),
+        ])
+        
+        # Create mock context with code execution parts
+        mock_ctx = Mock()
+        mock_ctx.interaction = Mock()
+        mock_ctx.interaction.response_metadata = {
+            'parts': [
+                {'executable_code': {'code': 'print("hello")', 'language': 'PYTHON'}},
+                {'code_execution_result': {'outcome': 'OUTCOME_OK', 'output': 'hello'}}
+            ],
+            'finish_reason': 'stop'  # This should be filtered out
+        }
+        
+        # Create client and call _finalize_conversation
+        config = create_test_config()
+        with patch('tarsy.integrations.llm.client.ChatOpenAI') as mock_openai:
+            mock_openai.return_value = Mock()
+            client = LLMClient("openai", config)
+            
+            client._finalize_conversation(
+                ctx=mock_ctx,
+                conversation=conversation,
+                accumulated_content="Test response",
+                interaction_type=None
+            )
+        
+        # Verify metadata observation was added with parts
+        assert len(conversation.messages) == 4
+        metadata_msg = conversation.messages[3]
+        assert "[Response Metadata]" in metadata_msg.content
+        assert "executable_code" in metadata_msg.content
+        assert "code_execution_result" in metadata_msg.content
+        assert "print" in metadata_msg.content
+        # Non-valuable keys should be filtered out
+        assert "finish_reason" not in metadata_msg.content
