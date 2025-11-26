@@ -75,10 +75,13 @@ def _create_openai_client(temp, api_key, model, disable_ssl_verification=False, 
     """
     client_kwargs = {
         "model": model, 
-        "temperature": temp, 
         "api_key": api_key,
         "stream_usage": True  # Enable token usage in streaming responses
     }
+    
+    # Only set temperature if explicitly provided
+    if temp is not None:
+        client_kwargs["temperature"] = temp
     
     # Only set base_url if explicitly provided, otherwise let LangChain use defaults
     if base_url:
@@ -90,41 +93,53 @@ def _create_openai_client(temp, api_key, model, disable_ssl_verification=False, 
     
     return ChatOpenAI(**client_kwargs)
 
-def _create_google_client(temp, api_key, model, disable_ssl_verification=False, base_url=None):
+def _create_google_client(temp, api_key, model, _disable_ssl_verification=False, _base_url=None):
     """Create ChatGoogleGenerativeAI client."""
     client_kwargs = {
         "model": model, 
-        "temperature": temp, 
         "google_api_key": api_key
     }
+    
+    # Only set temperature if explicitly provided
+    if temp is not None:
+        client_kwargs["temperature"] = temp
+    
     # Note: ChatGoogleGenerativeAI may not support custom base_url or HTTP clients
     return ChatGoogleGenerativeAI(**client_kwargs)
 
-def _create_xai_client(temp, api_key, model, disable_ssl_verification=False, base_url=None):
+def _create_xai_client(temp, api_key, model, _disable_ssl_verification=False, base_url=None):
     """Create ChatXAI client."""
     client_kwargs = {
         "model": model, 
-        "api_key": api_key, 
-        "temperature": temp
+        "api_key": api_key
     }
+    
+    # Only set temperature if explicitly provided
+    if temp is not None:
+        client_kwargs["temperature"] = temp
+    
     if base_url:
         client_kwargs["base_url"] = base_url
     # Note: ChatXAI may not support custom HTTP clients - would need to verify
     return ChatXAI(**client_kwargs)
 
-def _create_anthropic_client(temp, api_key, model, disable_ssl_verification=False, base_url=None):
+def _create_anthropic_client(temp, api_key, model, _disable_ssl_verification=False, base_url=None):
     """Create ChatAnthropic client."""
     client_kwargs = {
         "model": model, 
-        "api_key": api_key, 
-        "temperature": temp
+        "api_key": api_key
     }
+    
+    # Only set temperature if explicitly provided
+    if temp is not None:
+        client_kwargs["temperature"] = temp
+    
     if base_url:
         client_kwargs["base_url"] = base_url
     # Note: ChatAnthropic may not support custom HTTP clients - would need to verify  
     return ChatAnthropic(**client_kwargs)
 
-def _create_vertexai_client(temp, api_key, model, disable_ssl_verification=False, base_url=None):
+def _create_vertexai_client(temp, api_key, model, _disable_ssl_verification=False, _base_url=None):
     """Create ChatAnthropicVertex client for Claude models on Vertex AI.
     
     Authentication via GOOGLE_APPLICATION_CREDENTIALS env var pointing to service account JSON.
@@ -141,9 +156,12 @@ def _create_vertexai_client(temp, api_key, model, disable_ssl_verification=False
     client_kwargs = {
         "model_name": model,
         "project": project,
-        "location": location,
-        "temperature": temp
+        "location": location
     }
+    
+    # Only set temperature if explicitly provided
+    if temp is not None:
+        client_kwargs["temperature"] = temp
     
     return ChatAnthropicVertex(**client_kwargs)
 
