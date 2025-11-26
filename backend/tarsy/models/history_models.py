@@ -410,13 +410,14 @@ class PaginatedSessions(BaseModel):
 
 class FinalAnalysisResponse(BaseModel):
     """
-    Response for session final analysis endpoint.
+    Response for session final analysis and executive summary endpoint.
     
     Optionally includes LLM conversation history for analysis/evaluation purposes.
     The conversation contains the flat message history (system, user, assistant messages)
     along with metadata like model name and token usage.
     """
     final_analysis: Optional[str] = Field(description="Final analysis content (markdown formatted), null if not available")
+    final_analysis_summary: Optional[str] = Field(description="Executive summary of the final analysis for external notifications (e.g., Slack), null if not available")
     session_id: str = Field(description="Session identifier")
     status: AlertSessionStatus = Field(description="Current session status")
     llm_conversation: Optional[LLMConversationHistory] = Field(
@@ -430,9 +431,3 @@ class FinalAnalysisResponse(BaseModel):
     alert_data: dict = Field(
         description="The data of the alert that triggered the analysis"
     )
-
-class FinalAnalysisSummaryResponse(BaseModel):
-    """Response for session final analysis summary endpoint."""
-    final_analysis_summary: Optional[str] = Field(description="Summary of the final analysis for external notifications (e.g., Slack), null if not available")
-    session_id: str = Field(description="Session identifier")
-    status: AlertSessionStatus = Field(description="Current session status")

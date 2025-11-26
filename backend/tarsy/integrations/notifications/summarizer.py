@@ -1,5 +1,5 @@
 """
-Summary agent for generating concise 1-2 line final analysis summary for external notifications.
+Executive Summary Agent for generating concise final analysis summary for external notifications.
 
 This lightweight agent creates AI-powered summaries after chain completion,
 specifically for Slack notifications and other external integrations.
@@ -19,11 +19,11 @@ if TYPE_CHECKING:
 logger = get_module_logger(__name__)
 
 
-class SummaryAgent:
+class ExecutiveSummaryAgent:
     """
-    Lightweight agent for generating concise final analysis summaries of completed alert investigations.
+    Lightweight agent for generating concise final analysis executive summaries of completed alert investigations.
     
-    This agent uses LLM to create 1-2 line final analysis summaries
+    This agent uses LLM to create final analysis executive summaries
     suitable for external notifications (Slack, etc.).
     """
     
@@ -37,7 +37,7 @@ class SummaryAgent:
         self.llm_client = llm_client
         self.prompt_builder = PromptBuilder()
     
-    async def generate_summary(
+    async def generate_executive_summary(
         self,
         content: str,
         session_id: str,
@@ -45,41 +45,40 @@ class SummaryAgent:
         max_tokens: int = 150
     ) -> Optional[str]:
         """
-        Generate a concise 1-2 line final analysis summary of the content.
+        Generate a concise final analysis executive summary of the content.
         
-        This final analysis summary is optimized for external notifications (Slack, etc.) where
+        This final analysis executive summary is optimized for external notifications (Slack, etc.) where
         brevity is crucial.
         
         Args:
-            content: The content to summarize
+            content: The content to generate an executive summary
             session_id: Session ID for tracking
             stage_execution_id: Optional stage execution ID (typically None for post-chain)
-            max_tokens: Maximum tokens for final analysis summary (default: 150 for 1-2 lines)
+            max_tokens: Maximum tokens for final analysis executive summary (default: 150)
             
         Returns:
-            1-2 line final analysis summary string, or None if generation fails
+            Concise final analysis executive summary string, or None if generation fails
             
         Raises:
             Exception: If summarization fails critically
         """
         if not content:
-            logger.warning("No content provided for final analysis summary")
-            return None
+            raise ValueError("Cannot generate executive summary: content is required and cannot be empty")
         
         try:
             # Build summarization prompt using the existing builder
-            summary_prompt = self.prompt_builder.build_summary_prompt(content)
-            
-            # Create system message
-            system_message = LLMMessage(
-                role=MessageRole.SYSTEM,
-                content="You are a helpful assistant that creates concise summaries for alert notifications."
-            )
-            
+            summary_prompt = self.prompt_builder.build_final_analysis_summary_prompt(content)
             # Create user message with the prompt
             user_message = LLMMessage(
                 role=MessageRole.USER,
                 content=summary_prompt
+            )
+            
+            # Create system message with the system prompt
+            system_content = self.prompt_builder.build_final_analysis_summary_system_prompt()
+            system_message = LLMMessage(
+                role=MessageRole.SYSTEM,
+                content=system_content
             )
             
             # Create conversation with both messages
@@ -91,25 +90,19 @@ class SummaryAgent:
                 session_id=session_id,
                 stage_execution_id=stage_execution_id,
                 max_tokens=max_tokens,
-                interaction_type=LLMInteractionType.FINAL_ANALYSIS_SUMMARY.value  # NEW TYPE
+                interaction_type=LLMInteractionType.FINAL_ANALYSIS_SUMMARY.value  # Type dedicated to Final Analysis Summaries only
             )
             
             # Extract summary from response
             assistant_message = response_conversation.get_latest_assistant_message()
             if not assistant_message:
-                logger.error("No assistant response received for final analysis summary generation")
+                logger.error("No assistant response received for executive summary generation")
                 return None
             
-            final_analysis_summary_response = assistant_message.content.strip()
-            
-            # Clean up the response (remove common prefixes)
-            if final_analysis_summary_response.startswith("Resume:"):
-                final_analysis_summary_response = final_analysis_summary_response[7:].strip()
-            elif final_analysis_summary_response.startswith("Summary:"):
-                final_analysis_summary_response = final_analysis_summary_response[8:].strip()
+            executive_summary = assistant_message.content.strip()
 
-            logger.info(f"Generated result summary for session {session_id}: {final_analysis_summary_response[:100]}...")
-            return final_analysis_summary_response
+            logger.info(f"Generated executive summary for session {session_id}: {executive_summary[:100]}...")
+            return executive_summary
             
         except Exception as e:
             logger.error(f"Failed to generate result summary for session {session_id}: {e}")

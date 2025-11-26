@@ -21,7 +21,6 @@ from tarsy.models.history_models import (
     SessionStats,
     FilterOptions,
     FinalAnalysisResponse,
-    FinalAnalysisSummaryResponse,
 )
 from tarsy.models.api_models import ErrorResponse
 from tarsy.utils.timestamp import now_us
@@ -273,14 +272,14 @@ async def get_session_summary(
     },
     summary="Get Session Final Analysis",
     description="""
-    Retrieve the final analysis content for an alert processing session.
+    Retrieve the final analysis content and executive summary for an alert processing session.
     
     **Response behavior:**
-    - Returns session status and final_analysis field (null if not available)
-    - Completed sessions with analysis: final_analysis contains markdown content
-    - Completed sessions without analysis: final_analysis is null
-    - Non-completed sessions (pending, in_progress, etc.): final_analysis is null
-    - Failed/cancelled sessions: final_analysis is null
+    - Returns session status, final_analysis field (null if not available), and final_analysis_summary field (null if not available)
+    - Completed sessions with analysis: final_analysis and final_analysis_summary contain markdown content
+    - Completed sessions without analysis: final_analysis and final_analysis_summary are null
+    - Non-completed sessions (pending, in_progress, etc.): final_analysis and final_analysis_summary are null
+    - Failed/cancelled sessions: final_analysis and final_analysis_summary are null
     
     **Optional conversation history:**
     - Use `include_conversation=true` to include the LLM conversation history
@@ -290,6 +289,7 @@ async def get_session_summary(
     
     **Response includes:**
     - Final analysis content in markdown format (or null)
+    - Executive summary of the final analysis for external notifications (e.g., Slack) in markdown format (or null)
     - Current session status
     - Optional: LLM conversation history with metadata
     - Optional: Chat LLM conversation history (if chat exists)
@@ -318,8 +318,8 @@ async def get_session_final_analysis(
         history_service: Injected history service
         
     Returns:
-        FinalAnalysisResponse containing the analysis content (or null), session status,
-        and optionally the LLM conversation history
+        FinalAnalysisResponse containing the analysis content (or null), executive summary (or null), 
+        session status, and optionally the LLM conversation history
         
     Raises:
         HTTPException: 404 if session not found, 500 for internal errors
@@ -353,6 +353,7 @@ async def get_session_final_analysis(
         # Return response with current status, final_analysis, and optional conversations
         return FinalAnalysisResponse(
             final_analysis=session.final_analysis,  # Will be None if not available
+            final_analysis_summary=session.final_analysis_summary,  # Will be None if not available
             session_id=session_id,
             status=AlertSessionStatus(session.status),
             llm_conversation=llm_conversation,
@@ -663,82 +664,5 @@ async def resume_session(
         "message": "Session resume initiated",
         "status": "resuming"
     }
-
-@router.get(
-    "/sessions/{session_id}/final-analysis-summary",
-    response_model=FinalAnalysisSummaryResponse,
-    responses={
-        404: {"model": ErrorResponse, "description": "Session not found"},
-        500: {"model": ErrorResponse, "description": "Internal server error"}
-    },
-    summary="Get Session Final Analysis Summary",
-    description="""
-    Retrieve the final analysis summary (brief summary) for an alert processing session.
-    
-    **Response behavior:**
-    - Returns session status and final_analysis_summary field (null if not available)
-    - Completed sessions with summary: final_analysis_summary contains brief markdown summary
-    - Completed sessions without summary: final_analysis_summary is null
-    - Non-completed sessions (pending, in_progress, etc.): final_analysis_summary is null
-    - Failed/cancelled sessions: final_analysis_summary is null
-    
-    **Response includes:**
-    - Final analysis summary content in markdown format (or null)
-    - Current session status
-    - Timestamp of the response
-    """
-)
-async def get_session_final_analysis_summary(
-    *,
-    session_id: str = Path(..., description="Unique session identifier"),
-    history_service: Annotated[HistoryService, Depends(get_history_service)]
-) -> FinalAnalysisSummaryResponse:
-    """
-    Get final analysis summary (brief summary) for any session.
-    
-    Args:
-        session_id: Unique session identifier
-        history_service: Injected history service
-        
-    Returns:
-        FinalAnalysisSummaryResponse containing the summary content (or null) and session status
-        
-    Raises:
-        HTTPException: 404 if session not found, 500 for internal errors
-    """
-    try:
-        from tarsy.models.constants import AlertSessionStatus
-        
-        # Get the session
-        session = history_service.get_session(session_id)
-        
-        if not session:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Session {session_id} not found"
-            )
-        
-        # Always return response with current status and final_analysis_summary (or null)
-        return FinalAnalysisSummaryResponse(
-            final_analysis_summary=session.final_analysis_summary,  # Will be None if not available
-            session_id=session_id,
-            status=AlertSessionStatus(session.status)
-        )
-        
-    except HTTPException:
-        raise
-    except RuntimeError as e:
-        # Database unavailable - return 503
-        raise HTTPException(
-            status_code=503,
-            detail=f"History service unavailable: {str(e)}"
-        ) from e
-    except Exception as e:
-        logger.error(f"Failed to get final analysis summary for session {session_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve final analysis summary: {str(e)}"
-        ) from e
-
 
 # Note: Exception handlers should be registered at the app level in main.py 

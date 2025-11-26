@@ -32,7 +32,7 @@ from tarsy.services.runbook_service import RunbookService
 from tarsy.utils.logger import get_module_logger
 from tarsy.agents.exceptions import SessionPaused
 from tarsy.models.pause_metadata import PauseMetadata, PauseReason
-from tarsy.agents.summary_agent import SummaryAgent
+from tarsy.integrations.notifications.summarizer import ExecutiveSummaryAgent
 
 logger = get_module_logger(__name__)
 
@@ -101,7 +101,7 @@ class AlertService:
         self.mcp_health_monitor = None
 
         # Initialize final analysis summary agent
-        self.final_analysis_summary = None
+        self.final_analysis_summarizer = None
         
         logger.info(f"AlertService initialized with agent delegation support "
                    f"({len(self.parsed_config.agents)} configured agents, "
@@ -234,7 +234,7 @@ class AlertService:
             )
 
             # Initialize final result summarizer with LLM manager
-            self.final_analysis_summary = SummaryAgent(
+            self.final_analysis_summarizer = ExecutiveSummaryAgent(
                 llm_client=self.llm_manager,
             )
 
@@ -375,7 +375,8 @@ class AlertService:
                     chain_result.timestamp_us
                 )
                 
-                final_result_summary = await self.final_analysis_summary.generate_summary(
+                # TODO: Only generate summary when Slack integration is enabled (avoid unnecessary LLM calls)
+                final_result_summary = await self.final_analysis_summarizer.generate_executive_summary(
                     content=analysis,
                     session_id=chain_context.session_id
                 )

@@ -871,8 +871,8 @@ async def alert_service(ensure_integration_test_isolation, mock_settings, mock_r
     
     # Mock final_analysis_summary to avoid needing real LLM
     mock_summary = Mock()
-    mock_summary.generate_summary = AsyncMock(return_value="Test analysis summary")
-    service.final_analysis_summary = mock_summary
+    mock_summary.generate_executive_summary = AsyncMock(return_value="Test analysis summary")
+    service.final_analysis_summarizer = mock_summary
     
     # Replace the agent_factory with our mock AFTER initialization
     service.agent_factory = mock_agent_factory
@@ -911,8 +911,8 @@ def alert_service_with_mocks(
     
     # Mock final_analysis_summary
     mock_summary = Mock()
-    mock_summary.generate_summary = AsyncMock(return_value="Test analysis summary")
-    service.final_analysis_summary = mock_summary
+    mock_summary.generate_executive_summary = AsyncMock(return_value="Test analysis summary")
+    service.final_analysis_summarizer = mock_summary
     
     # Create mock history service for proper testing
     mock_history_service = Mock(spec=HistoryService)

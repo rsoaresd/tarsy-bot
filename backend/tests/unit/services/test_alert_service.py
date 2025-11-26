@@ -308,9 +308,9 @@ class TestAlertProcessing:
             final_analysis="Test analysis result"
         )
 
-        mock_final_analysis_summary = AsyncMock()
-        mock_final_analysis_summary.generate_summary.return_value = "Test analysis summary"
-        service.final_analysis_summary = mock_final_analysis_summary
+        mock_final_analysis_summarizer = AsyncMock()
+        mock_final_analysis_summarizer.generate_executive_summary.return_value = "Test analysis summary"
+        service.final_analysis_summarizer = mock_final_analysis_summarizer
         
         # Set up the service with our mocked dependencies
         service.chain_registry = dependencies['chain_registry']

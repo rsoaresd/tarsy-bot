@@ -531,9 +531,22 @@ Begin your ReAct reasoning:
                 flattened_history.append(str(item))
         return flattened_history
 
-    def build_summary_prompt(self, final_analysis: str) -> str:
-        """Build prompt for generating summary of an incident analysis."""
-        return f"""Generate a 1-2 line summary of this incident analysis.
+    def build_final_analysis_summary_system_prompt(self) -> str:
+        """
+        Build system prompt for executive summary generation.
+        
+        Returns:
+            System prompt instructing the LLM to generate brief, actionable executive summaries
+        """
+        return (
+            "You are an expert Site Reliability Engineer assistant that creates "
+            "concise 1-4 line executive summaries of incident analyses for alert notifications. "
+            "Focus on clarity, brevity, and actionable information."
+        )
+
+    def build_final_analysis_summary_prompt(self, final_analysis: str) -> str:
+        """Build prompt for generating executive summary of an incident analysis."""
+        return f"""Generate a 1-4 line executive summary of this incident analysis.
 
 CRITICAL RULES:
 - Only summarize what is EXPLICITLY stated in the analysis
@@ -544,4 +557,4 @@ CRITICAL RULES:
 Analysis to summarize:
 {final_analysis}
 
-Summary (1-2 lines, facts only):"""
+Executive Summary (1-4 lines, facts only):"""

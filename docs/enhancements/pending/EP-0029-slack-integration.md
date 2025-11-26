@@ -1,6 +1,6 @@
 # EP-0029: Slack Notification Integration
 
-**Status**: Implemented
++**Status**: Phase 1 (In Review) / Phase 2 (Pending)
 **Created:** 2025-11-18
 
 ---
@@ -19,7 +19,7 @@ SRE teams need immediate visibility into alert analysis without constantly monit
 
 ## Key Architectural Decisions
 1. **Dedicate Agent for Summary**
-   - Separate `SummaryAgent` responsible only for generating concise summaries
+   - Separate `ExecutiveSummaryAgent` responsible only for generating concise executive summaries
    - **Benefits of this approach:**
      - **Timeline Clarity**: Summary generation appears as distinct LLM interaction in audit trail, making it easy to track when/how summaries are created
      - **Low Brittleness**: Independent failure handling - if summary generation fails, core analysis remains unaffected and session still completes successfully
@@ -70,7 +70,7 @@ SRE teams need immediate visibility into alert analysis without constantly monit
 
 ### High-Level Flow (Phase 1: Summary)
 
-```
+```text
 ┌─────────────────────────────────────────────────┐
 │ 1. Session Completion                           │
 │    Alert Processing → Final Analysis → Summary  │
@@ -79,7 +79,7 @@ SRE teams need immediate visibility into alert analysis without constantly monit
 
 ### High-Level Flow (Phase 2: Slack Integration)
 
-```
+```text
 ┌─────────────────────────────────────────────────┐
 │ 1. External System (e.g. GuardDuty)             │
 │    Posts alert to Slack channel                 │
@@ -129,9 +129,9 @@ Generate concise 1-2 line AI-powered summaries of alert analysis results for qui
   - Column: `final_analysis_summary TEXT NULL`
   - Includes existence check to support test environments
 
-#### 2. Summary Agent Implementation
+#### 2. Executive Summary Agent Implementation
 - **Create**: `backend/tarsy/agents/summary_agent.py`
-  - `SummaryAgent` class with `generate_summary()` method
+  - `SummaryAgent` class with `generate_executive_summary()` method
   - Uses LLM (via `LLMManager`) to generate concise summaries
   - Configured with `max_tokens=150` to ensure brevity
   - Handles empty content gracefully (returns `None`)
@@ -140,14 +140,14 @@ Generate concise 1-2 line AI-powered summaries of alert analysis results for qui
 
 #### 3. Prompt Engineering
 - **Update**: `backend/tarsy/agents/prompts/builders.py`
-  - Added `build_summary_prompt()` method
+  - Added `build_final_analysis_summary_prompt()` method
   - Prompts LLM to generate 1-2 line summaries optimized for Slack notifications
   - Emphasizes brevity and actionable information
 
 #### 4. Alert Service Integration
 - **Modify**: `backend/tarsy/services/alert_service.py`
   - Initialized `SummaryAgent` in `initialize()` method
-  - Generates summary after analysis completion: `await self.final_analysis_summary.generate_summary()`
+  - Generates summary after analysis completion: `await self.final_analysis_summarizer.generate_executive_summary()`
   - Persists summary alongside final analysis in single atomic update
   - Avoids race conditions by bundling both fields in `_update_session_status()`
 
@@ -156,18 +156,11 @@ Generate concise 1-2 line AI-powered summaries of alert analysis results for qui
   - Updated `update_session_status()` signature to accept `final_analysis_summary` parameter
   - Persists summary to database when provided
 
-#### 6. API Endpoint
-- **Add**: `GET /api/v1/history/sessions/{session_id}/final-analysis-summary`
-  - Returns `FinalAnalysisSummaryResponse` model
-  - Includes: `final_analysis_summary`, `session_id`, `status`
-  - Returns 404 if session not found
+#### 6. Update Final Analysis Summary API Endpoint
+- **Modify**: `GET /api/v1/history/sessions/{session_id}/final-analysis`
+  - Include: `final_analysis_summary`
 
-#### 7. Response Models
-- **Create**: `FinalAnalysisSummaryResponse` in `backend/tarsy/models/history_models.py`
-  - Fields: `final_analysis_summary`, `session_id`, `status`
-  - Pydantic validation ensures type safety
-
-#### 8. Testing
+#### 7. Testing
 - Update existing tests with necessary changes and address new ones
 
 
@@ -179,33 +172,33 @@ Create a Slack service that finds the original alert notification in a Slack cha
    - Find the best way to locate the original alert message in Slack
 
 #### 2. **Core Service**
-   -  Implement `SlackService` with API client initialization
-   -  Implement message search functionality
-   -  Implement threaded reply posting
-   -  Success notifications with summary
-   -  Failure notifications with error details
-   -  Session link to dashboard for detailed analysis
-   -  Add message formatting
-   -  Optional enablement
+   - Implement `SlackService` with API client initialization
+   - Implement message search functionality
+   - Implement threaded reply posting
+   - Success notifications with summary
+   - Failure notifications with error details
+   - Session link to dashboard for detailed analysis
+   - Add message formatting
+   - Optional enablement
 
 #### 3. **Integration**
-   -  Integrate with `AlertService` completion flow
+   - Integrate with `AlertService` completion flow
 
 #### 4. **Testing** 
-   -  Unit tests for `SlackService` methods
-   -  Integration tests with mocked Slack API
-   -  E2E tests
+   - Unit tests for `SlackService` methods
+   - Integration tests with mocked Slack API
+   - E2E tests
 
 #### 5. **Documentation**
-   -  Update configuration guide
-   -  Document Slack app setup process
+   - Update configuration guide
+   - Document Slack app setup process
 
 ---
 
 ## Benefits
 
 ### Phase 1: Summary
-- **Faster Triage**: 1-2 line summary enable quick alert assessment without reading full analysis
+- **Faster Triage**: 1-4 line summary enable quick alert assessment without reading full analysis
 
 ### Phase 2: Slack Integration
 - **Real-Time Awareness**: Immediate notifications in team channels without direct dashboard access

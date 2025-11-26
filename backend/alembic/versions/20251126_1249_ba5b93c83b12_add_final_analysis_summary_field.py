@@ -1,8 +1,8 @@
-"""add final_analysis_summary field
+"""Add final analysis summary field
 
-Revision ID: 3d5ddcec5d5f
+Revision ID: ba5b93c83b12
 Revises: 01b89ac17a5e
-Create Date: 2025-11-25 14:18:59.776600
+Create Date: 2025-11-26 12:49:53.000810
 
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "3d5ddcec5d5f"
+revision: str = "ba5b93c83b12"
 down_revision: Union[str, Sequence[str], None] = "01b89ac17a5e"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
