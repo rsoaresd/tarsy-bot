@@ -344,6 +344,12 @@ Analysis complete after successful resume from pause.""",
                     "output_tokens": 140,
                     "total_tokens": 390,
                 },
+                8: {  # Executive summary generation after analysis completes
+                    "response_content": """Executive Summary: Namespace 'stuck-namespace' is stuck in Terminating state due to finalizers. Remove finalizers manually to complete deletion.""",
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "total_tokens": 150,
+                },
             }
 
             # Create streaming mock for LLM client
@@ -620,6 +626,14 @@ Finalizers:   [kubernetes.io/pvc-protection]
                                 "pause_metadata should be cleared after completion (not paused = no pause_metadata)"
                             print("✅ Pause metadata cleared after completion (clean state)")
                             
+                            # Verify executive summary was generated
+                            final_analysis_summary = final_detail_data.get("final_analysis_summary")
+                            assert final_analysis_summary is not None, \
+                                "final_analysis_summary should be generated for completed resumed sessions"
+                            assert len(final_analysis_summary) > 0, \
+                                "final_analysis_summary should not be empty"
+                            print(f"✅ Executive summary generated: {len(final_analysis_summary)} chars")
+                            
                             # Verify session-level timestamps
                             assert final_detail_data.get("started_at_us") > 0, "started_at_us missing"
                             assert final_detail_data.get("completed_at_us") > 0, "completed_at_us missing"
@@ -655,14 +669,27 @@ Finalizers:   [kubernetes.io/pvc-protection]
                             print("✅ All 3 stage executions verified: data-collection (reused), verification, analysis")
 
                             # Verify LLM interactions match our mock setup
-                            # Mock interactions: 1,2 (pause #1 at iteration 2) → 3 (pause #2 at iteration 1 after resume/reset) → 4,5 (data-collection complete) → 6 (verification) → 7 (analysis)
-                            # Total: 7 interactions
+                            # Mock interactions: 
+                            # - 1,2 (pause #1 at iteration 2) 
+                            # - 3 (pause #2 at iteration 1 after resume/reset) 
+                            # - 4,5 (data-collection complete after second resume) 
+                            # - 6 (verification) 
+                            # - 7 (analysis)
+                            # - 8 (executive summary generation after completion)
+                            # Total: 8 interactions (7 for stages + 1 for summary)
                             total_llm_interactions = sum(
                                 len(stage.get("llm_interactions", [])) for stage in final_stages
                             )
-                            print(f"✅ Total LLM interactions: {total_llm_interactions}")
+                            print(f"✅ Total stage LLM interactions: {total_llm_interactions}")
+                            # Note: The 8th interaction (executive summary) happens outside stage execution
+                            # so it's not counted in stage LLM interactions, but it still happens
                             assert total_llm_interactions == 7, \
-                                f"Expected exactly 7 LLM interactions (2 before first pause + 1 before second pause + 2 after second resume + 2 for other stages), got {total_llm_interactions}"
+                                f"Expected exactly 7 stage LLM interactions (2 before first pause + 1 before second pause + 2 after second resume + 2 for other stages), got {total_llm_interactions}"
+                            
+                            # Verify the mock was called 8 times total (7 stage + 1 summary)
+                            print(f"✅ Total LLM calls (including summary): {len(all_llm_interactions)}")
+                            assert len(all_llm_interactions) == 8, \
+                                f"Expected 8 total LLM calls (7 for stages + 1 for executive summary), got {len(all_llm_interactions)}"
 
                             print("\n🔍 Step 12: Comprehensive stage validation (proving multiple pause/resume cycles work)...")
                             

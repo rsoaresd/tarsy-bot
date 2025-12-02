@@ -820,6 +820,7 @@ class HistoryRepository:
                 # Full session details
                 alert_data=session.alert_data,
                 final_analysis=session.final_analysis,
+                final_analysis_summary=session.final_analysis_summary,
                 session_metadata=session.session_metadata,
                 pause_metadata=session.pause_metadata,
                 

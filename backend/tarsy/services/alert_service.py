@@ -573,10 +573,18 @@ class AlertService:
                     analysis,
                     result.timestamp_us,
                 )
+                
+                # Generate executive summary for resumed sessions too
+                final_result_summary = await self.final_analysis_summarizer.generate_executive_summary(
+                    content=analysis,
+                    session_id=session_id
+                )
+                
                 self._update_session_status(
                     session_id,
                     AlertSessionStatus.COMPLETED.value,
                     final_analysis=final_result,
+                    final_analysis_summary=final_result_summary,
                 )
                 from tarsy.services.events.event_helpers import publish_session_completed
                 await publish_session_completed(session_id)

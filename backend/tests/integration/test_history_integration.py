@@ -883,6 +883,8 @@ class TestHistoryAPIIntegration:
             assert "session_id" in data
             assert "chain_id" in data
             assert "stages" in data
+            assert "final_analysis" in data
+            assert "final_analysis_summary" in data  # Verify field is in response (may be None)
             
             # Verify session details
             assert data["session_id"] == expected_session_id
