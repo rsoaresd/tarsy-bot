@@ -409,6 +409,7 @@ class TestHistoryService:
             error_message=None,
             alert_data={},
             final_analysis=None,
+            final_analysis_summary=None,
             session_metadata={},
             chain_id="test-chain-123",
             chain_definition={},

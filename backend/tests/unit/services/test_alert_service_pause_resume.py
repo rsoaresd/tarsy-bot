@@ -59,6 +59,11 @@ class TestAlertServiceResumePausedSession:
         alert_service.runbook_service = MagicMock()
         alert_service.runbook_service.download_runbook = AsyncMock(return_value="# Default runbook")
         
+        # Mock final_analysis_summarizer
+        mock_summarizer = AsyncMock()
+        mock_summarizer.generate_executive_summary = AsyncMock(return_value="Executive summary of resumed analysis")
+        alert_service.final_analysis_summarizer = mock_summarizer
+        
         # Mock _update_session_status and _execute_chain_stages
         alert_service._update_session_status = MagicMock()
         alert_service._execute_chain_stages = AsyncMock(
@@ -96,14 +101,26 @@ class TestAlertServiceResumePausedSession:
         mock_resume_event.assert_called_once_with(session_id)
         mock_complete_event.assert_called_once_with(session_id)
         
-        # Verify session was eventually marked COMPLETED
-        assert any(
-            call_args[0][1] == AlertSessionStatus.COMPLETED.value
-            for call_args in alert_service._update_session_status.call_args_list
-        )
+        # Verify session was eventually marked COMPLETED with summary
+        completed_call = None
+        for call_args in alert_service._update_session_status.call_args_list:
+            if call_args[0][1] == AlertSessionStatus.COMPLETED.value:
+                completed_call = call_args
+                break
+        
+        assert completed_call is not None, "Session was not marked as COMPLETED"
+        # Verify final_analysis_summary was passed
+        assert completed_call[1].get('final_analysis_summary') == "Executive summary of resumed analysis", \
+            "Executive summary not generated for resumed session"
         
         # Verify chain execution called
         alert_service._execute_chain_stages.assert_called_once()
+        
+        # Verify executive summary was generated
+        mock_summarizer.generate_executive_summary.assert_called_once_with(
+            content="Analysis completed after resume",
+            session_id=session_id
+        )
     
     @pytest.mark.asyncio
     async def test_resume_session_not_found(self) -> None:
@@ -222,6 +239,11 @@ class TestAlertServiceResumePausedSession:
         
         alert_service.history_service = mock_history_service
         alert_service._update_session_status = MagicMock()
+        
+        # Mock final_analysis_summarizer (not used in this test, but needs to exist)
+        mock_summarizer = AsyncMock()
+        alert_service.final_analysis_summarizer = mock_summarizer
+        
         alert_service._execute_chain_stages = AsyncMock(
             return_value=ChainExecutionResult(
                 status=ChainStatus.COMPLETED,
@@ -287,6 +309,10 @@ class TestAlertServiceResumePausedSession:
         
         alert_service.history_service = mock_history_service
         alert_service._update_session_status = MagicMock()
+        
+        # Mock final_analysis_summarizer (not used for PAUSED status)
+        mock_summarizer = AsyncMock()
+        alert_service.final_analysis_summarizer = mock_summarizer
         
         # Chain execution returns PAUSED again
         alert_service._execute_chain_stages = AsyncMock(
@@ -365,6 +391,10 @@ class TestAlertServiceResumePausedSession:
         alert_service.runbook_service = MagicMock()
         alert_service.runbook_service.download_runbook = AsyncMock(return_value="# Default runbook")
         alert_service._update_session_status = MagicMock()
+        
+        # Mock final_analysis_summarizer (not used for FAILED status)
+        mock_summarizer = AsyncMock()
+        alert_service.final_analysis_summarizer = mock_summarizer
         
         # Chain execution returns FAILED status
         alert_service._execute_chain_stages = AsyncMock(

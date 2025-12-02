@@ -1164,6 +1164,34 @@ class TestHistoryRepository:
         assert result.mcp_selection is None
     
     @pytest.mark.unit
+    def test_get_session_details_with_final_analysis_summary(self, repository):
+        """Test that get_session_details includes final_analysis_summary field."""
+        # Create completed session with final analysis and summary
+        session_with_summary = AlertSession(
+            session_id="session-with-summary",
+            alert_data={"test": "data"},
+            agent_type="TestAgent",
+            alert_type="test",
+            status="completed",
+            started_at_us=int(datetime.now(timezone.utc).timestamp() * 1_000_000),
+            completed_at_us=int(datetime.now(timezone.utc).timestamp() * 1_000_000),
+            chain_id="test-chain-summary",
+            final_analysis="**Root Cause:** Test issue detected.\n\n**Resolution:** Apply fix.",
+            final_analysis_summary="Executive Summary: Test issue detected and resolved."
+        )
+        
+        repository.create_alert_session(session_with_summary)
+        
+        # Get session details
+        result = repository.get_session_details("session-with-summary")
+        
+        assert result is not None
+        assert result.final_analysis is not None
+        assert result.final_analysis_summary is not None
+        assert result.final_analysis_summary == "Executive Summary: Test issue detected and resolved."
+        assert "Test issue detected" in result.final_analysis_summary
+    
+    @pytest.mark.unit
     def test_get_alert_sessions_with_mcp_selection(self, repository):
         """Test that get_alert_sessions includes mcp_selection in SessionOverview."""
         from tarsy.models.mcp_selection_models import (

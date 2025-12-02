@@ -599,3 +599,124 @@ class TestInvestigationContextFormatting:
         
         # Should be multi-line formatted text
         assert "\n" in result
+
+
+@pytest.mark.unit
+class TestFinalAnalysisSummaryPromptBuilding:
+    """Test final analysis summary prompt building functionality."""
+    
+    @pytest.fixture
+    def builder(self):
+        """Create PromptBuilder instance."""
+        return PromptBuilder()
+    
+    def test_build_final_analysis_summary_system_prompt(self, builder):
+        """Test system prompt generation for executive summary."""
+        result = builder.build_final_analysis_summary_system_prompt()
+        
+        assert isinstance(result, str)
+        assert len(result) > 0
+        assert "Site Reliability Engineer" in result
+        assert "executive summaries" in result
+        assert "concise" in result
+        assert "brevity" in result
+    
+    def test_build_final_analysis_summary_prompt_basic(self, builder):
+        """Test basic executive summary prompt generation."""
+        final_analysis = "# Analysis\n\nThe pod was stuck in CrashLoopBackOff due to missing config."
+        
+        result = builder.build_final_analysis_summary_prompt(final_analysis)
+        
+        assert isinstance(result, str)
+        assert final_analysis in result
+        assert "1-4 line" in result
+        assert "executive summary" in result.lower()
+    
+    def test_build_final_analysis_summary_prompt_includes_rules(self, builder):
+        """Test that summary prompt includes critical rules."""
+        final_analysis = "Analysis content"
+        
+        result = builder.build_final_analysis_summary_prompt(final_analysis)
+        
+        assert "CRITICAL RULES" in result
+        assert "EXPLICITLY stated" in result
+        assert "Do NOT infer" in result
+        assert "Do NOT add your own conclusions" in result
+        assert "facts only" in result
+    
+    def test_build_final_analysis_summary_prompt_with_long_analysis(self, builder):
+        """Test summary prompt with very long analysis content."""
+        final_analysis = "Section\n" * 500
+        
+        result = builder.build_final_analysis_summary_prompt(final_analysis)
+        
+        assert final_analysis in result
+        assert "executive summary" in result.lower()
+    
+    def test_build_final_analysis_summary_prompt_with_special_characters(self, builder):
+        """Test summary prompt with special characters in analysis."""
+        final_analysis = "Analysis with special chars: $VAR, {config}, [array], <tag>, & more"
+        
+        result = builder.build_final_analysis_summary_prompt(final_analysis)
+        
+        assert final_analysis in result
+        assert "$VAR" in result
+        assert "{config}" in result
+        assert "[array]" in result
+    
+    def test_build_final_analysis_summary_prompt_with_markdown(self, builder):
+        """Test summary prompt with markdown-formatted analysis."""
+        final_analysis = """# Incident Analysis
+
+## Root Cause
+The application crashed due to memory leak.
+
+## Impact
+- Service downtime: 15 minutes
+- Affected users: ~1000
+
+## Resolution
+Restarted pod with increased memory limits."""
+        
+        result = builder.build_final_analysis_summary_prompt(final_analysis)
+        
+        assert final_analysis in result
+        assert "# Incident Analysis" in result
+        assert "## Root Cause" in result
+        assert "## Resolution" in result
+    
+    def test_build_final_analysis_summary_prompt_with_multiline_text(self, builder):
+        """Test summary prompt preserves multiline structure."""
+        final_analysis = "Line 1\nLine 2\nLine 3"
+        
+        result = builder.build_final_analysis_summary_prompt(final_analysis)
+        
+        assert "Line 1\nLine 2\nLine 3" in result
+    
+    def test_build_final_analysis_summary_prompt_focuses_on_brevity(self, builder):
+        """Test that prompt emphasizes brevity and conciseness."""
+        final_analysis = "Analysis content"
+        
+        result = builder.build_final_analysis_summary_prompt(final_analysis)
+        
+        assert "1-4 line" in result
+    
+    def test_build_final_analysis_summary_system_prompt_consistency(self, builder):
+        """Test that system prompt is consistent across multiple calls."""
+        result1 = builder.build_final_analysis_summary_system_prompt()
+        result2 = builder.build_final_analysis_summary_system_prompt()
+        
+        assert result1 == result2
+    
+    def test_build_final_analysis_summary_prompt_different_content(self, builder):
+        """Test that prompt changes with different analysis content."""
+        analysis1 = "Analysis 1"
+        analysis2 = "Analysis 2"
+        
+        result1 = builder.build_final_analysis_summary_prompt(analysis1)
+        result2 = builder.build_final_analysis_summary_prompt(analysis2)
+        
+        assert analysis1 in result1
+        assert analysis2 in result2
+        assert analysis1 not in result2
+        assert analysis2 not in result1
