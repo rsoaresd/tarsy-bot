@@ -125,17 +125,17 @@ Generate concise 1-2 line AI-powered summaries of alert analysis results for qui
 
 #### 1. Database Schema Changes
 - **Added**: `final_analysis_summary` field to `AlertSession` model (optional string)
-- **Migration**: Created idempotent Alembic migration `20251125_1418_3d5ddcec5d5f_add_final_analysis_summary_field.py`
+- **Migration**: Created idempotent Alembic migration adding `final_analysis_summary` column
   - Column: `final_analysis_summary TEXT NULL`
   - Includes existence check to support test environments
 
 #### 2. Executive Summary Agent Implementation
-- **Create**: `backend/tarsy/agents/summary_agent.py`
-  - `SummaryAgent` class with `generate_executive_summary()` method
+- **Create**: `backend/tarsy/integrations/notifications/summarizer.py`
+  - `ExecutiveSummaryAgent` class with `generate_executive_summary()` method
   - Uses LLM (via `LLMManager`) to generate concise summaries
   - Configured with `max_tokens=150` to ensure brevity
-  - Handles empty content gracefully (returns `None`)
-  - Strips common prefixes ("Summary:", "Resume:") from responses
+  - Raises `ValueError` on empty content
+  - Uses prompt builder for consistent prompting
   - Uses new interaction type: `LLMInteractionType.FINAL_ANALYSIS_SUMMARY`
 
 #### 3. Prompt Engineering
@@ -146,7 +146,7 @@ Generate concise 1-2 line AI-powered summaries of alert analysis results for qui
 
 #### 4. Alert Service Integration
 - **Modify**: `backend/tarsy/services/alert_service.py`
-  - Initialized `SummaryAgent` in `initialize()` method
+  - Initialized `ExecutiveSummaryAgent` in `initialize()` method
   - Generates summary after analysis completion: `await self.final_analysis_summarizer.generate_executive_summary()`
   - Persists summary alongside final analysis in single atomic update
   - Avoids race conditions by bundling both fields in `_update_session_status()`

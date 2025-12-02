@@ -213,13 +213,13 @@ Missing ConfigMap reference in pod spec.
         assert "ConfigMap" in summary
     
     @pytest.mark.asyncio
-    async def test_summary_strips_common_prefixes(self, summary_agent, mock_llm_manager):
-        """Test that summary generation handles various response formats."""
+    async def test_summary_trims_whitespace(self, summary_agent, mock_llm_manager):
+        """Test that summary generation trims surrounding whitespace from the response."""
+        expected_summary = "This is the actual summary"
         test_responses = [
-            "Summary: This is the actual summary",
-            "Resume: This is the actual summary",
-            "   This is the actual summary   ",
-            "\n\nThis is the actual summary\n\n"
+            f"   {expected_summary}   ",
+            f"\n\n{expected_summary}\n\n",
+            f"\t{expected_summary}\t"
         ]
         
         for response_content in test_responses:
@@ -231,11 +231,10 @@ Missing ConfigMap reference in pod spec.
             
             summary = await summary_agent.generate_executive_summary(
                 content="Analysis",
-                session_id="test-prefix"
+                session_id="test-whitespace"
             )
             
-            assert summary is not None
-            assert summary.strip() == response_content.strip()
+            assert summary == expected_summary
 
 
 @pytest.mark.integration
