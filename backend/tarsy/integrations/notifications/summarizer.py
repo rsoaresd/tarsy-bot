@@ -60,7 +60,7 @@ class ExecutiveSummaryAgent:
             Concise final analysis executive summary string, or None if generation fails
             
         Raises:
-            Exception: If summarization fails critically
+            ValueError: If content is empty or None
         """
         if not content:
             raise ValueError("Cannot generate executive summary: content is required and cannot be empty")
@@ -105,5 +105,5 @@ class ExecutiveSummaryAgent:
             return executive_summary
             
         except Exception as e:
-            logger.error(f"Failed to generate result summary for session {session_id}: {e}")
+            logger.error(f"Failed to generate executive summary for session {session_id}: {e}")
             return None

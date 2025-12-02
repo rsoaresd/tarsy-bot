@@ -101,7 +101,7 @@ class AlertService:
         self.mcp_health_monitor = None
 
         # Initialize final analysis summary agent
-        self.final_analysis_summarizer = None
+        self.final_analysis_summarizer: Optional[ExecutiveSummaryAgent] = None
         
         logger.info(f"AlertService initialized with agent delegation support "
                    f"({len(self.parsed_config.agents)} configured agents, "
