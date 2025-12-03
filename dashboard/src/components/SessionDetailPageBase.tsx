@@ -164,12 +164,12 @@ function SessionDetailPageBase({
   const [isBottomResuming, setIsBottomResuming] = useState(false);
   const [bottomResumeError, setBottomResumeError] = useState<string | null>(null);
   
-  // Ref for Final Analysis Card (for scrolling)
+  // Ref for Final Analysis Card (includes summary + analysis)
   const finalAnalysisRef = useRef<HTMLDivElement>(null);
   const disableTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasPerformedInitialScrollRef = useRef<boolean>(false);
   
-  // Reset initial scroll flag when sessionId changes
+  // Reset scroll flags when sessionId changes
   useEffect(() => {
     hasPerformedInitialScrollRef.current = false;
   }, [sessionId]);
@@ -248,23 +248,23 @@ function SessionDetailPageBase({
   }, [sendingMessage, chatStageInProgress, activeExecutionId, autoScrollEnabled]);
   
   // Perform initial scroll to bottom for active sessions
+  // Always scroll to bottom when opening an active session, regardless of autoScrollEnabled state
   useEffect(() => {
     if (
       session &&
       !loading &&
       !hasPerformedInitialScrollRef.current &&
-      autoScrollEnabled &&
       isActiveSessionStatus(session.status)
     ) {
       // Wait for content to render, then scroll to bottom
       const scrollTimer = setTimeout(() => {
         window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
         hasPerformedInitialScrollRef.current = true;
-      }, 300); // Small delay to ensure content is rendered
+      }, 500); // Increased delay to ensure content is fully rendered
       
       return () => clearTimeout(scrollTimer);
     }
-  }, [session, loading, autoScrollEnabled]);
+  }, [session, loading]);
   
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -668,8 +668,8 @@ function SessionDetailPageBase({
               <OriginalAlertCard alertData={session.alert_data} />
             </Suspense>
 
-            {/* Jump to Final Analysis button - shown at top for quick navigation to conclusion */}
-            {session.final_analysis && (
+            {/* Jump to Summary/Analysis button - shown at top for quick navigation to conclusion */}
+            {(session.final_analysis_summary || session.final_analysis) && (
               <Box sx={{ display: 'flex', justifyContent: 'center', my: 1.5 }}>
                 <Button
                   variant="text"
@@ -678,7 +678,7 @@ function SessionDetailPageBase({
                     // Increment counter to force Final Analysis expansion
                     setExpandCounter(prev => prev + 1);
                     
-                    // Scroll to Final Analysis with offset for header
+                    // Scroll to Final Analysis Card (contains both summary and analysis)
                     // Wait for expansion animation (400ms) + buffer (100ms)
                     setTimeout(() => {
                       if (finalAnalysisRef.current) {
@@ -702,7 +702,7 @@ function SessionDetailPageBase({
                     },
                   }}
                 >
-                  Jump to Final Analysis
+                  {session.final_analysis_summary ? 'Jump to Summary' : 'Jump to Final Analysis'}
                 </Button>
               </Box>
             )}
@@ -755,13 +755,15 @@ function SessionDetailPageBase({
               </Box>
             )}
 
-            {/* Final AI Analysis - Lazy loaded */}
+            {/* Final AI Analysis - Unified card with summary and detailed analysis */}
+            {/* Executive summary shown at top (always visible), full analysis collapsible below */}
             {/* Auto-collapses when Jump to Chat is clicked (via collapseCounter) */}
             {/* Auto-expands when Jump to Final Analysis is clicked (via expandCounter) */}
             <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
               <FinalAnalysisCard 
                 ref={finalAnalysisRef}
                 analysis={session.final_analysis}
+                summary={session.final_analysis_summary}
                 sessionStatus={session.status}
                 errorMessage={session.error_message}
                 collapseCounter={collapseCounter}

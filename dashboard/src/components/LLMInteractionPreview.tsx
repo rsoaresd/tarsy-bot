@@ -33,6 +33,13 @@ const getInteractionTypeStyle = (interactionType: string) => {
         bgColor: 'rgba(46, 125, 50, 0.08)',
         borderColor: 'rgba(46, 125, 50, 0.4)'
       };
+    case 'final_analysis_summary':
+      return {
+        label: 'Executive Summary',
+        color: 'info' as const,
+        bgColor: 'rgba(2, 136, 209, 0.08)',
+        borderColor: 'rgba(2, 136, 209, 0.4)'
+      };
     default:
       return {
         label: 'LLM',
@@ -219,6 +226,25 @@ function LLMInteractionPreview({
           size="small" 
           color={typeStyle.color}
           sx={{ fontWeight: 600, fontSize: '0.7rem' }}
+        />
+        
+        {/* Model Name */}
+        <Chip 
+          label={interaction.model_name} 
+          size="small" 
+          variant="outlined"
+          sx={{ fontSize: '0.7rem' }}
+        />
+        
+        {/* Temperature - always show, display "default" if not configured */}
+        <Chip 
+          label={interaction.temperature !== undefined && interaction.temperature !== null 
+            ? `T: ${interaction.temperature}` 
+            : 'T: default'
+          } 
+          size="small" 
+          variant="outlined"
+          sx={{ fontSize: '0.7rem', opacity: (interaction.temperature !== undefined && interaction.temperature !== null) ? 1 : 0.7 }}
         />
         
         {/* Native Tools Display - Compact */}

@@ -26,6 +26,9 @@ from tarsy.utils.timestamp import now_us
 
 logger = get_logger(__name__)
 
+# Constant for session-level interactions (not associated with any specific stage)
+SESSION_LEVEL_STAGE_ID = 'unknown'
+
 
 class HistoryRepository:
     """
@@ -696,12 +699,12 @@ class HistoryRepository:
                     event_id=llm_db.interaction_id,
                     timestamp_us=llm_db.timestamp_us,
                     duration_ms=llm_db.duration_ms,
-                    stage_execution_id=llm_db.stage_execution_id or 'unknown',
+                    stage_execution_id=llm_db.stage_execution_id or SESSION_LEVEL_STAGE_ID,
                     step_description=f"LLM analysis using {llm_db.model_name}",
                     details=llm_db
                 )
                 
-                stage_id = llm_db.stage_execution_id or 'unknown'
+                stage_id = llm_db.stage_execution_id or SESSION_LEVEL_STAGE_ID
                 interactions_by_stage[stage_id].append(llm_event)
             
             # Convert MCP communications to type-safe models
@@ -724,11 +727,11 @@ class HistoryRepository:
                     timestamp_us=mcp_db.timestamp_us,
                     step_description=mcp_db.step_description,
                     duration_ms=mcp_db.duration_ms,
-                    stage_execution_id=mcp_db.stage_execution_id or 'unknown',
+                    stage_execution_id=mcp_db.stage_execution_id or SESSION_LEVEL_STAGE_ID,
                     details=mcp_details
                 )
                 
-                stage_id = mcp_db.stage_execution_id or 'unknown'
+                stage_id = mcp_db.stage_execution_id or SESSION_LEVEL_STAGE_ID
                 interactions_by_stage[stage_id].append(mcp_interaction)
             
             # Build DetailedStage objects
@@ -781,6 +784,11 @@ class HistoryRepository:
                 )
                 detailed_stages.append(detailed_stage)
             
+            # Extract session-level interactions (not associated with any stage)
+            session_level_interactions = interactions_by_stage.get(SESSION_LEVEL_STAGE_ID, [])
+            # Sort chronologically by timestamp
+            session_level_interactions = sorted(session_level_interactions, key=lambda x: x.timestamp_us)
+            
             # Calculate total interaction counts
             total_llm = len(llm_interactions_db)
             total_mcp = len(mcp_communications_db)
@@ -797,6 +805,16 @@ class HistoryRepository:
                     session_output_tokens += stage.stage_output_tokens
                 if stage.stage_total_tokens:
                     session_total_tokens += stage.stage_total_tokens
+            
+            # Add session-level interaction tokens (e.g., executive summary)
+            for interaction in session_level_interactions:
+                if interaction.type == "llm" and interaction.details:
+                    if interaction.details.input_tokens:
+                        session_input_tokens += interaction.details.input_tokens
+                    if interaction.details.output_tokens:
+                        session_output_tokens += interaction.details.output_tokens
+                    if interaction.details.total_tokens:
+                        session_total_tokens += interaction.details.total_tokens
             
             # Use None instead of 0 for cleaner display
             session_input_tokens = session_input_tokens if session_input_tokens > 0 else None
@@ -841,7 +859,10 @@ class HistoryRepository:
                 session_total_tokens=session_total_tokens,
                 
                 # Complete stage executions with interactions
-                stages=detailed_stages
+                stages=detailed_stages,
+                
+                # Session-level interactions (not associated with any specific stage)
+                session_level_interactions=session_level_interactions
             )
             
         except Exception as e:
