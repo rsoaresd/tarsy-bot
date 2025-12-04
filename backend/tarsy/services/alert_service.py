@@ -30,6 +30,7 @@ from tarsy.services.history_service import get_history_service
 from tarsy.services.mcp_server_registry import MCPServerRegistry
 from tarsy.services.runbook_service import RunbookService
 from tarsy.utils.logger import get_module_logger
+from tarsy.services.slack_service import SlackService
 from tarsy.agents.exceptions import SessionPaused
 from tarsy.models.pause_metadata import PauseMetadata, PauseReason
 from tarsy.integrations.notifications.summarizer import ExecutiveSummaryAgent
@@ -75,6 +76,7 @@ class AlertService:
 
         # Initialize services
         self.runbook_service = RunbookService(settings, runbook_http_client)
+        self.slack_service = SlackService(settings)
         self.history_service = get_history_service()
         
         # Initialize registries with loaded configuration
@@ -361,6 +363,14 @@ class AlertService:
                 # Publish session.failed event
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(chain_context.session_id)
+
+                if self.slack_service.enabled:
+                    await self.slack_service.send_alert_notification(
+                        alert_type=chain_context.processing_alert.alert_type,
+                        error=error_msg,
+                        session_id=chain_context.session_id
+                )
+
                 return self._format_error_response(chain_context, error_msg)
             
             # Step 7: Format and return results
@@ -388,6 +398,14 @@ class AlertService:
                     final_analysis=final_result,
                     final_analysis_summary=final_result_summary
                 )
+
+                if self.slack_service.enabled:
+                    await self.slack_service.send_alert_notification(
+                        alert_type=chain_context.processing_alert.alert_type,
+                        analysis=final_result_summary,
+                        session_id=chain_context.session_id,
+                        alert_data=chain_context.processing_alert.alert_data,
+                    )
                 
                 # Publish session.completed event
                 from tarsy.services.events.event_helpers import publish_session_completed
@@ -416,6 +434,13 @@ class AlertService:
                 # Publish session.failed event
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(chain_context.session_id)
+
+                if self.slack_service.enabled:
+                    await self.slack_service.send_alert_notification(
+                        alert_type=chain_context.processing_alert.alert_type,
+                        error=error_msg,
+                        session_id=chain_context.session_id
+                    )
                 
                 return self._format_error_response(chain_context, error_msg)
                 
@@ -429,6 +454,13 @@ class AlertService:
             # Publish session.failed event
             from tarsy.services.events.event_helpers import publish_session_failed
             await publish_session_failed(chain_context.session_id)
+
+            if self.slack_service.enabled:
+                await self.slack_service.send_alert_notification(
+                    alert_type=chain_context.processing_alert.alert_type,
+                    error=error_msg,
+                    session_id=chain_context.session_id
+            )
             
             return self._format_error_response(chain_context, error_msg)
         
@@ -606,6 +638,14 @@ class AlertService:
                 self._update_session_status(session_id, AlertSessionStatus.FAILED.value)
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(session_id)
+
+                if self.slack_service.enabled:
+                    await self.slack_service.send_alert_notification(
+                        alert_type=chain_context.processing_alert.alert_type,
+                        error=error_msg,
+                        session_id=chain_context.session_id
+                )
+                
                 return self._format_error_response(chain_context, error_msg)
         
         except Exception as e:
