@@ -207,7 +207,7 @@ function InteractionDetails({
           </Box>
         )}
 
-        {/* EP-0014: Show conversation messages in sequence */}
+        {/* Show conversation messages in sequence */}
         <Box>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
@@ -246,6 +246,57 @@ function InteractionDetails({
           {/* Render all conversation messages */}
           {renderConversationMessages(llmDetails)}
         </Box>
+
+        {/* Native Thinking Content (Gemini 3.0+ native thinking mode) */}
+        {/* Placed after conversation messages - it's the model's internal reasoning that led to the response */}
+        {llmDetails.thinking_content && (
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Box sx={{
+                  px: 1,
+                  py: 0.5,
+                  bgcolor: 'info.main',
+                  color: 'info.contrastText',
+                  borderRadius: 1,
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Thinking
+                </Box>
+                <Typography variant="caption" color="text.secondary">
+                  Internal reasoning from Gemini
+                </Typography>
+              </Box>
+              <CopyButton
+                text={llmDetails.thinking_content}
+                variant="icon"
+                size="small"
+                tooltip="Copy thinking content"
+              />
+            </Box>
+            <Typography 
+              variant="body2" 
+              sx={{ 
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                p: 1.5,
+                bgcolor: 'rgba(33, 150, 243, 0.08)',
+                borderRadius: 1,
+                border: 1,
+                borderColor: 'info.light',
+                fontStyle: 'italic',
+                color: 'text.secondary',
+                maxHeight: 300,
+                overflow: 'auto'
+              }}
+            >
+              {llmDetails.thinking_content}
+            </Typography>
+          </Box>
+        )}
 
       {/* Model metadata */}
       <Box>

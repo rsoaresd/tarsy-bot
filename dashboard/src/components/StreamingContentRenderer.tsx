@@ -7,13 +7,21 @@ import {
   finalAnswerMarkdownComponents, 
   thoughtMarkdownComponents 
 } from '../utils/markdownComponents';
+import { 
+  STREAMING_CONTENT_TYPES, 
+  type StreamingContentType 
+} from '../utils/eventTypes';
 
 /**
  * Shared streaming item interface
  * Used by both ConversationTimeline and ChatMessageList
+ * 
+ * Types:
+ * - LLM streaming content types (thought, final_answer, summarization, native_thinking) 
+ * - UI-specific types (tool_call, user_message)
  */
 export interface StreamingItem {
-  type: 'thought' | 'final_answer' | 'summarization' | 'tool_call' | 'user_message';
+  type: StreamingContentType | 'tool_call' | 'user_message';
   content?: string;
   stage_execution_id?: string;
   mcp_event_id?: string;
@@ -21,6 +29,8 @@ export interface StreamingItem {
   // Tool call specific fields
   toolName?: string;
   messageId?: string;
+  // LLM interaction ID for deduplication of thought/final_answer/native_thinking streams
+  llm_interaction_id?: string;
 }
 
 interface StreamingContentRendererProps {
@@ -44,8 +54,8 @@ interface StreamingContentRendererProps {
  * - Consistent styling across views
  */
 const StreamingContentRenderer = memo(({ item }: StreamingContentRendererProps) => {
-  // Render thought
-  if (item.type === 'thought') {
+  // Render thought (ReAct pattern)
+  if (item.type === STREAMING_CONTENT_TYPES.THOUGHT) {
     const hasMarkdown = hasMarkdownSyntax(item.content || '');
     
     return (
@@ -61,7 +71,7 @@ const StreamingContentRenderer = memo(({ item }: StreamingContentRendererProps) 
         >
           💭
         </Typography>
-        <TypewriterText text={item.content || ''} speed={15}>
+        <TypewriterText text={item.content || ''} speed={3}>
           {(displayText) => (
             hasMarkdown ? (
               <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -91,9 +101,79 @@ const StreamingContentRenderer = memo(({ item }: StreamingContentRendererProps) 
       </Box>
     );
   }
+
+  // Render native thinking (Gemini 3.0+ native thinking mode)
+  if (item.type === STREAMING_CONTENT_TYPES.NATIVE_THINKING) {
+    const hasMarkdown = hasMarkdownSyntax(item.content || '');
+    
+    return (
+      <Box sx={{ mb: 1.5, display: 'flex', gap: 1.5 }}>
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            fontSize: '1.1rem', 
+            lineHeight: 1,
+            flexShrink: 0,
+            mt: 0.25
+          }}
+        >
+          🧠
+        </Typography>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography
+            variant="caption"
+            sx={{
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: 0.5,
+              fontSize: '0.65rem',
+              color: 'info.main',
+              display: 'block',
+              mb: 0.5
+            }}
+          >
+            Thinking
+          </Typography>
+          <TypewriterText text={item.content || ''} speed={3}>
+            {(displayText) => (
+              hasMarkdown ? (
+                <Box sx={{ 
+                  '& p, & li': { 
+                    color: 'text.secondary',
+                    fontStyle: 'italic'
+                  }
+                }}>
+                  <ReactMarkdown
+                    components={thoughtMarkdownComponents}
+                    skipHtml
+                  >
+                    {displayText}
+                  </ReactMarkdown>
+                </Box>
+              ) : (
+                <Typography 
+                  variant="body1" 
+                  sx={{ 
+                    whiteSpace: 'pre-wrap', 
+                    wordBreak: 'break-word',
+                    lineHeight: 1.7,
+                    fontSize: '1rem',
+                    color: 'text.secondary',
+                    fontStyle: 'italic'
+                  }}
+                >
+                  {displayText}
+                </Typography>
+              )
+            )}
+          </TypewriterText>
+        </Box>
+      </Box>
+    );
+  }
   
-  // Render summarization
-  if (item.type === 'summarization') {
+  // Render summarization (tool result summary)
+  if (item.type === STREAMING_CONTENT_TYPES.SUMMARIZATION) {
     // Check if this is the placeholder text
     const isPlaceholder = item.content === 'Summarizing tool results...';
     
@@ -156,7 +236,7 @@ const StreamingContentRenderer = memo(({ item }: StreamingContentRendererProps) 
               {item.content}
             </Typography>
           ) : (
-            <TypewriterText text={item.content || ''} speed={15}>
+            <TypewriterText text={item.content || ''} speed={3}>
               {(displayText) => (
                 hasMarkdown ? (
                   <Box sx={{ 
@@ -192,8 +272,8 @@ const StreamingContentRenderer = memo(({ item }: StreamingContentRendererProps) 
     );
   }
   
-  // Render final answer
-  if (item.type === 'final_answer') {
+  // Render final answer (ReAct pattern)
+  if (item.type === STREAMING_CONTENT_TYPES.FINAL_ANSWER) {
     return (
       <Box sx={{ mb: 2, mt: 3 }}>
         <Box sx={{ display: 'flex', gap: 1.5, mb: 1 }}>
@@ -222,7 +302,7 @@ const StreamingContentRenderer = memo(({ item }: StreamingContentRendererProps) 
           </Typography>
         </Box>
         <Box sx={{ pl: 3.5 }}>
-          <TypewriterText text={item.content || ''} speed={15}>
+          <TypewriterText text={item.content || ''} speed={3}>
             {(displayText) => (
               <ReactMarkdown
                 urlTransform={defaultUrlTransform}

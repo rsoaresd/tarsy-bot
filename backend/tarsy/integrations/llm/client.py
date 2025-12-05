@@ -19,13 +19,16 @@ tool combination. The NEW SDK types (google.genai.types) are required.
 """
 
 import asyncio
-import httpx
-import json
 import pprint
 import traceback
-import urllib3
 from typing import Any, Dict, List, Optional
 
+import httpx
+import urllib3
+from google.genai import (
+    types as google_genai_types,  # Google SDK types for tool definitions
+)
+from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -33,21 +36,21 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_vertexai.model_garden import ChatAnthropicVertex
 from langchain_openai import ChatOpenAI
 from langchain_xai import ChatXAI
-from langchain_anthropic import ChatAnthropic
-from google.genai import types as google_genai_types  # Google SDK types for tool definitions
 
 from tarsy.config.settings import Settings
 from tarsy.hooks.hook_context import llm_interaction_context
-from tarsy.models.constants import LLMInteractionType, StreamingEventType
-from tarsy.models.llm_models import GoogleNativeTool, LLMProviderConfig, LLMProviderType
-from tarsy.models.mcp_selection_models import NativeToolsConfig
-from tarsy.models.unified_interactions import LLMConversation, MessageRole
-from tarsy.utils.logger import get_module_logger
-from tarsy.utils.error_details import extract_error_details
 
 # Apply url_context patch for Gemini models
 # This enables url_context tool support which is not yet natively supported in LangChain
 from tarsy.integrations.llm.gemini_url_context_patch import apply_url_context_patch
+from tarsy.models.constants import LLMInteractionType, StreamingEventType
+from tarsy.models.llm_models import GoogleNativeTool, LLMProviderConfig, LLMProviderType
+from tarsy.models.mcp_selection_models import NativeToolsConfig
+from tarsy.models.processing_context import ToolWithServer
+from tarsy.models.unified_interactions import LLMConversation, MessageRole
+from tarsy.utils.error_details import extract_error_details
+from tarsy.utils.logger import get_module_logger
+
 apply_url_context_patch()
 
 # Suppress SSL warnings when SSL verification is disabled
@@ -75,13 +78,10 @@ def _create_openai_client(temp, api_key, model, disable_ssl_verification=False, 
     """
     client_kwargs = {
         "model": model, 
+        "temperature": temp, 
         "api_key": api_key,
         "stream_usage": True  # Enable token usage in streaming responses
     }
-    
-    # Only set temperature if explicitly provided
-    if temp is not None:
-        client_kwargs["temperature"] = temp
     
     # Only set base_url if explicitly provided, otherwise let LangChain use defaults
     if base_url:
@@ -93,53 +93,41 @@ def _create_openai_client(temp, api_key, model, disable_ssl_verification=False, 
     
     return ChatOpenAI(**client_kwargs)
 
-def _create_google_client(temp, api_key, model, _disable_ssl_verification=False, _base_url=None):
+def _create_google_client(temp, api_key, model, disable_ssl_verification=False, base_url=None):
     """Create ChatGoogleGenerativeAI client."""
     client_kwargs = {
         "model": model, 
+        "temperature": temp if temp is not None else 1.0,  # Default to 1.0 if not specified
         "google_api_key": api_key
     }
-    
-    # Only set temperature if explicitly provided
-    if temp is not None:
-        client_kwargs["temperature"] = temp
-    
     # Note: ChatGoogleGenerativeAI may not support custom base_url or HTTP clients
     return ChatGoogleGenerativeAI(**client_kwargs)
 
-def _create_xai_client(temp, api_key, model, _disable_ssl_verification=False, base_url=None):
+def _create_xai_client(temp, api_key, model, disable_ssl_verification=False, base_url=None):
     """Create ChatXAI client."""
     client_kwargs = {
         "model": model, 
-        "api_key": api_key
+        "api_key": api_key, 
+        "temperature": temp
     }
-    
-    # Only set temperature if explicitly provided
-    if temp is not None:
-        client_kwargs["temperature"] = temp
-    
     if base_url:
         client_kwargs["base_url"] = base_url
     # Note: ChatXAI may not support custom HTTP clients - would need to verify
     return ChatXAI(**client_kwargs)
 
-def _create_anthropic_client(temp, api_key, model, _disable_ssl_verification=False, base_url=None):
+def _create_anthropic_client(temp, api_key, model, disable_ssl_verification=False, base_url=None):
     """Create ChatAnthropic client."""
     client_kwargs = {
         "model": model, 
-        "api_key": api_key
+        "api_key": api_key, 
+        "temperature": temp
     }
-    
-    # Only set temperature if explicitly provided
-    if temp is not None:
-        client_kwargs["temperature"] = temp
-    
     if base_url:
         client_kwargs["base_url"] = base_url
     # Note: ChatAnthropic may not support custom HTTP clients - would need to verify  
     return ChatAnthropic(**client_kwargs)
 
-def _create_vertexai_client(temp, api_key, model, _disable_ssl_verification=False, _base_url=None):
+def _create_vertexai_client(temp, api_key, model, disable_ssl_verification=False, base_url=None):
     """Create ChatAnthropicVertex client for Claude models on Vertex AI.
     
     Authentication via GOOGLE_APPLICATION_CREDENTIALS env var pointing to service account JSON.
@@ -156,12 +144,9 @@ def _create_vertexai_client(temp, api_key, model, _disable_ssl_verification=Fals
     client_kwargs = {
         "model_name": model,
         "project": project,
-        "location": location
+        "location": location,
+        "temperature": temp
     }
-    
-    # Only set temperature if explicitly provided
-    if temp is not None:
-        client_kwargs["temperature"] = temp
     
     return ChatAnthropicVertex(**client_kwargs)
 
@@ -233,7 +218,9 @@ class LLMClient:
                 logger.error(f"Unknown LLM provider type: {provider_type.value} for provider: {self.provider_name}")
                 self.available = False
         except Exception as e:
+            import traceback
             logger.error(f"Failed to initialize {self.provider_name}: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             self.available = False
 
     def _initialize_native_tools(self):
@@ -368,6 +355,57 @@ class LLMClient:
         logger.info(log_msg)
         
         return overridden_tools
+
+    def _convert_mcp_tools_for_binding(
+        self,
+        available_tools: List[ToolWithServer]
+    ) -> List[Dict[str, Any]]:
+        """
+        Convert MCP tools to format compatible with LangChain's .bind(tools=...).
+        
+        Uses OpenAI-style format which is then processed by our Gemini patch
+        to handle JSON Schema type conversion (object → OBJECT).
+        
+        Function names use double underscore separator (server__tool_name) to
+        avoid conflicts with dots in tool names while remaining valid identifiers.
+        
+        Args:
+            available_tools: List of MCP tools with server context
+            
+        Returns:
+            List of tool definitions in OpenAI-style dict format
+        """
+        tools = []
+        
+        for tool_with_server in available_tools:
+            try:
+                # Use server__tool_name as function name (double underscore separator)
+                # This avoids dots which aren't valid in function names
+                func_name = f"{tool_with_server.server}__{tool_with_server.tool.name}"
+                
+                # Get the input schema, defaulting to empty object if not specified
+                input_schema = tool_with_server.tool.inputSchema or {"type": "object", "properties": {}}
+                
+                # Create tool definition in OpenAI-style format
+                # Our Gemini patch converts JSON Schema types (object → OBJECT) during binding
+                tool_def = {
+                    "type": "function",
+                    "function": {
+                        "name": func_name,
+                        "description": tool_with_server.tool.description or f"Tool {tool_with_server.tool.name} from {tool_with_server.server}",
+                        "parameters": input_schema
+                    }
+                }
+                tools.append(tool_def)
+                
+                logger.debug(f"Converted MCP tool for binding: {func_name}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to convert MCP tool {tool_with_server.server}.{tool_with_server.tool.name}: {e}")
+                continue
+        
+        logger.info(f"Converted {len(tools)} MCP tools for binding")
+        return tools
 
     def _convert_conversation_to_langchain(self, conversation: LLMConversation) -> List:
         """Convert typed conversation to LangChain message objects."""
@@ -549,14 +587,16 @@ class LLMClient:
                                     await self._publish_stream_chunk(
                                         session_id, stage_execution_id,
                                         StreamingEventType.THOUGHT, clean_thought,
-                                        is_complete=True
+                                        is_complete=True,
+                                        llm_interaction_id=ctx.interaction.interaction_id
                                     )
                                 else:
                                     # Send completion marker
                                     await self._publish_stream_chunk(
                                         session_id, stage_execution_id,
                                         StreamingEventType.THOUGHT, "",
-                                        is_complete=True
+                                        is_complete=True,
+                                        llm_interaction_id=ctx.interaction.interaction_id
                                     )
                                 is_streaming_thought = False
                                 token_count_since_last_send = 0
@@ -599,7 +639,8 @@ class LLMClient:
                                             await self._publish_stream_chunk(
                                                 session_id, stage_execution_id,
                                                 StreamingEventType.THOUGHT, current_thought,
-                                                is_complete=False
+                                                is_complete=False,
+                                                llm_interaction_id=ctx.interaction.interaction_id
                                             )
                                     
                                     elif is_streaming_final_answer:
@@ -610,7 +651,8 @@ class LLMClient:
                                             await self._publish_stream_chunk(
                                                 session_id, stage_execution_id,
                                                 StreamingEventType.FINAL_ANSWER, current_final_answer,
-                                                is_complete=False
+                                                is_complete=False,
+                                                llm_interaction_id=ctx.interaction.interaction_id
                                             )
                                     
                                     elif is_streaming_summarization:
@@ -640,14 +682,16 @@ class LLMClient:
                             await self._publish_stream_chunk(
                                 session_id, stage_execution_id,
                                 StreamingEventType.THOUGHT, final_thought,
-                                is_complete=True
+                                is_complete=True,
+                                llm_interaction_id=ctx.interaction.interaction_id
                             )
                         else:
                             # Send completion marker
                             await self._publish_stream_chunk(
                                 session_id, stage_execution_id,
                                 StreamingEventType.THOUGHT, "",
-                                is_complete=True
+                                is_complete=True,
+                                llm_interaction_id=ctx.interaction.interaction_id
                             )
                     
                     # Send final complete final answer if streaming is still active
@@ -659,14 +703,16 @@ class LLMClient:
                             await self._publish_stream_chunk(
                                 session_id, stage_execution_id,
                                 StreamingEventType.FINAL_ANSWER, final_answer,
-                                is_complete=True
+                                is_complete=True,
+                                llm_interaction_id=ctx.interaction.interaction_id
                             )
                         else:
                             # Send completion marker
                             await self._publish_stream_chunk(
                                 session_id, stage_execution_id,
                                 StreamingEventType.FINAL_ANSWER, "",
-                                is_complete=True
+                                is_complete=True,
+                                llm_interaction_id=ctx.interaction.interaction_id
                             )
                     
                     # Send final complete summarization if streaming is still active
@@ -796,39 +842,35 @@ class LLMClient:
                             enhanced_message += f" (max retries {max_retries + 1} exhausted)"
                         
                         raise Exception(enhanced_message) from e
-    
+
     def _contains_final_answer(self, conversation: LLMConversation) -> bool:
         """
-        Check if the latest assistant message contains 'Final Answer:'.
+        Check if the LAST message is from assistant and contains 'Final Answer:'.
         
         Uses the centralized ReAct parser to determine if the response contains
         a final answer, ensuring consistency across the codebase.
-        
-        Note: This method finds the last ASSISTANT message, not the absolute last
-        message. This is important because metadata observations may be appended
-        after assistant messages.
         
         Args:
             conversation: The conversation to check
             
         Returns:
-            True if latest assistant message contains "Final Answer:", False otherwise
+            True if last message is assistant with "Final Answer:", False otherwise
         """
         if not conversation.messages:
             return False
         
-        # Find the last assistant message (not absolute last message)
-        # This handles cases where metadata observations are appended after assistant response
-        last_assistant_msg = conversation.get_latest_assistant_message()
+        # Check LAST message only
+        last_msg = conversation.messages[-1]
         
-        if last_assistant_msg is None:
+        # Must be from assistant
+        if last_msg.role != MessageRole.ASSISTANT:
             return False
         
         # Use the centralized ReAct parser to determine if this is a final answer
         # This ensures all Final Answer detection logic is in one place
         from tarsy.agents.parsers.react_parser import ReActParser
         
-        parsed = ReActParser.parse_response(last_assistant_msg.content)
+        parsed = ReActParser.parse_response(last_msg.content)
         return parsed.is_final_answer
     
     def get_max_tool_result_tokens(self) -> int:
@@ -975,37 +1017,6 @@ class LLMClient:
         # Add assistant response to conversation
         conversation.append_assistant_message(accumulated_content)
         
-        # Inject response metadata as observation if it contains valuable tool usage info
-        # This ensures LLM has context about native tool usage (Google Search, etc.)
-        # in subsequent iterations - without this, search results would be "lost"
-        #
-        # Only inject metadata containing these keys (indicates actual tool usage):
-        # - grounding_metadata: Google Search queries/results, URL context
-        # - parts: Code execution results (Python code blocks, outputs)
-        #
-        # Skip metadata that only contains generic fields like:
-        # - safety_ratings, model_provider, finish_reason, usage_metadata
-        metadata = ctx.interaction.response_metadata
-        if metadata and isinstance(metadata, dict):
-            valuable_keys = {'grounding_metadata', 'parts'}
-            
-            # Check if any valuable keys are present with non-empty content
-            has_valuable_content = any(
-                key in metadata and metadata[key]  # Key exists and has truthy value
-                for key in valuable_keys
-            )
-            
-            if has_valuable_content:
-                # Filter to only include valuable metadata for cleaner context
-                filtered_metadata = {k: v for k, v in metadata.items() if k in valuable_keys and v}
-                metadata_json = json.dumps(filtered_metadata, indent=2, default=str)
-                metadata_observation = (
-                    "[Response Metadata]\n"
-                    "The following metadata was captured from this LLM response:\n"
-                    f"```json\n{metadata_json}\n```"
-                )
-                conversation.append_observation(metadata_observation)
-        
         # Update the interaction with conversation data
         ctx.interaction.conversation = conversation
         ctx.interaction.provider = self.provider_name
@@ -1034,7 +1045,8 @@ class LLMClient:
         stream_type: StreamingEventType,
         chunk: str,
         is_complete: bool,
-        mcp_event_id: Optional[str] = None
+        mcp_event_id: Optional[str] = None,
+        llm_interaction_id: Optional[str] = None
     ) -> None:
         """Publish streaming chunk via transient channel."""
         # Check if streaming is enabled via config flag
@@ -1070,6 +1082,7 @@ class LLMClient:
                     stream_type=stream_type.value,
                     is_complete=is_complete,
                     mcp_event_id=mcp_event_id,
+                    llm_interaction_id=llm_interaction_id,
                     timestamp_us=now_us()
                 )
                 
@@ -1078,7 +1091,7 @@ class LLMClient:
                     f"session:{session_id}", 
                     event
                 )
-                logger.debug(f"Published streaming chunk ({stream_type.value}, complete={is_complete}, mcp_event={mcp_event_id}) for {session_id}")
+                logger.debug(f"Published streaming chunk ({stream_type.value}, complete={is_complete}, mcp_event={mcp_event_id}, llm_interaction={llm_interaction_id}) for {session_id}")
         except Exception as e:
             # Don't fail LLM call if streaming fails
             logger.warning(f"Failed to publish streaming chunk: {e}")

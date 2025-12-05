@@ -10,6 +10,11 @@ import { apiClient } from '../../services/api';
 import type { ChatUserMessage, StageExecution, DetailedSession } from '../../types';
 import { STAGE_STATUS, isValidStageStatus, type StageStatus } from '../../utils/statusConstants';
 import { useAdvancedAutoScroll } from '../../hooks/useAdvancedAutoScroll';
+import { 
+  LLM_EVENTS, 
+  STREAMING_CONTENT_TYPES, 
+  parseStreamingContentType 
+} from '../../utils/eventTypes';
 
 interface ChatMessageListProps {
   sessionId: string;
@@ -279,15 +284,21 @@ export default function ChatMessageList({ sessionId, chatId }: ChatMessageListPr
 
     // Handle streaming events
     const handleStreamEvent = (event: any) => {
-      if (event.type === 'llm.stream.chunk') {
-        console.log('🌊 Chat received streaming chunk:', event.stream_type, event.is_complete);
+      if (event.type === LLM_EVENTS.STREAM_CHUNK) {
+        console.log('🌊 Chat received streaming chunk:', event.stream_type, event.is_complete,
+          event.llm_interaction_id ? `llm_id=${event.llm_interaction_id}` : '');
         
         setStreamingItems(prev => {
           const updated = new Map(prev);
-          // Use composite key based on stream type
-          const key = event.stream_type === 'summarization' && event.mcp_event_id
-            ? `${event.mcp_event_id}-summarization`
-            : `${event.stage_execution_id || 'default'}-${event.stream_type}`;
+          
+          // Use unique keys based on stream type:
+          // - For summarization: use mcp_event_id (links to specific tool call)
+          // - For thought/final_answer/native_thinking: use llm_interaction_id (unique per LLM call)
+          const key = event.stream_type === STREAMING_CONTENT_TYPES.SUMMARIZATION
+            ? `${event.mcp_event_id}-${STREAMING_CONTENT_TYPES.SUMMARIZATION}`
+            : `${event.llm_interaction_id}-${event.stream_type}`;
+          
+          const streamType = parseStreamingContentType(event.stream_type);
           
           if (event.is_complete) {
             // Stream completed - mark as waiting for DB update
@@ -300,20 +311,22 @@ export default function ChatMessageList({ sessionId, chatId }: ChatMessageListPr
               });
             } else {
               updated.set(key, {
-                type: event.stream_type as 'thought' | 'final_answer' | 'summarization',
+                type: streamType,
                 content: event.chunk,
                 stage_execution_id: event.stage_execution_id,
                 mcp_event_id: event.mcp_event_id,
+                llm_interaction_id: event.llm_interaction_id,
                 waitingForDb: true
               });
             }
           } else {
             // Still streaming - update content
             updated.set(key, {
-              type: event.stream_type as 'thought' | 'final_answer' | 'summarization',
+              type: streamType,
               content: event.chunk,
               stage_execution_id: event.stage_execution_id,
               mcp_event_id: event.mcp_event_id,
+              llm_interaction_id: event.llm_interaction_id,
               waitingForDb: false
             });
           }
@@ -327,7 +340,7 @@ export default function ChatMessageList({ sessionId, chatId }: ChatMessageListPr
     const unsubscribe = websocketService.subscribeToChannel(
       `session:${sessionId}`,
       (event: any) => {
-        if (event.type === 'llm.stream.chunk') {
+        if (event.type === LLM_EVENTS.STREAM_CHUNK) {
           handleStreamEvent(event);
         } else {
           handleStageEvent(event);
@@ -366,6 +379,8 @@ export default function ChatMessageList({ sessionId, chatId }: ChatMessageListPr
       )}
       
       {/* Show streaming items in real-time */}
+      {/* Note: We show all streaming items including waitingForDb to prevent brief disappearance */}
+      {/* They'll be cleared by the streaming state update when new data arrives */}
       {streamingItems.size > 0 && (
         <Paper sx={{ p: 2, mb: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>

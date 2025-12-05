@@ -89,10 +89,12 @@ class IterationStrategy(str, Enum):
     - REACT: Standard ReAct pattern with Think→Action→Observation cycles for complete analysis
     - REACT_STAGE: ReAct pattern for stage-specific analysis within multi-stage chains
     - REACT_FINAL_ANALYSIS: ReAct final analysis only, no tools, uses all accumulated data
+    - NATIVE_THINKING: Gemini-specific native thinking with structured function calling (no text parsing)
     """
     REACT = "react"
     REACT_STAGE = "react-stage"           # ReAct pattern for stage-specific analysis
     REACT_FINAL_ANALYSIS = "react-final-analysis"   # ReAct final analysis only, no tools
+    NATIVE_THINKING = "native-thinking"   # Gemini native thinking + function calling
 
 
 class LLMInteractionType(str, Enum):
@@ -128,10 +130,12 @@ class StreamingEventType(str, Enum):
     - THOUGHT: Complete "Thought:" section from ReAct pattern
     - FINAL_ANSWER: Complete "Final Answer:" section from ReAct pattern
     - SUMMARIZATION: Plain text summarization of tool results
+    - NATIVE_THINKING: Native thinking summaries from Gemini models (distinct from ReAct thoughts)
     """
     THOUGHT = "thought"
     FINAL_ANSWER = "final_answer"
     SUMMARIZATION = "summarization"
+    NATIVE_THINKING = "native_thinking"
 
 
 # ==============================================================================

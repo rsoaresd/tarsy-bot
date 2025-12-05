@@ -16,6 +16,11 @@ import CopyButton from './CopyButton';
 import StreamingContentRenderer, { type StreamingItem } from './StreamingContentRenderer';
 import { websocketService } from '../services/websocketService';
 import { isTerminalSessionStatus, SESSION_STATUS, STAGE_STATUS } from '../utils/statusConstants';
+import { 
+  LLM_EVENTS, 
+  STREAMING_CONTENT_TYPES, 
+  parseStreamingContentType 
+} from '../utils/eventTypes';
 // Auto-scroll is now handled by the centralized system in SessionDetailPageBase
 
 interface ProcessingIndicatorProps {
@@ -96,12 +101,17 @@ interface ConversationStreamingItem extends StreamingItem {
 /**
  * StreamingItemRenderer Component
  * Renders streaming items with proper formatting
- * Delegates common types (thought, final_answer, summarization) to shared StreamingContentRenderer
+ * Delegates common types (thought, final_answer, summarization, native_thinking) to shared StreamingContentRenderer
  * Handles ConversationTimeline-specific types (tool_call, user_message) locally
  */
 const StreamingItemRenderer = memo(({ item }: { item: ConversationStreamingItem }) => {
-  // Handle common streaming types with shared component
-  if (item.type === 'thought' || item.type === 'final_answer' || item.type === 'summarization') {
+  // Handle LLM streaming content types with shared component
+  if (
+    item.type === STREAMING_CONTENT_TYPES.THOUGHT || 
+    item.type === STREAMING_CONTENT_TYPES.FINAL_ANSWER || 
+    item.type === STREAMING_CONTENT_TYPES.SUMMARIZATION || 
+    item.type === STREAMING_CONTENT_TYPES.NATIVE_THINKING
+  ) {
     return <StreamingContentRenderer item={item} />;
   }
   
@@ -237,8 +247,6 @@ function ConversationTimeline({
   const [chatFlow, setChatFlow] = useState<ChatFlowItemData[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [streamingItems, setStreamingItems] = useState<Map<string, ConversationStreamingItem>>(new Map());
-  // Track which chatFlow items have been "claimed" by deduplication (prevents double-matching)
-  const [claimedChatFlowItems, setClaimedChatFlowItems] = useState<Set<string>>(new Set());
   // Track if there's an active chat stage in progress (for showing processing indicator on completed sessions)
   const [activeChatStageInProgress, setActiveChatStageInProgress] = useState<boolean>(false);
   // Track collapsed stages by execution_id (default: all expanded)
@@ -312,43 +320,73 @@ function ConversationTimeline({
     return content;
   }, [chatFlow, chatStats, session.session_id, session.status, session.chain_id]);
 
-  // Filter and sort streaming items for display (avoids showing duplicates during deduplication lag)
+  // Filter and sort streaming items for display
+  // Uses ID-based matching for reliable deduplication
   const displayedStreamingItems = useMemo(() => {
     if (streamingItems.size === 0) return [];
     
-    // Get recent DB items (last 3) to filter out duplicates
-    const recentDbItems = chatFlow.slice(-3);
+    // Build a set of IDs from DB items for O(1) lookup
+    // For thought/final_answer/native_thinking: use llm_interaction_id
+    // For tool_call/summarization: use mcp_event_id
+    // For user_message: use messageId
+    const dbInteractionIds = new Set<string>();
+    const dbMcpEventIds = new Set<string>();
+    const dbMessageIds = new Set<string>();
+    
+    for (const item of chatFlow) {
+      if (item.llm_interaction_id) {
+        dbInteractionIds.add(item.llm_interaction_id);
+      }
+      if (item.mcp_event_id) {
+        dbMcpEventIds.add(item.mcp_event_id);
+      }
+      if (item.messageId) {
+        dbMessageIds.add(item.messageId);
+      }
+    }
     
     return Array.from(streamingItems.entries())
       .filter(([, streamItem]) => {
-        // Check if matching DB item exists
-        const hasMatchingDbItem = recentDbItems.some(dbItem => {
-          if (dbItem.type !== streamItem.type) return false;
-          
-          // Match by content for thoughts/final_answer
-          if (streamItem.type === 'thought' || streamItem.type === 'final_answer') {
-            return dbItem.content && streamItem.content && 
-                   dbItem.content.trim() === streamItem.content.trim();
+        // ID-based deduplication: check if DB already has this item
+        if (
+          streamItem.type === STREAMING_CONTENT_TYPES.THOUGHT ||
+          streamItem.type === STREAMING_CONTENT_TYPES.FINAL_ANSWER ||
+          streamItem.type === STREAMING_CONTENT_TYPES.NATIVE_THINKING
+        ) {
+          // If streaming item has llm_interaction_id and DB has it, hide
+          if (streamItem.llm_interaction_id && dbInteractionIds.has(streamItem.llm_interaction_id)) {
+            return false;
           }
-          
-          if (streamItem.type === 'user_message') {
-            return (
-              !!dbItem.messageId &&
-              !!streamItem.messageId &&
-              dbItem.messageId === streamItem.messageId
-            );
-          }
-          
-          // Match by mcp_event_id for tool_call/summarization
-          return dbItem.mcp_event_id === streamItem.mcp_event_id;
-        });
+          // Show streaming item (DB doesn't have it yet)
+          return true;
+        }
         
-        return !hasMatchingDbItem;
+        if (streamItem.type === 'tool_call' || streamItem.type === STREAMING_CONTENT_TYPES.SUMMARIZATION) {
+          // Match by mcp_event_id
+          if (streamItem.mcp_event_id && dbMcpEventIds.has(streamItem.mcp_event_id)) {
+            return false;
+          }
+          return true;
+        }
+        
+        if (streamItem.type === 'user_message') {
+          // Match by messageId
+          if (streamItem.messageId && dbMessageIds.has(streamItem.messageId)) {
+            return false;
+          }
+          return true;
+        }
+        
+        // Unknown type - show it
+        return true;
       })
       .sort(([_keyA, itemA], [_keyB, itemB]) => {
-        const priorityA = itemA.type === 'thought' ? 0 : 1;
-        const priorityB = itemB.type === 'thought' ? 0 : 1;
-        return priorityA - priorityB;
+        // Sort by type priority: thoughts/native_thinking first, then others
+        const getPriority = (type: string) => {
+          if (type === STREAMING_CONTENT_TYPES.THOUGHT || type === STREAMING_CONTENT_TYPES.NATIVE_THINKING) return 0;
+          return 1;
+        };
+        return getPriority(itemA.type) - getPriority(itemB.type);
       });
   }, [streamingItems, chatFlow]);
 
@@ -488,20 +526,25 @@ function ConversationTimeline({
           
           return updated;
         });
-      } else if (event.type === 'llm.stream.chunk') {
-        console.log('🌊 Received streaming chunk:', event.stream_type, event.is_complete, event.mcp_event_id);
+      } else if (event.type === LLM_EVENTS.STREAM_CHUNK) {
+        console.log('🌊 Received streaming chunk:', event.stream_type, event.is_complete, 
+          event.llm_interaction_id ? `llm_id=${event.llm_interaction_id}` : '',
+          event.mcp_event_id ? `mcp_id=${event.mcp_event_id}` : '');
         
         setStreamingItems(prev => {
           const updated = new Map(prev);
-          // Use composite key based on stream type
-          // For summarization, use mcp_event_id to link to specific tool call
-          const key = event.stream_type === 'summarization' && event.mcp_event_id
-            ? `${event.mcp_event_id}-summarization`
-            : `${event.stage_execution_id || 'default'}-${event.stream_type}`;
+          
+          // Use unique keys based on stream type:
+          // - For summarization: use mcp_event_id (links to specific tool call)
+          // - For thought/final_answer/native_thinking: use llm_interaction_id (unique per LLM call)
+          const key = event.stream_type === STREAMING_CONTENT_TYPES.SUMMARIZATION
+            ? `${event.mcp_event_id}-${STREAMING_CONTENT_TYPES.SUMMARIZATION}`
+            : `${event.llm_interaction_id}-${event.stream_type}`;
+          
+          const streamType = parseStreamingContentType(event.stream_type);
           
           if (event.is_complete) {
             // Stream completed - mark as waiting for DB update
-            // Don't set timeout - let content-based deduplication handle it
             const existing = prev.get(key);
             if (existing) {
               updated.set(key, {
@@ -509,25 +552,26 @@ function ConversationTimeline({
                 content: event.chunk, // Final content update
                 waitingForDb: true // Mark as waiting for DB confirmation
               });
-              console.log('✅ Stream completed, waiting for DB update to deduplicate');
             } else {
               // Seed a new entry for completion event with no prior partial entry
               updated.set(key, {
-                type: event.stream_type as 'thought' | 'final_answer' | 'summarization',
+                type: streamType,
                 content: event.chunk,
                 stage_execution_id: event.stage_execution_id,
                 mcp_event_id: event.mcp_event_id,
+                llm_interaction_id: event.llm_interaction_id,
                 waitingForDb: true
               });
-              console.log('✅ Stream completed (no prior chunks), waiting for DB update to deduplicate');
             }
+            console.log('✅ Stream completed, waiting for DB update to deduplicate');
           } else {
             // Still streaming - update content
             updated.set(key, {
-              type: event.stream_type as 'thought' | 'final_answer' | 'summarization',
+              type: streamType,
               content: event.chunk,
               stage_execution_id: event.stage_execution_id,
               mcp_event_id: event.mcp_event_id,
+              llm_interaction_id: event.llm_interaction_id,
               waitingForDb: false
             });
           }
@@ -545,7 +589,8 @@ function ConversationTimeline({
     return () => unsubscribe();
   }, [session.session_id, session.status, activeChatStageInProgress]);
 
-  // Clear streaming items when their content appears in DB data (smart deduplication with claimed-item tracking)
+  // Clear streaming items when their content appears in DB data
+  // Uses simple ID-based matching
   // ONLY runs when chatFlow changes (DB update), NOT when streaming chunks arrive
   useEffect(() => {
     setStreamingItems(prev => {
@@ -554,79 +599,66 @@ function ConversationTimeline({
         return prev;
       }
       
-      const updated = new Map(prev);
-      const newlyClaimed = new Set(claimedChatFlowItems);
-      let itemsCleared = 0;
+      // Build sets of IDs from DB items for O(1) lookup
+      const dbInteractionIds = new Set<string>();
+      const dbMcpEventIds = new Set<string>();
+      const dbMessageIds = new Set<string>();
       
-      // For each streaming item (in insertion order = chronological), find its matching unclaimed DB item
-      for (const [key, streamingItem] of prev.entries()) {
-        // Search from OLDEST to NEWEST (last 20 items for performance)
-        // This ensures chronological matching: 1st stream → 1st unclaimed DB item
-        const searchStart = Math.max(0, chatFlow.length - 20);
-        const searchEnd = chatFlow.length;
-        
-        for (let i = searchStart; i < searchEnd; i++) {
-          const dbItem = chatFlow[i];
-          
-          // Create unique key for this DB item based on its primary identifier
-          const itemKey = dbItem.mcp_event_id 
-            ? `${dbItem.timestamp_us}-${dbItem.type}-event-${dbItem.mcp_event_id}`
-            : `${dbItem.timestamp_us}-${dbItem.type}-content-${dbItem.content?.substring(0, 50)}`;
-          
-          // Separate matching logic by type for clarity
-          let shouldMatch = false;
-          
-          if (newlyClaimed.has(itemKey)) {
-            // Skip already claimed items
-            shouldMatch = false;
-          } else if (streamingItem.type === 'tool_call') {
-            // Tool calls match by type and mcp_event_id only
-            shouldMatch = dbItem.type === 'tool_call' && 
-                         dbItem.mcp_event_id === streamingItem.mcp_event_id;
-          } else if (streamingItem.type === 'summarization') {
-            // Summarizations match by type and mcp_event_id
-            shouldMatch = dbItem.type === 'summarization' && 
-                         dbItem.mcp_event_id === streamingItem.mcp_event_id;
-          } else if (streamingItem.type === 'user_message') {
-            // User messages match by type and message_id
-            shouldMatch = dbItem.type === 'user_message' && 
-                         dbItem.messageId === streamingItem.messageId;
-          } else {
-            // Thoughts and final_answer match by type and content
-            shouldMatch = dbItem.type === streamingItem.type && 
-                         dbItem.content?.trim() === streamingItem.content?.trim();
-          }
-          
-          if (shouldMatch) {
-            // Found unclaimed match!
-            updated.delete(key); // Clear streaming item
-            newlyClaimed.add(itemKey); // Mark DB item as claimed
-            itemsCleared++;
-            console.log(`🎯 Matched streaming item to unclaimed DB item (ts: ${dbItem.timestamp_us}, type: ${dbItem.type})`);
-            break; // Stop searching for this streaming item
-          }
+      for (const item of chatFlow) {
+        if (item.llm_interaction_id) {
+          dbInteractionIds.add(item.llm_interaction_id);
+        }
+        if (item.mcp_event_id) {
+          dbMcpEventIds.add(item.mcp_event_id);
+        }
+        if (item.messageId) {
+          dbMessageIds.add(item.messageId);
         }
       }
       
-      // Update claimed items tracking if we claimed new items
-      if (newlyClaimed.size > claimedChatFlowItems.size) {
-        setClaimedChatFlowItems(newlyClaimed);
+      const updated = new Map(prev);
+      let itemsCleared = 0;
+      
+      // For each streaming item, check if DB has its ID
+      for (const [key, streamingItem] of prev.entries()) {
+        let shouldRemove = false;
+        
+        if (
+          streamingItem.type === STREAMING_CONTENT_TYPES.THOUGHT ||
+          streamingItem.type === STREAMING_CONTENT_TYPES.FINAL_ANSWER ||
+          streamingItem.type === STREAMING_CONTENT_TYPES.NATIVE_THINKING
+        ) {
+          // Match by llm_interaction_id
+          if (streamingItem.llm_interaction_id && dbInteractionIds.has(streamingItem.llm_interaction_id)) {
+            shouldRemove = true;
+          }
+        } else if (streamingItem.type === 'tool_call' || streamingItem.type === STREAMING_CONTENT_TYPES.SUMMARIZATION) {
+          // Match by mcp_event_id
+          if (streamingItem.mcp_event_id && dbMcpEventIds.has(streamingItem.mcp_event_id)) {
+            shouldRemove = true;
+          }
+        } else if (streamingItem.type === 'user_message') {
+          // Match by messageId
+          if (streamingItem.messageId && dbMessageIds.has(streamingItem.messageId)) {
+            shouldRemove = true;
+          }
+        }
+        
+        if (shouldRemove) {
+          updated.delete(key);
+          itemsCleared++;
+          console.log(`🎯 Cleared streaming item via ID match: ${streamingItem.type}, id=${streamingItem.llm_interaction_id || streamingItem.mcp_event_id || streamingItem.messageId}`);
+        }
       }
       
       if (itemsCleared > 0) {
-        console.log(`🧹 Cleared ${itemsCleared} streaming items via claimed-item matching`);
-        return updated; // Return new Map only if we made changes
+        console.log(`🧹 Cleared ${itemsCleared} streaming items via ID-based matching`);
+        return updated;
       }
       
       return prev; // Return same reference to avoid unnecessary re-renders
     });
-  }, [chatFlow, claimedChatFlowItems]); // Depend on both chatFlow and claimed items
-
-  // Clear claimed items tracking when session changes (cleanup)
-  useEffect(() => {
-    console.log('🔄 Session changed, resetting claimed items tracking');
-    setClaimedChatFlowItems(new Set());
-  }, [session.session_id]);
+  }, [chatFlow]); // Only depend on chatFlow
 
   // Track chat stage progress for processing indicator (any chat, not just ours)
   useEffect(() => {

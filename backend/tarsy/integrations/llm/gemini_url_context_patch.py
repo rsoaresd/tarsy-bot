@@ -1,9 +1,5 @@
 """
-Monkeypatch for URL_CONTEXT support in langchain-google-genai.
-
-This module patches LangChain's Google Gemini integration to support the URL_CONTEXT
-tool (GoogleNativeTool.URL_CONTEXT), which is not yet natively supported in 
-langchain-google-genai v2.1.5.
+Monkeypatch for URL_CONTEXT tool support in langchain-google-genai.
 
 PROBLEM:
 --------
@@ -12,20 +8,24 @@ as a native Google tool, causing "Invalid function name" errors when trying to u
 
 SOLUTION:
 ---------
-This patch intercepts the tool conversion process and manually attaches url_context
-to the underlying Google API Tool object, bypassing LangChain's validation.
+This patch intercepts the tool conversion process to manually attach url_context
+to the Google API Tool object.
 
 SCOPE:
 ------
-- Only affects: Gemini models with GoogleNativeTool.URL_CONTEXT enabled
-- Does NOT affect: Other LLM providers, other Gemini tools, function calling
+- Only affects: Gemini models using LangChain (ReAct controllers)
+- Does NOT affect: Native thinking controller (uses Google SDK directly)
 - Safe: Gracefully handles errors, won't break initialization
+
+NOTE: MCP function calling is handled by the native Google SDK in
+      generate_response_with_native_thinking(), NOT through this LangChain patch.
 
 TODO: Remove this patch when langchain-google-genai adds native url_context support
       (Track: https://github.com/langchain-ai/langchain-google/issues)
 """
 
 import logging
+from typing import Any, List
 from tarsy.models.llm_models import GoogleNativeTool
 
 logger = logging.getLogger(__name__)
@@ -33,9 +33,10 @@ logger = logging.getLogger(__name__)
 
 def apply_url_context_patch() -> bool:
     """
-    Apply monkeypatch to enable URL_CONTEXT tool support in LangChain.
+    Apply monkeypatch to enable URL_CONTEXT in LangChain's Gemini integration.
     
-    Enables GoogleNativeTool.URL_CONTEXT for Google/Gemini models.
+    This patch is only needed for the LangChain path (ReAct controllers)
+    which binds native Google tools (google_search, url_context, code_execution).
     
     Returns:
         bool: True if patch was applied successfully, False otherwise
@@ -47,11 +48,7 @@ def apply_url_context_patch() -> bool:
         _original_convert = _function_utils.convert_to_genai_function_declarations
         
         def _patched_convert_to_genai_function_declarations(tools):
-            """Patched version that handles url_context in tool dictionaries.
-            
-            LangChain's current version doesn't recognize GoogleNativeTool.URL_CONTEXT as a native
-            Google tool. This patch intercepts the conversion process and manually
-            attaches url_context to the Google API Tool object.
+            """Patched version that handles url_context native tool.
             
             Args:
                 tools: Tools to convert (can be list, tuple, or single tool)
@@ -59,8 +56,6 @@ def apply_url_context_patch() -> bool:
             Returns:
                 gapic.Tool object with url_context properly attached
             """
-            # Separate url_context tools from others
-            # Note: Using string literal here as LangChain's API expects it
             URL_CONTEXT_KEY = GoogleNativeTool.URL_CONTEXT.value
             standard_tools = []
             url_context_config = None
@@ -69,7 +64,7 @@ def apply_url_context_patch() -> bool:
             if not isinstance(tools, (list, tuple)):
                 tools_seq = [tools]
             else:
-                tools_seq = tools
+                tools_seq = list(tools)
                 
             for tool in tools_seq:
                 is_url_context = False
@@ -92,7 +87,6 @@ def apply_url_context_patch() -> bool:
                 try:
                     gapic_tool.url_context = url_context_config
                 except AttributeError:
-                    # Graceful fallback if API structure changes
                     logger.warning(
                         "Failed to attach url_context to Google API Tool object. "
                         "The Google API structure may have changed."
@@ -100,7 +94,7 @@ def apply_url_context_patch() -> bool:
                     
             return gapic_tool
 
-        # Apply the patch to both modules (chat_models imports from _function_utils)
+        # Apply the patch to both modules
         _function_utils.convert_to_genai_function_declarations = _patched_convert_to_genai_function_declarations
         chat_models.convert_to_genai_function_declarations = _patched_convert_to_genai_function_declarations
         
@@ -108,12 +102,10 @@ def apply_url_context_patch() -> bool:
         return True
         
     except ImportError:
-        # LangChain Google GenAI package not installed - this is fine
         logger.debug("langchain-google-genai not installed, skipping url_context patch")
         return False
         
     except Exception as e:
-        # Don't fail initialization if patch fails
         logger.warning(f"Failed to apply url_context patch: {e}")
         return False
 
