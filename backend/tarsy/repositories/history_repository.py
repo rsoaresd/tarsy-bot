@@ -6,18 +6,26 @@ supporting comprehensive audit trails, chronological timeline reconstruction,
 and advanced querying capabilities using Unix timestamps for optimal performance.
 """
 
-from typing import Dict, List, Optional, Union
 from collections import defaultdict
+from typing import Dict, List, Optional, Union
 
-from sqlmodel import Session, asc, desc, func, select, and_, or_, case
 from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, and_, asc, case, desc, func, or_, select
 
 from tarsy.models.constants import AlertSessionStatus, StageStatus
-from tarsy.models.db_models import AlertSession, StageExecution, Chat, ChatUserMessage
+from tarsy.models.db_models import AlertSession, Chat, ChatUserMessage, StageExecution
 from tarsy.models.history_models import (
-    PaginatedSessions, DetailedSession, FilterOptions, TimeRangeOption, PaginationInfo,
-    SessionOverview, DetailedStage, LLMTimelineEvent, MCPTimelineEvent, MCPEventDetails,
-    ChatUserMessageData
+    ChatUserMessageData,
+    DetailedSession,
+    DetailedStage,
+    FilterOptions,
+    LLMTimelineEvent,
+    MCPEventDetails,
+    MCPTimelineEvent,
+    PaginatedSessions,
+    PaginationInfo,
+    SessionOverview,
+    TimeRangeOption,
 )
 from tarsy.models.unified_interactions import LLMInteraction, MCPInteraction
 from tarsy.repositories.base_repository import BaseRepository
@@ -350,12 +358,27 @@ class HistoryRepository:
             raise
     
     def get_stage_executions_for_session(self, session_id: str) -> List['StageExecution']:
-        """Get all stage executions for a session, ordered by stage_index."""
+        """Get all stage executions for a session in proper display order.
+        
+        Ordering:
+        1. Regular stages (chat_id IS NULL) first, sorted by stage_index
+        2. Chat stages (chat_id IS NOT NULL) last, sorted by started_at_us
+        
+        This ensures chat follow-up stages appear after all regular chain stages,
+        even though chat stages have stage_index=0.
+        """
         try:
             stmt = (
                 select(StageExecution)
                 .where(StageExecution.session_id == session_id)
-                .order_by(StageExecution.stage_index)
+                .order_by(
+                    # Chat stages (has chat_id) sort to the end
+                    case((StageExecution.chat_id.isnot(None), 1), else_=0),
+                    # Then by stage_index (for regular stages)
+                    asc(StageExecution.stage_index),
+                    # Then by timestamp (for chat stages with same stage_index)
+                    asc(StageExecution.started_at_us)
+                )
             )
             stage_executions = self.session.exec(stmt).all()
             return list(stage_executions)

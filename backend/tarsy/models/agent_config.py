@@ -11,10 +11,11 @@ This module contains all configuration models
 
 import re
 from typing import Dict, List, Optional
-from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 from .constants import IterationStrategy
 from .mcp_transport_config import TransportConfig
-
 
 # =============================================================================
 # MASKING CONFIGURATION MODELS (moved from masking_config.py)
@@ -261,6 +262,10 @@ class ChainStageConfigModel(BaseModel):
         None,
         description="Optional iteration strategy override (uses agent's default if not specified)"
     )
+    llm_provider: Optional[str] = Field(
+        None,
+        description="Optional LLM provider override for this stage (uses chain's provider if not specified)"
+    )
 
 
 class ChainConfigModel(BaseModel):
@@ -293,6 +298,10 @@ class ChainConfigModel(BaseModel):
     chat_enabled: bool = Field(
         default=True,
         description="Enable follow-up chat for sessions using this chain"
+    )
+    llm_provider: Optional[str] = Field(
+        None,
+        description="Optional LLM provider for all stages in this chain (uses global default if not specified)"
     )
 
 

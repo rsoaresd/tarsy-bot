@@ -304,7 +304,12 @@ class SessionFactory:
             MCPEventDetails,
             MCPTimelineEvent,
         )
-        from tarsy.models.unified_interactions import LLMInteraction, LLMConversation, LLMMessage, MessageRole
+        from tarsy.models.unified_interactions import (
+            LLMConversation,
+            LLMInteraction,
+            LLMMessage,
+            MessageRole,
+        )
         from tarsy.utils.timestamp import now_us
         
         current_time_us = now_us()
@@ -629,6 +634,35 @@ class ChainFactory:
                 }
             ],
             "description": "Invalid chain for testing"
+        }
+        base_data.update(overrides)
+        return base_data
+    
+    @staticmethod
+    def create_multi_model_chain(**overrides):
+        """Create a chain with different LLM providers per stage.
+        
+        Use this for testing per-stage LLM provider configuration.
+        """
+        base_data = {
+            "chain_id": "multi-model-chain",
+            "alert_types": ["multi-model"],
+            "stages": [
+                {
+                    "name": "data-collection",
+                    "agent": "KubernetesAgent",
+                    "iteration_strategy": "react",
+                    "llm_provider": "gemini-flash"
+                },
+                {
+                    "name": "analysis",
+                    "agent": "KubernetesAgent",
+                    "iteration_strategy": "native-thinking",
+                    "llm_provider": "gemini-pro"
+                }
+            ],
+            "description": "Multi-model chain with per-stage providers",
+            "llm_provider": "default-provider"
         }
         base_data.update(overrides)
         return base_data
@@ -1248,12 +1282,12 @@ class AgentServiceFactory:
         """Create mock dependencies for AgentFactory."""
         from unittest.mock import Mock
 
-        from tarsy.integrations.llm.client import LLMClient
+        from tarsy.integrations.llm.manager import LLMManager
         from tarsy.integrations.mcp.client import MCPClient
         from tarsy.services.mcp_server_registry import MCPServerRegistry
         
         return {
-            'llm_client': Mock(spec=LLMClient),
+            'llm_manager': Mock(spec=LLMManager),
             'mcp_client': Mock(spec=MCPClient),
             'mcp_registry': Mock(spec=MCPServerRegistry)
         }
@@ -1283,7 +1317,7 @@ class AgentServiceFactory:
         
         mock_agent = Mock()
         mock_agent.agent_type = "KubernetesAgent"
-        mock_agent.llm_client = Mock()
+        mock_agent.llm_manager = Mock()
         mock_agent.mcp_client = Mock()
         mock_agent.mcp_registry = Mock()
         return mock_agent

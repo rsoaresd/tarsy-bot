@@ -9,14 +9,14 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional
 
-from ...models.unified_interactions import MessageRole, LLMConversation
 from ...config.settings import get_settings
+from ...models.unified_interactions import LLMConversation, MessageRole
 from ..parsers.react_parser import ReActParser
 
 if TYPE_CHECKING:
-    from ...models.processing_context import StageContext
-    from ...integrations.llm.client import LLMClient
     from ...agents.prompts import PromptBuilder
+    from ...integrations.llm.manager import LLMManager
+    from ...models.processing_context import StageContext
 
 class IterationController(ABC):
     """
@@ -25,6 +25,27 @@ class IterationController(ABC):
     This allows clean separation between ReAct and regular processing flows
     without conditional logic scattered throughout the BaseAgent.
     """
+    
+    # LLM provider override (set by agent for per-stage/per-chain providers)
+    _llm_provider_name: Optional[str] = None
+    
+    def set_llm_provider(self, provider_name: Optional[str]):
+        """
+        Set the LLM provider override for this controller.
+        
+        Args:
+            provider_name: Name of the LLM provider to use, or None for global default
+        """
+        self._llm_provider_name = provider_name
+    
+    def get_llm_provider(self) -> Optional[str]:
+        """
+        Get the LLM provider override for this controller.
+        
+        Returns:
+            Provider name if set, or None for global default
+        """
+        return self._llm_provider_name
     
     def _get_native_tools_override(self, context: 'StageContext'):
         """
@@ -243,10 +264,11 @@ class ReactController(IterationController):
     Specific controllers only need to override build_initial_conversation().
     """
     
-    def __init__(self, llm_client: 'LLMClient', prompt_builder: 'PromptBuilder'):
-        """Initialize with LLM client and prompt builder."""
-        self.llm_client = llm_client
+    def __init__(self, llm_manager: 'LLMManager', prompt_builder: 'PromptBuilder'):
+        """Initialize with LLM manager and prompt builder."""
+        self.llm_manager = llm_manager
         self.prompt_builder = prompt_builder
+        self._llm_provider_name: Optional[str] = None
         # Import here to avoid circular imports during class definition
         from tarsy.utils.logger import get_module_logger
         self.logger = get_module_logger(__name__)
@@ -295,10 +317,11 @@ class ReactController(IterationController):
                     # Extract native tools override from context (if specified)
                     native_tools_override = self._get_native_tools_override(context)
                     
-                    conversation_result = await self.llm_client.generate_response(
+                    conversation_result = await self.llm_manager.generate_response(
                         conversation=conversation,
                         session_id=context.session_id,
                         stage_execution_id=context.agent.get_current_stage_execution_id(),
+                        provider=self._llm_provider_name,
                         native_tools_override=native_tools_override
                     )
                     

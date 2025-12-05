@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Dict, List, Optional, assert_never
 
 from tarsy.config.settings import get_settings
-from tarsy.integrations.llm.client import LLMClient
+from tarsy.integrations.llm.manager import LLMManager
 from tarsy.integrations.mcp.client import MCPClient
 from tarsy.models.agent_execution_result import AgentExecutionResult
 from tarsy.models.constants import StageStatus
@@ -69,7 +69,7 @@ class BaseAgent(ABC):
     
     def __init__(
         self,
-        llm_client: LLMClient,
+        llm_manager: LLMManager,
         mcp_client: MCPClient,
         mcp_registry: MCPServerRegistry,
         iteration_strategy: IterationStrategy = IterationStrategy.REACT
@@ -78,12 +78,12 @@ class BaseAgent(ABC):
         Initialize the base agent with required dependencies.
         
         Args:
-            llm_client: Client for LLM interactions
+            llm_manager: LLM manager for accessing LLM clients (both LangChain and native thinking)
             mcp_client: Client for MCP server interactions
             mcp_registry: Registry of MCP server configurations (REQUIRED)
             iteration_strategy: Which iteration strategy to use (configured per agent)
         """
-        self.llm_client = llm_client
+        self.llm_manager = llm_manager
         self.mcp_client = mcp_client
         self.mcp_registry = mcp_registry
         self._max_iterations = get_settings().max_llm_mcp_iterations
@@ -95,6 +95,10 @@ class BaseAgent(ABC):
         
         # Chat tracking for interaction recording
         self._current_chat_id: Optional[str] = None
+        
+        # LLM provider override for this agent instance (per-stage or per-chain)
+        # When None, uses the global default provider from settings
+        self._llm_provider_name: Optional[str] = None
         
         # Create appropriate iteration controller based on configuration
         self._iteration_controller: IterationController = self._create_iteration_controller(iteration_strategy)
@@ -112,19 +116,19 @@ class BaseAgent(ABC):
             Appropriate IterationController instance
         """
         if strategy == IterationStrategy.REACT:
-            return SimpleReActController(self.llm_client, self._prompt_builder)
+            return SimpleReActController(self.llm_manager, self._prompt_builder)
         elif strategy == IterationStrategy.REACT_STAGE:
-            return ReactStageController(self.llm_client, self._prompt_builder)
+            return ReactStageController(self.llm_manager, self._prompt_builder)
         elif strategy == IterationStrategy.REACT_FINAL_ANALYSIS:
             from .iteration_controllers.react_final_analysis_controller import (
                 ReactFinalAnalysisController,
             )
-            return ReactFinalAnalysisController(self.llm_client, self._prompt_builder)
+            return ReactFinalAnalysisController(self.llm_manager, self._prompt_builder)
         elif strategy == IterationStrategy.NATIVE_THINKING:
             from .iteration_controllers.native_thinking_controller import (
                 NativeThinkingController,
             )
-            return NativeThinkingController(self.llm_client, self._prompt_builder)
+            return NativeThinkingController(self.llm_manager, self._prompt_builder)
         else:
             assert_never(strategy)
     
@@ -320,6 +324,31 @@ class BaseAgent(ABC):
         """Get the current chat ID."""
         return self._current_chat_id
     
+    def set_llm_provider(self, provider_name: Optional[str]):
+        """
+        Set the LLM provider override for this agent instance.
+        
+        When set, this provider will be used for all LLM calls instead of the global default.
+        Used by AgentFactory to configure per-stage or per-chain providers.
+        
+        Args:
+            provider_name: Name of the LLM provider to use, or None to use global default
+        """
+        self._llm_provider_name = provider_name
+        # Update the iteration controller with the provider
+        self._iteration_controller.set_llm_provider(provider_name)
+        if provider_name:
+            logger.info(f"Agent {self.__class__.__name__} configured with LLM provider: {provider_name}")
+    
+    def get_llm_provider(self) -> Optional[str]:
+        """
+        Get the LLM provider override for this agent instance.
+        
+        Returns:
+            Provider name if set, or None if using global default
+        """
+        return self._llm_provider_name
+    
     async def _configure_mcp_client(self):
         """Configure MCP client with agent-specific server subset and summarizer."""
         mcp_server_ids = self.mcp_servers()
@@ -345,10 +374,10 @@ class BaseAgent(ABC):
             logger.error(f"Missing MCP server configurations: {config_error.to_dict()}")
             raise config_error
         
-        # Create and inject summarizer if LLM client is available
-        if hasattr(self, 'llm_client') and self.llm_client:
+        # Create and inject summarizer if LLM manager is available
+        if hasattr(self, 'llm_manager') and self.llm_manager:
             from tarsy.integrations.mcp.summarizer import MCPResultSummarizer
-            summarizer = MCPResultSummarizer(self.llm_client, self._prompt_builder)
+            summarizer = MCPResultSummarizer(self.llm_manager, self._prompt_builder)
             # Update MCP client with summarizer
             self.mcp_client.summarizer = summarizer
         

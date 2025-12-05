@@ -8,31 +8,30 @@ Uses Unix timestamps (microseconds since epoch) throughout for optimal
 performance and consistency with the rest of the system.
 """
 
-from typing import Dict, Any, Optional
 import asyncio
+from typing import Any, Dict, Optional
 
 import httpx
 
-from tarsy.models.processing_context import ChainContext
+from tarsy.agents.exceptions import SessionPaused
+from tarsy.config.agent_config import ConfigurationError, ConfigurationLoader
 from tarsy.config.settings import Settings
-from tarsy.config.agent_config import ConfigurationLoader, ConfigurationError
-from tarsy.integrations.llm.client import LLMManager
+from tarsy.integrations.llm.manager import LLMManager
 from tarsy.integrations.mcp.client import MCPClient
+from tarsy.integrations.notifications.summarizer import ExecutiveSummaryAgent
 from tarsy.models.agent_config import ChainConfigModel
-
 from tarsy.models.agent_execution_result import AgentExecutionResult
-from tarsy.models.constants import AlertSessionStatus, StageStatus, ChainStatus
 from tarsy.models.api_models import ChainExecutionResult
-from tarsy.utils.timestamp import now_us
+from tarsy.models.constants import AlertSessionStatus, ChainStatus, StageStatus
+from tarsy.models.pause_metadata import PauseMetadata, PauseReason
+from tarsy.models.processing_context import ChainContext
 from tarsy.services.agent_factory import AgentFactory
 from tarsy.services.chain_registry import ChainRegistry
 from tarsy.services.history_service import get_history_service
 from tarsy.services.mcp_server_registry import MCPServerRegistry
 from tarsy.services.runbook_service import RunbookService
 from tarsy.utils.logger import get_module_logger
-from tarsy.agents.exceptions import SessionPaused
-from tarsy.models.pause_metadata import PauseMetadata, PauseReason
-from tarsy.integrations.notifications.summarizer import ExecutiveSummaryAgent
+from tarsy.utils.timestamp import now_us
 
 logger = get_module_logger(__name__)
 
@@ -119,6 +118,7 @@ class AlertService:
             ConfigurationError: If configuration file exists but is invalid
         """
         import os
+
         from tarsy.models.agent_config import CombinedConfigModel
         
         config_path = self.settings.agent_config_path
@@ -228,14 +228,14 @@ class AlertService:
 
             # Initialize agent factory with dependencies (no MCP client - provided per agent)
             self.agent_factory = AgentFactory(
-                llm_client=self.llm_manager,
+                llm_manager=self.llm_manager,
                 mcp_registry=self.mcp_server_registry,
                 agent_configs=self.parsed_config.agents,
             )
 
             # Initialize final result summarizer with LLM manager
             self.final_analysis_summarizer = ExecutiveSummaryAgent(
-                llm_client=self.llm_manager,
+                llm_manager=self.llm_manager,
             )
 
             logger.info("AlertService initialized successfully")
@@ -376,9 +376,11 @@ class AlertService:
                 )
                 
                 # Generate executive summary for dashboard display and external notifications
+                # Use chain-level provider for executive summary (or global if not set)
                 final_result_summary = await self.final_analysis_summarizer.generate_executive_summary(
                     content=analysis,
-                    session_id=chain_context.session_id
+                    session_id=chain_context.session_id,
+                    provider=chain_definition.llm_provider
                 )
 
                 # Mark history session as completed successfully
@@ -390,7 +392,9 @@ class AlertService:
                 )
                 
                 # Publish session.completed event
-                from tarsy.services.events.event_helpers import publish_session_completed
+                from tarsy.services.events.event_helpers import (
+                    publish_session_completed,
+                )
                 await publish_session_completed(chain_context.session_id)
                 return final_result
             elif chain_result.status == ChainStatus.PAUSED:
@@ -575,9 +579,11 @@ class AlertService:
                 )
                 
                 # Generate executive summary for resumed sessions too
+                # Use chain-level provider for executive summary (or global if not set)
                 final_result_summary = await self.final_analysis_summarizer.generate_executive_summary(
                     content=analysis,
-                    session_id=session_id
+                    session_id=session_id,
+                    provider=chain_definition.llm_provider
                 )
                 
                 self._update_session_status(
@@ -586,7 +592,9 @@ class AlertService:
                     final_analysis=final_result,
                     final_analysis_summary=final_result_summary,
                 )
-                from tarsy.services.events.event_helpers import publish_session_completed
+                from tarsy.services.events.event_helpers import (
+                    publish_session_completed,
+                )
                 await publish_session_completed(session_id)
                 return final_result
             elif result.status == ChainStatus.PAUSED:
@@ -701,12 +709,19 @@ class AlertService:
                     # Mark stage as started
                     await self._update_stage_execution_started(stage_execution_id)
                     
-                    # Get agent instance with stage-specific strategy (always creates unique instance)
+                    # Resolve effective LLM provider for this stage
+                    # Precedence: stage.llm_provider > chain.llm_provider > global (None)
+                    effective_provider = stage.llm_provider or chain_definition.llm_provider
+                    if effective_provider:
+                        logger.debug(f"Stage '{stage.name}' using LLM provider: {effective_provider}")
+                    
+                    # Get agent instance with stage-specific strategy and provider
                     # Pass session-scoped MCP client for isolation
                     agent = self.agent_factory.get_agent(
                         agent_identifier=stage.agent,
                         mcp_client=session_mcp_client,
-                        iteration_strategy=stage.iteration_strategy
+                        iteration_strategy=stage.iteration_strategy,
+                        llm_provider=effective_provider
                     )
                     
                     # Set current stage execution ID for interaction tagging
@@ -781,7 +796,9 @@ class AlertService:
                         )
                         
                         # Publish pause event with metadata
-                        from tarsy.services.events.event_helpers import publish_session_paused
+                        from tarsy.services.events.event_helpers import (
+                            publish_session_paused,
+                        )
                         await publish_session_paused(chain_context.session_id, pause_metadata=pause_meta_dict)
                         
                         # Return paused result (not failed)
