@@ -27,12 +27,10 @@ from tarsy.config.builtin_config import BUILTIN_MCP_SERVERS
 from tarsy.integrations.mcp.client import MCPClient
 
 from .conftest import MockGeminiClient, create_native_thinking_response
-from .e2e_utils import E2ETestUtils
+from .e2e_utils import E2ETestUtils, assert_conversation_messages
 from .expected_native_thinking_conversations import (
     EXPECTED_NATIVE_THINKING_ANALYSIS_CONVERSATION,
     EXPECTED_NATIVE_THINKING_CHAT_INTERACTIONS,
-    EXPECTED_NATIVE_THINKING_CHAT_MESSAGE_1_CONVERSATION,
-    EXPECTED_NATIVE_THINKING_CHAT_MESSAGE_2_CONVERSATION,
     EXPECTED_NATIVE_THINKING_DATA_COLLECTION_CONVERSATION,
     EXPECTED_NATIVE_THINKING_EXECUTIVE_SUMMARY_CONVERSATION,
     EXPECTED_NATIVE_THINKING_SESSION_LEVEL_INTERACTIONS,
@@ -42,50 +40,6 @@ from .expected_native_thinking_conversations import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def assert_conversation_messages(
-    expected_conversation: dict, actual_messages: list, n: int
-):
-    """
-    Get the first N messages from expected_conversation['messages'] and compare with actual_messages.
-
-    Args:
-        expected_conversation: Dictionary with 'messages' key containing expected message list
-        actual_messages: List of actual messages from the LLM interaction
-        n: Number of messages to compare (a count)
-    """
-    expected_messages = expected_conversation.get("messages", [])
-    assert (
-        len(actual_messages) == n
-    ), f"Actual messages count mismatch: expected {n}, got {len(actual_messages)}"
-
-    # Extract first N messages
-    first_n_expected = expected_messages[:n]
-
-    # Compare each message
-    for i in range(len(first_n_expected)):
-        assert (
-            i < len(actual_messages)
-        ), f"Missing actual message: Expected {len(first_n_expected)} messages, got {len(actual_messages)}"
-
-        expected_msg = first_n_expected[i]
-        actual_msg = actual_messages[i]
-
-        # Compare role
-        expected_role = expected_msg.get("role", "")
-        actual_role = actual_msg.get("role", "")
-        assert (
-            expected_role == actual_role
-        ), f"Role mismatch: expected {expected_role}, got {actual_role}"
-
-        # Normalize content for comparison
-        expected_content = E2ETestUtils.normalize_content(expected_msg.get("content", ""))
-        actual_content = E2ETestUtils.normalize_content(actual_msg.get("content", ""))
-        
-        assert (
-            expected_content == actual_content
-        ), f"Content mismatch in message {i}: expected length {len(expected_content)}, got {len(actual_content)}"
 
 
 @pytest.mark.asyncio
@@ -455,20 +409,12 @@ class TestNativeThinkingE2E:
 
             # Mock LangChain streaming (used by summarizer)
             langchain_streaming_mock = create_langchain_streaming_mock()
-            
-            # Import LangChain clients to patch
-            from langchain_anthropic import ChatAnthropic
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            from langchain_openai import ChatOpenAI
-            from langchain_xai import ChatXAI
 
-            # Mock Gemini SDK - patch the genai.Client constructor
-            with patch("google.genai.Client", create_gemini_mock_client), \
-                 patch.object(ChatOpenAI, 'astream', langchain_streaming_mock), \
-                 patch.object(ChatAnthropic, 'astream', langchain_streaming_mock), \
-                 patch.object(ChatXAI, 'astream', langchain_streaming_mock), \
-                 patch.object(ChatGoogleGenerativeAI, 'astream', langchain_streaming_mock):
-                
+            # Patch both Gemini SDK and LangChain clients using shared utility
+            with E2ETestUtils.create_llm_patch_context(
+                gemini_mock_factory=create_gemini_mock_client,
+                streaming_mock=langchain_streaming_mock
+            ):
                 # Mock MCP client
                 mock_sessions = {
                     "kubernetes-server": mock_kubernetes_session,
@@ -909,7 +855,7 @@ class TestNativeThinkingE2E:
         await self._verify_chat_response(
             chat_stage=message_1_stage,
             message_key='message_1',
-            expected_conversation=EXPECTED_NATIVE_THINKING_CHAT_MESSAGE_1_CONVERSATION
+            expected_conversation=EXPECTED_NATIVE_THINKING_CHAT_INTERACTIONS['message_1']
         )
         verified_chat_stage_ids.add(message_1_stage.get("stage_id"))
 
@@ -926,7 +872,7 @@ class TestNativeThinkingE2E:
         await self._verify_chat_response(
             chat_stage=message_2_stage,
             message_key='message_2',
-            expected_conversation=EXPECTED_NATIVE_THINKING_CHAT_MESSAGE_2_CONVERSATION
+            expected_conversation=EXPECTED_NATIVE_THINKING_CHAT_INTERACTIONS['message_2']
         )
 
         # Verify message history
@@ -997,7 +943,7 @@ class TestNativeThinkingE2E:
         assert chat_stage.get("agent") == "ChatAgent"
         assert chat_stage.get("status") == "completed"
         
-        expected_chat = EXPECTED_NATIVE_THINKING_CHAT_INTERACTIONS[message_key]
+        expected_chat = expected_conversation
         llm_interactions = chat_stage.get("llm_interactions", [])
         mcp_interactions = chat_stage.get("mcp_communications", [])
         

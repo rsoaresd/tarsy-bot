@@ -10,11 +10,11 @@ This module contains all configuration models
 """
 
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .constants import IterationStrategy
+from .constants import FailurePolicy, IterationStrategy
 from .mcp_transport_config import TransportConfig
 
 # =============================================================================
@@ -240,6 +240,51 @@ class MCPServerConfigModel(BaseModel):
     )
 
 
+class ParallelAgentConfig(BaseModel):
+    """Configuration for a single agent in a parallel stage."""
+    
+    model_config = ConfigDict(
+        extra='forbid',
+        str_strip_whitespace=True
+    )
+    
+    name: str = Field(
+        ...,
+        description="Agent identifier (class name or 'ConfigurableAgent:agent-name')",
+        min_length=1
+    )
+    llm_provider: Optional[str] = Field(
+        None,
+        description="Optional LLM provider override for this agent"
+    )
+    iteration_strategy: Optional[IterationStrategy] = Field(
+        None,
+        description="Optional iteration strategy override for this agent"
+    )
+
+
+class SynthesisConfig(BaseModel):
+    """Configuration for parallel stage synthesis."""
+    
+    model_config = ConfigDict(
+        extra='forbid',
+        str_strip_whitespace=True
+    )
+    
+    agent: str = Field(
+        default="SynthesisAgent",
+        description="Agent to use for synthesis (default: SynthesisAgent)"
+    )
+    iteration_strategy: IterationStrategy = Field(
+        default=IterationStrategy.SYNTHESIS,
+        description="Iteration strategy for synthesis (default: synthesis)"
+    )
+    llm_provider: Optional[str] = Field(
+        None,
+        description="Optional LLM provider for synthesis (uses stage/chain/system default if not specified)"
+    )
+
+
 class ChainStageConfigModel(BaseModel):
     """Configuration model for a single stage in a chain."""
     
@@ -253,12 +298,26 @@ class ChainStageConfigModel(BaseModel):
         description="Human-readable stage name",
         min_length=1
     )
-    agent: str = Field(
-        ...,
+    # Optional but when provided must be non-empty (min_length=1 applies only to non-None values)
+    agent: Optional[str] = Field(
+        None,
         description="Agent identifier (class name or 'ConfigurableAgent:agent-name')",
         min_length=1
     )
-    iteration_strategy: Optional[str] = Field(
+    agents: Optional[List[ParallelAgentConfig]] = Field(
+        None,
+        description="List of agents for multi-agent parallelism (alternative to single agent)"
+    )
+    replicas: int = Field(
+        default=1,
+        ge=1,
+        description="Number of replicas for simple redundancy (default: 1)"
+    )
+    failure_policy: FailurePolicy = Field(
+        default=FailurePolicy.ALL,
+        description="Failure policy: 'all' requires all agents to succeed, 'any' requires at least one"
+    )
+    iteration_strategy: Optional[IterationStrategy] = Field(
         None,
         description="Optional iteration strategy override (uses agent's default if not specified)"
     )
@@ -266,6 +325,35 @@ class ChainStageConfigModel(BaseModel):
         None,
         description="Optional LLM provider override for this stage (uses chain's provider if not specified)"
     )
+    synthesis: Optional[SynthesisConfig] = Field(
+        None,
+        description="Optional synthesis configuration for parallel stages"
+    )
+    
+    @model_validator(mode='after')
+    def validate_agent_configuration(self) -> 'ChainStageConfigModel':
+        """Validate agent/agents mutual exclusivity and parallel configuration rules."""
+        # Either agent OR agents must be specified, not both
+        if self.agent is None and self.agents is None:
+            raise ValueError("Either 'agent' or 'agents' must be specified")
+        
+        if self.agent is not None and self.agents is not None:
+            raise ValueError("Cannot specify both 'agent' and 'agents' - use one or the other")
+        
+        # If replicas > 1, must use single agent field
+        if self.replicas > 1 and self.agents is not None:
+            raise ValueError(
+                f"Cannot use 'agents' list with replicas > 1 (replicas={self.replicas}). "
+                "Use single 'agent' field for replica parallelism, or use 'agents' list with replicas=1 for multi-agent parallelism."
+            )
+        
+        # If agents list is provided, must have at least 2 items
+        if self.agents is not None and len(self.agents) < 2:
+            raise ValueError(
+                f"'agents' list must contain at least 2 agents for parallel execution (got {len(self.agents)})"
+            )
+        
+        return self
 
 
 class ChainConfigModel(BaseModel):
@@ -336,12 +424,23 @@ class CombinedConfigModel(BaseModel):
         """Validate that ConfigurableAgent references in chain stages exist in agents config."""
         for chain_id, chain_config in self.agent_chains.items():
             for stage in chain_config.stages:
-                if stage.agent.startswith("ConfigurableAgent:"):
+                # Handle single agent case
+                if stage.agent and stage.agent.startswith("ConfigurableAgent:"):
                     agent_name = stage.agent[len("ConfigurableAgent:"):]
                     if agent_name not in self.agents:
                         raise ValueError(
                             f"Chain '{chain_id}' stage '{stage.name}' references missing configurable agent '{agent_name}'"
                         )
+                
+                # Handle parallel agents case
+                if stage.agents:
+                    for parallel_agent in stage.agents:
+                        if parallel_agent.name.startswith("ConfigurableAgent:"):
+                            agent_name = parallel_agent.name[len("ConfigurableAgent:"):]
+                            if agent_name not in self.agents:
+                                raise ValueError(
+                                    f"Chain '{chain_id}' stage '{stage.name}' references missing configurable agent '{agent_name}'"
+                                )
         return self
 
     @model_validator(mode='after')

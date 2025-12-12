@@ -13,7 +13,8 @@ from tarsy.config.builtin_config import (
     DEFAULT_ALERT_TYPE,
     get_builtin_chain_definitions,
 )
-from tarsy.models.agent_config import ChainConfigModel, ChainStageConfigModel
+from tarsy.models.agent_config import ChainConfigModel, ChainStageConfigModel, ParallelAgentConfig
+from tarsy.models.constants import FailurePolicy
 from tarsy.utils.logger import get_module_logger
 
 logger = get_module_logger(__name__)
@@ -103,7 +104,17 @@ class ChainRegistry:
                         stages=[
                             ChainStageConfigModel(
                                 name=stage["name"],
-                                agent=stage["agent"],
+                                agent=stage.get("agent"),
+                                agents=[
+                                    ParallelAgentConfig(
+                                        name=agent["name"],
+                                        llm_provider=agent.get("llm_provider"),
+                                        iteration_strategy=agent.get("iteration_strategy")
+                                    )
+                                    for agent in stage["agents"]
+                                ] if stage.get("agents") else None,
+                                replicas=stage.get("replicas", 1),
+                                failure_policy=FailurePolicy(stage.get("failure_policy", "all")),
                                 iteration_strategy=stage.get("iteration_strategy"),
                                 llm_provider=stage.get("llm_provider")
                             )
@@ -278,7 +289,7 @@ class ChainRegistry:
     
     def get_default_alert_type(self) -> str:
         """
-        Get the default alert type for clietns.
+        Get the default alert type for clients.
         
         Returns:
             Default alert type (from config or DEFAULT_ALERT_TYPE constant)

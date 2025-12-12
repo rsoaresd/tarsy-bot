@@ -21,6 +21,7 @@ from tarsy.models.agent_config import (
     CombinedConfigModel,
     MCPServerConfigModel,
 )
+from tarsy.models.constants import FailurePolicy
 
 
 @pytest.mark.unit
@@ -610,7 +611,7 @@ class TestGetChainConfigs:
                     "stages": [
                         {
                             "name": "analysis",
-                            "agent": "TestAgent",
+                            "agent": "KubernetesAgent",
                             "iteration_strategy": "react"
                         }
                     ],
@@ -632,12 +633,17 @@ class TestGetChainConfigs:
             assert chain_config["alert_types"] == ["test-alert"]
             assert len(chain_config["stages"]) == 1
             assert chain_config["stages"][0]["name"] == "analysis"
+            assert chain_config["stages"][0]["agent"] == "KubernetesAgent"
             assert chain_config["description"] == "Test chain description"
             # Verify llm_provider fields are included (None when not specified)
             assert "llm_provider" in chain_config
             assert chain_config["llm_provider"] is None
             assert "llm_provider" in chain_config["stages"][0]
             assert chain_config["stages"][0]["llm_provider"] is None
+            # Verify EP-0030 parallel agent fields are included with defaults
+            assert chain_config["stages"][0]["agents"] is None
+            assert chain_config["stages"][0]["replicas"] == 1
+            assert chain_config["stages"][0]["failure_policy"] == FailurePolicy.ALL
         finally:
             os.unlink(temp_path)
     
@@ -652,12 +658,12 @@ class TestGetChainConfigs:
                     "stages": [
                         {
                             "name": "stage-with-provider",
-                            "agent": "TestAgent",
+                            "agent": "KubernetesAgent",
                             "llm_provider": "gemini-flash"
                         },
                         {
                             "name": "stage-without-provider",
-                            "agent": "TestAgent"
+                            "agent": "KubernetesAgent"
                         }
                     ],
                     "description": "Chain with LLM provider configuration",
@@ -682,8 +688,16 @@ class TestGetChainConfigs:
             
             # Verify stage-level providers
             assert len(chain_config["stages"]) == 2
+            assert chain_config["stages"][0]["agent"] == "KubernetesAgent"
             assert chain_config["stages"][0]["llm_provider"] == "gemini-flash"
+            assert chain_config["stages"][1]["agent"] == "KubernetesAgent"
             assert chain_config["stages"][1]["llm_provider"] is None
+            assert chain_config["stages"][0]["agents"] is None
+            assert chain_config["stages"][0]["replicas"] == 1
+            assert chain_config["stages"][0]["failure_policy"] == FailurePolicy.ALL
+            assert chain_config["stages"][1]["agents"] is None
+            assert chain_config["stages"][1]["replicas"] == 1
+            assert chain_config["stages"][1]["failure_policy"] == FailurePolicy.ALL
         finally:
             os.unlink(temp_path)
     

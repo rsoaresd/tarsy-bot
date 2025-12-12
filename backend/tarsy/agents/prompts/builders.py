@@ -13,6 +13,7 @@ from tarsy.models.unified_interactions import LLMConversation, MessageRole
 from tarsy.utils.logger import get_module_logger
 
 if TYPE_CHECKING:
+    from tarsy.models.agent_execution_result import ParallelStageResult
     from tarsy.models.processing_context import StageContext
 from .components import AlertSectionTemplate, RunbookSectionTemplate
 from .templates import (
@@ -82,6 +83,40 @@ class PromptBuilder:
             available_actions=self._format_available_actions(context.available_tools.tools),
             question=question,
             history_text=history_text
+        )
+    
+    def build_synthesis_prompt(self, context: 'StageContext') -> str:
+        """
+        Build synthesis prompt for combining parallel investigation results.
+        
+        Similar to ReAct prompt but with no tools available (tool-less synthesis).
+        """
+        logger.debug("Building synthesis prompt")
+        # Build question components using StageContext properties directly
+        alert_section = self.alert_component.format(context.chain_context.processing_alert)
+        runbook_section = self.runbook_component.format(context.runbook_content)
+        
+        # Use StageContext's built-in previous stages formatting
+        # This will include the parallel results
+        previous_stages_context = context.format_previous_stages_context()
+        if previous_stages_context == "No previous stage context available.":
+            chain_context = "## Previous Stage Data\nNo previous stage data is available for this alert. This is the first stage of analysis."
+        else:
+            chain_context = f"## Previous Stage Data\n{previous_stages_context}"
+        
+        # Build question
+        question = ANALYSIS_QUESTION_TEMPLATE.format(
+            alert_type=context.chain_context.processing_alert.alert_type,
+            alert_section=alert_section,
+            runbook_section=runbook_section,
+            chain_context=chain_context
+        )
+        
+        # Format with no tools available (synthesis doesn't use tools)
+        return STANDARD_REACT_PROMPT_TEMPLATE.format(
+            available_actions="No tools available.",
+            question=question,
+            history_text=""
         )
     
     def build_stage_analysis_react_prompt(self, context: 'StageContext', react_history: Optional[List[str]] = None) -> str:
@@ -620,3 +655,62 @@ Analysis to summarize:
 =================================================================================
 
 Executive Summary (1-4 lines, facts only):"""
+    
+    def format_parallel_stage_results(self, parallel_result: 'ParallelStageResult') -> str:
+        """
+        Format ParallelStageResult for SynthesisAgent or next stage consumption.
+        
+        Presents raw investigation results with clear sections and metadata.
+        NO pre-analysis or synthesis - that's the next agent's job.
+        
+        For multi-agent parallelism:
+        - Section per agent: "## Kubernetes Investigation", "## VM Investigation"
+        
+        For replica parallelism:
+        - Labeled runs: "## Run 1 (openai)", "## Run 2 (anthropic)", "## Run 3 (gemini)"
+        
+        Includes metadata: timing, status, LLM provider, iteration strategy, token usage.
+        
+        Args:
+            parallel_result: The parallel stage result to format
+            
+        Returns:
+            Formatted string with parallel stage results and metadata
+        """
+        sections = []
+        
+        # Overall summary
+        sections.append(f"# Parallel Stage Results: {parallel_result.metadata.parallel_type}")
+        sections.append(f"**Status**: {parallel_result.status.value}")
+        sections.append("")
+        
+        # Individual agent results
+        for idx, (result, metadata) in enumerate(zip(parallel_result.results, parallel_result.metadata.agent_metadatas, strict=True), 1):
+            # Header based on parallel type
+            if parallel_result.metadata.parallel_type == "multi_agent":
+                sections.append(f"## {metadata.agent_name} Investigation")
+            else:  # replica
+                sections.append(f"## Run {idx}: {metadata.agent_name}")
+            
+            sections.append(f"**Provider**: {metadata.llm_provider}")
+            sections.append(f"**Status**: {metadata.status.value}")
+            sections.append(f"**Duration**: {metadata.duration_ms}ms")
+            
+            if metadata.error_message:
+                sections.append(f"**Error**: {metadata.error_message}")
+            
+            sections.append("")
+            sections.append("### Investigation Result")
+            sections.append("")
+            
+            # Use complete conversation history if available, otherwise result_summary
+            content = result.complete_conversation_history or result.result_summary or "No result"
+            
+            # Wrap the investigation result content with HTML comment boundaries
+            # This prevents the content's markdown from breaking our structure
+            sections.append("<!-- Investigation Result START -->")
+            sections.append(content)
+            sections.append("<!-- Investigation Result END -->")
+            sections.append("")
+        
+        return "\n".join(sections)

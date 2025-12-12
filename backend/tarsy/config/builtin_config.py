@@ -46,6 +46,11 @@ BUILTIN_AGENTS: Dict[str, Dict[str, Any]] = {
         "iteration_strategy": "react",
         "description": "Built-in agent for handling follow-up chat conversations",
     },
+    "SynthesisAgent": {
+        "import": "tarsy.agents.synthesis_agent.SynthesisAgent",
+        "iteration_strategy": "synthesis",
+        "description": "Synthesizes parallel investigation results into unified analysis",
+    },
     # Future agents will be added here:
     # "ArgoCDAgent": {
     #     "import": "tarsy.agents.argocd_agent.ArgoCDAgent",
