@@ -180,12 +180,23 @@ class ConfigurationLoader:
                             "replicas": stage.replicas,
                             "failure_policy": stage.failure_policy,
                             "iteration_strategy": stage.iteration_strategy,
-                            "llm_provider": stage.llm_provider
+                            "llm_provider": stage.llm_provider,
+                            "synthesis": {
+                                "agent": stage.synthesis.agent,
+                                "iteration_strategy": stage.synthesis.iteration_strategy,
+                                "llm_provider": stage.synthesis.llm_provider
+                            } if stage.synthesis else None
                         }
                         for stage in chain_config.stages
                     ],
                     "description": chain_config.description,
-                    "llm_provider": chain_config.llm_provider
+                    "llm_provider": chain_config.llm_provider,
+                    "chat": {
+                        "enabled": chain_config.chat.enabled,
+                        "agent": chain_config.chat.agent,
+                        "iteration_strategy": chain_config.chat.iteration_strategy,
+                        "llm_provider": chain_config.chat.llm_provider
+                    } if chain_config.chat else None
                 }
             
             return chain_configs
@@ -416,6 +427,10 @@ class ConfigurationLoader:
         - Single agent references in 'agent' field exist (for replica parallelism)
         - Parallel configurations are valid
         
+        Note: Synthesis and chat agent validation is already handled by Pydantic model
+        validators in CombinedConfigModel (validate_configurable_agent_references and
+        validate_chat_agent_references).
+        
         Args:
             config: The parsed configuration to validate
             
@@ -443,17 +458,8 @@ class ConfigurationLoader:
                     for agent_idx, parallel_agent in enumerate(stage.agents, 1):
                         agent_name = parallel_agent.name
                         
-                        # Handle ConfigurableAgent references
-                        if agent_name.startswith("ConfigurableAgent:"):
-                            actual_agent_name = agent_name[len("ConfigurableAgent:"):]
-                            if actual_agent_name not in config.agents:
-                                raise ConfigurationError(
-                                    f"Chain '{chain_id}', stage '{stage_name}', agent {agent_idx}: "
-                                    f"References missing configurable agent '{actual_agent_name}'. "
-                                    f"Available configured agents: {sorted(config.agents.keys())}"
-                                )
                         # Check if agent exists in available agents
-                        elif agent_name not in available_agents:
+                        if agent_name not in available_agents:
                             raise ConfigurationError(
                                 f"Chain '{chain_id}', stage '{stage_name}', agent {agent_idx}: "
                                 f"References unknown agent '{agent_name}'. "
@@ -470,17 +476,8 @@ class ConfigurationLoader:
                             f"with {stage.replicas} replicas of agent '{agent_name}'"
                         )
                     
-                    # Handle ConfigurableAgent references
-                    if agent_name.startswith("ConfigurableAgent:"):
-                        actual_agent_name = agent_name[len("ConfigurableAgent:"):]
-                        if actual_agent_name not in config.agents:
-                            raise ConfigurationError(
-                                f"Chain '{chain_id}', stage '{stage_name}': "
-                                f"References missing configurable agent '{actual_agent_name}'. "
-                                f"Available configured agents: {sorted(config.agents.keys())}"
-                            )
                     # Check if agent exists in available agents
-                    elif agent_name not in available_agents:
+                    if agent_name not in available_agents:
                         raise ConfigurationError(
                             f"Chain '{chain_id}', stage '{stage_name}': "
                             f"References unknown agent '{agent_name}'. "

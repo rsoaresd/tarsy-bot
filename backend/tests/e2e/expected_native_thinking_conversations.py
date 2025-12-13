@@ -234,14 +234,6 @@ Focus on:
 
 Be thorough but efficient. Collect all relevant data before stopping.
 
-You are an SRE agent analyzing incidents. Use the available tools to investigate and provide actionable recommendations.
-
-When you have gathered sufficient information, provide your final analysis with:
-1. Root cause analysis
-2. Current system state assessment
-3. Specific remediation steps for human operators
-4. Prevention recommendations
-
 Focus on investigation and providing recommendations for human operators to execute."""
         },
         {
@@ -306,7 +298,7 @@ Use tools as needed to gather information. When you have sufficient data, provid
             "role": "user",
             "content": """Tool Result: test-data-server.collect_system_info:
 {
-  "result": "Summarized: System healthy, CPU 45%, Memory 33%, Disk 76%, Network OK."
+  "result": "[NOTE: The tool output was too long and has been summarized below.]\\n\\nSummarized: System healthy, CPU 45%, Memory 33%, Disk 76%, Network OK."
 }"""
         },
         # NOTE: No assistant message here - model called kubectl_get events with empty text_content
@@ -362,14 +354,6 @@ For Kubernetes operations:
 - If you get "server could not find the requested resource" error, check if you're using the namespace parameter correctly:
   * Cluster-scoped resources (Namespace, Node, ClusterRole, PersistentVolume) should NOT have a namespace parameter
   * Namespace-scoped resources (Pod, Deployment, Service, ConfigMap) REQUIRE a namespace parameter
-
-You are an SRE agent analyzing incidents. Use the available tools to investigate and provide actionable recommendations.
-
-When you have gathered sufficient information, provide your final analysis with:
-1. Root cause analysis
-2. Current system state assessment
-3. Specific remediation steps for human operators
-4. Prevention recommendations
 
 Focus on investigation and providing recommendations for human operators to execute."""
         },
@@ -493,14 +477,6 @@ Your analysis should:
 - Provide confidence levels for your conclusions
 
 Be precise and actionable in your analysis.
-
-You are an SRE agent analyzing incidents. Use the available tools to investigate and provide actionable recommendations.
-
-When you have gathered sufficient information, provide your final analysis with:
-1. Root cause analysis
-2. Current system state assessment
-3. Specific remediation steps for human operators
-4. Prevention recommendations
 
 Focus on investigation and providing recommendations for human operators to execute."""
         },
@@ -638,33 +614,95 @@ You have access to the same tools and systems that were used in the original inv
 4. **Specificity**: Always reference actual data and observations, not assumptions
 5. **Brevity**: Be concise but complete - users have already read the full investigation
 
-You are an SRE agent analyzing incidents. Use the available tools to investigate and provide actionable recommendations.
-
-When you have gathered sufficient information, provide your final analysis with:
-1. Root cause analysis
-2. Current system state assessment
-3. Specific remediation steps for human operators
-4. Prevention recommendations
-
 Focus on answering follow-up questions about a completed investigation for human operators to execute."""
         },
         {
             "role": "user",
-            "content": """## Investigation Context
+            "content": """═══════════════════════════════════════════════════════════════════════════════
+📋 INVESTIGATION CONTEXT
+═══════════════════════════════════════════════════════════════════════════════
 
-The following is the complete history of the alert investigation. Use this context to answer the user's question.
+# Original Investigation
 
-### Alert Information
+### Initial Investigation Request
+
+Analyze this test-native-thinking alert and provide actionable recommendations.
+
+## Alert Details
+
+### Alert Metadata
 **Alert Type:** test-native-thinking
+**Timestamp:** {TIMESTAMP}
 
-### Investigation Summary
+### Alert Data
+```json
+{
+  "namespace": "test-namespace",
+  "description": "Namespace stuck in Terminating state",
+  "cluster": "test-cluster",
+  "contact": "__MASKED_EMAIL__",
+  "labels": {
+    "env": "test",
+    "team": "platform"
+  },
+  "annotations": {
+    "finalizers": "kubernetes.io/pv-protection"
+  }
+}
+```
+
+## Runbook Content
+```markdown
+<!-- RUNBOOK START -->
+# Mock Runbook
+Test runbook content
+<!-- RUNBOOK END -->
+```
+
+## Previous Stage Data
+### Results from 'data-collection' stage:
+
+#### Analysis Result
+
+<!-- Analysis Result START -->
+Based on the collected data, namespace 'stuck-namespace' is stuck in Terminating state due to finalizers blocking deletion.
+<!-- Analysis Result END -->
+
+### Results from 'verification' stage:
+
+#### Analysis Result
+
+<!-- Analysis Result START -->
+Verification completed. Root cause identified: namespace stuck due to finalizers preventing deletion.
+<!-- Analysis Result END -->
+
+
+## Your Task
+Investigate this alert using the available tools and provide:
+1. Root cause analysis based on your investigation
+2. Current system state assessment from tool observations
+3. Specific remediation steps for human operators
+4. Prevention recommendations
+
+Use tools as needed to gather information. When you have sufficient data, provide your complete analysis.
+
+**Agent Response:**
+
 Based on previous stages, the namespace is stuck due to finalizers.
 
----
+═══════════════════════════════════════════════════════════════════════════════
+🎯 CURRENT TASK
+═══════════════════════════════════════════════════════════════════════════════
 
-## User Question
+**Question:** Can you check the pods in the stuck-namespace?
 
-Can you check the pods in the stuck-namespace?"""
+**Your Task:**
+Answer the user's question based on the investigation context above.
+- Reference investigation history when relevant
+- Use tools to get fresh data if needed
+- Provide clear, actionable responses
+
+Begin your response:"""
         },
         # NOTE: No assistant message here - model called kubectl_get pods with empty text_content
         # Tool result - kubectl_get pods
@@ -713,37 +751,114 @@ You have access to the same tools and systems that were used in the original inv
 4. **Specificity**: Always reference actual data and observations, not assumptions
 5. **Brevity**: Be concise but complete - users have already read the full investigation
 
-You are an SRE agent analyzing incidents. Use the available tools to investigate and provide actionable recommendations.
-
-When you have gathered sufficient information, provide your final analysis with:
-1. Root cause analysis
-2. Current system state assessment
-3. Specific remediation steps for human operators
-4. Prevention recommendations
-
 Focus on answering follow-up questions about a completed investigation for human operators to execute."""
         },
         {
             "role": "user",
-            "content": """## Investigation Context
+            "content": """═══════════════════════════════════════════════════════════════════════════════
+📋 INVESTIGATION CONTEXT
+═══════════════════════════════════════════════════════════════════════════════
 
-The following is the complete history of the alert investigation. Use this context to answer the user's question.
+# Original Investigation
 
-### Alert Information
+### Initial Investigation Request
+
+Analyze this test-native-thinking alert and provide actionable recommendations.
+
+## Alert Details
+
+### Alert Metadata
 **Alert Type:** test-native-thinking
+**Timestamp:** {TIMESTAMP}
 
-### Investigation Summary
+### Alert Data
+```json
+{
+  "namespace": "test-namespace",
+  "description": "Namespace stuck in Terminating state",
+  "cluster": "test-cluster",
+  "contact": "__MASKED_EMAIL__",
+  "labels": {
+    "env": "test",
+    "team": "platform"
+  },
+  "annotations": {
+    "finalizers": "kubernetes.io/pv-protection"
+  }
+}
+```
+
+## Runbook Content
+```markdown
+<!-- RUNBOOK START -->
+# Mock Runbook
+Test runbook content
+<!-- RUNBOOK END -->
+```
+
+## Previous Stage Data
+### Results from 'data-collection' stage:
+
+#### Analysis Result
+
+<!-- Analysis Result START -->
+Based on the collected data, namespace 'stuck-namespace' is stuck in Terminating state due to finalizers blocking deletion.
+<!-- Analysis Result END -->
+
+### Results from 'verification' stage:
+
+#### Analysis Result
+
+<!-- Analysis Result START -->
+Verification completed. Root cause identified: namespace stuck due to finalizers preventing deletion.
+<!-- Analysis Result END -->
+
+
+## Your Task
+Investigate this alert using the available tools and provide:
+1. Root cause analysis based on your investigation
+2. Current system state assessment from tool observations
+3. Specific remediation steps for human operators
+4. Prevention recommendations
+
+Use tools as needed to gather information. When you have sufficient data, provide your complete analysis.
+
+**Agent Response:**
+
 Based on previous stages, the namespace is stuck due to finalizers.
 
-### Previous Chat Messages
-**User:** Can you check the pods in the stuck-namespace?
-**Assistant:** I checked the pods in stuck-namespace and found no pods are currently running. This is consistent with the namespace being stuck in Terminating state - all pods have likely been deleted already, but the namespace can't complete deletion due to the finalizers mentioned in the original investigation.
+═══════════════════════════════════════════════════════════════════════════════
+💬 CHAT HISTORY (1 previous exchange)
+═══════════════════════════════════════════════════════════════════════════════
 
----
+## Exchange 1
 
-## User Question
+**USER:**
+Can you check the pods in the stuck-namespace?
 
-Does the namespace still exist?"""
+**Observation:**
+
+Tool Result: kubernetes-server.kubectl_get:
+{
+  "result": "No pods found in namespace stuck-namespace"
+}
+
+**ASSISTANT:**
+I checked the pods in stuck-namespace and found no pods are currently running. This is consistent with the namespace being stuck in Terminating state - all pods have likely been deleted already, but the namespace can't complete deletion due to the finalizers mentioned in the original investigation.
+
+═══════════════════════════════════════════════════════════════════════════════
+🎯 CURRENT TASK
+═══════════════════════════════════════════════════════════════════════════════
+
+**Question:** Does the namespace still exist?
+
+**Your Task:**
+Answer the user's question based on the investigation context above.
+- Reference investigation history when relevant
+- Use tools to get fresh data if needed
+- Provide clear, actionable responses
+
+Begin your response:"""
         },
         # NOTE: No assistant message here - model called kubectl_get with empty text_content
         # Tool result - kubectl_get namespace status

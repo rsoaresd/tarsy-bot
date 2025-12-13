@@ -213,8 +213,9 @@ agents:
     mcp_servers: ["security-scanner", "kubernetes-server"]  # Mix of custom + built-in
     iteration_strategy: "react"
     custom_instructions: "Focus on security implications and threat analysis..."
-    
-chains:
+
+# Chain definitions
+agent_chains:
   security-incident-chain:
     alert_types: ["SecurityBreach", "SuspiciousActivity"]
     llm_provider: "google-default"  # Optional: chain-level default provider
@@ -373,7 +374,7 @@ sequenceDiagram
 **Multi-stage Chain Example**:
 ```yaml
 # In agents.yaml
-chains:
+agent_chains:
   incident-investigation-chain:
     alert_types: ["CriticalIncident"]
     llm_provider: "google-default"  # Optional: chain-level default
@@ -409,9 +410,9 @@ stages:
         iteration_strategy: "native-thinking"
     failure_policy: "any"  # Continue if at least one succeeds
     synthesis:  # Optional synthesis configuration
-      agent: "SynthesisAgent"  # Default
-      iteration_strategy: "react-synthesis"  # or "native-thinking-synthesis"
-      llm_provider: "anthropic-default"
+      agent: "SynthesisAgent"  # Optional, defaults to SynthesisAgent
+      iteration_strategy: "synthesis"  # or "synthesis-native-thinking"
+      llm_provider: "anthropic-default"  # Optional
   
   - name: "recommendations"
     agent: "SynthesisAgent"  # Uses synthesized results from investigation
@@ -425,7 +426,7 @@ stages:
     replicas: 3  # Run same agent 3 times with same config
     llm_provider: "openai"
     synthesis:  # Optional custom synthesis
-      iteration_strategy: "native-thinking-synthesis"
+      iteration_strategy: "synthesis-native-thinking"
       llm_provider: "google-default"
 ```
 
@@ -1664,13 +1665,15 @@ graph TB
 - **Pod tracking & graceful shutdown** - Multi-replica support (mirrors AlertService patterns)
 
 **📍 Chat Agent**: `backend/tarsy/agents/chat_agent.py`
-- **Built-in agent** for follow-up conversations using ReAct strategy
+- **Built-in agent** for follow-up conversations (configurable per chain)
+- **Multiple iteration strategies** - Supports ReAct and NativeThinking (auto-determined from last stage or explicitly configured)
 - **Dynamic MCP configuration** - Uses servers from original session
 - **Context-aware processing** - Receives complete investigation history
 
-**📍 Chat Controller**: `backend/tarsy/agents/iteration_controllers/chat_react_controller.py`
-- **Extends ReactController** with conversation history
-- **Formats prompts** with investigation context prepended to user questions
+**📍 Chat Controllers**: 
+- `chat_react_controller.py` - ReAct-based chat with conversation history
+- `chat_native_thinking_controller.py` - Gemini native thinking for chat
+- **Strategy selection** - Auto-translates synthesis strategies (synthesis → react, synthesis-native-thinking → native-thinking)
 
 #### Database Schema
 
@@ -1690,7 +1693,24 @@ graph TB
 # In config/agents.yaml
 agent_chains:
   kubernetes-agent-chain:
-    chat_enabled: true  # Default: true
+    # Option 1: Default chat (enabled with defaults)
+    # Omit chat field = enabled with ChatAgent, auto-determined strategy, chain LLM provider
+    
+    # Option 2: Custom chat configuration
+    chat:
+      enabled: true                         # Optional, defaults to true
+      agent: "ChatAgent"                    # Optional, defaults to ChatAgent
+      iteration_strategy: "native-thinking" # Optional, auto-determined from last stage if not set
+      llm_provider: "google-default"        # Optional, uses chain/system default if not set
+    
+    # Option 3: Disable chat
+    # chat:
+    #   enabled: false
+
+# Configuration Hierarchy:
+# - Iteration Strategy: chat.iteration_strategy > last stage (translated) > agent default > REACT
+# - LLM Provider: chat.llm_provider > chain.llm_provider > system default
+# - Agent: chat.agent > "ChatAgent" (default)
 ```
 
 **REST Endpoints**: `backend/tarsy/controllers/chat_controller.py`

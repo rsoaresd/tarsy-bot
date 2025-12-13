@@ -20,12 +20,14 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from mcp.types import Tool
 
-from .e2e_utils import E2ETestUtils
+from .e2e_utils import E2ETestUtils, assert_conversation_messages
 from .expected_parallel_conversations import (
     EXPECTED_MULTI_AGENT_STAGES,
     EXPECTED_PARALLEL_AGENT_1_CONVERSATION,
     EXPECTED_PARALLEL_AGENT_2_CONVERSATION,
     EXPECTED_PARALLEL_CHAT_INTERACTIONS,
+    EXPECTED_PARALLEL_CHAT_MESSAGE_1_CONVERSATION,
+    EXPECTED_PARALLEL_CHAT_MESSAGE_2_CONVERSATION,
     EXPECTED_SYNTHESIS_CONVERSATION,
 )
 from .parallel_test_base import ParallelTestBase
@@ -89,6 +91,58 @@ class TestParallelMultiAgentE2E(ParallelTestBase):
                 "input_tokens": 180,
                 "output_tokens": 65,
                 "total_tokens": 245
+            },
+            3: {  # Third call - synthesis (native thinking, no tools)
+                "text_content": """**Synthesis of Parallel Investigations**
+
+Both investigations provide complementary evidence. The Kubernetes agent identified the symptom (CrashLoopBackOff), while the log agent uncovered the root cause (database connection timeout).
+
+**Root Cause:** Pod-1 in test-namespace is crashing due to inability to connect to database at db.example.com:5432, resulting in repeated restart attempts (CrashLoopBackOff).
+
+**Recommended Actions:**
+1. Verify database service is running and accessible
+2. Check network policies and firewall rules for connectivity to db.example.com:5432
+3. Validate database credentials in pod configuration
+4. Review database connection timeout settings in application config
+
+**Priority:** High - Application is currently non-functional""",
+                "thinking_content": "I need to synthesize the findings from both agents - KubernetesAgent found the CrashLoopBackOff state, and LogAgent identified database connectivity as the root cause.",
+                "function_calls": None,
+                "input_tokens": 420,
+                "output_tokens": 180,
+                "total_tokens": 600
+            },
+            4: {  # Fourth call - Chat Message 1, tool call (native thinking)
+                "text_content": "",  # Empty for tool calls
+                "thinking_content": "The user wants to verify database service status. I'll check the service in test-namespace.",
+                "function_calls": [{"name": "kubernetes-server__kubectl_get", "args": {"resource": "service", "name": "database", "namespace": "test-namespace"}}],
+                "input_tokens": 210,
+                "output_tokens": 65,
+                "total_tokens": 275
+            },
+            5: {  # Fifth call - Chat Message 1, final answer
+                "text_content": "Yes, the database service is running in test-namespace with ClusterIP 10.96.0.100. The service endpoint exists, so the issue is likely with the actual database pod or external database connectivity rather than the Kubernetes service configuration.",
+                "thinking_content": "The service exists and is properly configured. The problem must be elsewhere.",
+                "function_calls": None,
+                "input_tokens": 190,
+                "output_tokens": 80,
+                "total_tokens": 270
+            },
+            6: {  # Sixth call - Chat Message 2, tool call (native thinking)
+                "text_content": "",  # Empty for tool calls
+                "thinking_content": "The user wants to check the database pod status. Let me get pod information.",
+                "function_calls": [{"name": "kubernetes-server__kubectl_get", "args": {"resource": "pods", "label_selector": "app=database", "namespace": "test-namespace"}}],
+                "input_tokens": 220,
+                "output_tokens": 70,
+                "total_tokens": 290
+            },
+            7: {  # Seventh call - Chat Message 2, final answer
+                "text_content": "The database pod (database-0) is running and ready (1/1) in test-namespace. Since both the service and pod are healthy, the issue is that pod-1 is trying to connect to the external address db.example.com:5432 instead of using the internal Kubernetes service. The application configuration likely needs to be updated to use the service name 'database' or 'database.test-namespace.svc.cluster.local' instead of the external address.",
+                "thinking_content": "Both service and pod are healthy, so the issue is in the application configuration pointing to the wrong database address.",
+                "function_calls": None,
+                "input_tokens": 200,
+                "output_tokens": 90,
+                "total_tokens": 290
             }
         }
         
@@ -334,7 +388,8 @@ Action Input: {"resource": "pods", "label_selector": "app=database", "namespace"
         await self._verify_chat_response(
             chat_stage=message_1_stage,
             message_key='message_1',
-            expected_conversation=EXPECTED_PARALLEL_CHAT_INTERACTIONS['message_1']
+            expected_conversation=EXPECTED_PARALLEL_CHAT_MESSAGE_1_CONVERSATION,
+            expected_spec=EXPECTED_PARALLEL_CHAT_INTERACTIONS['message_1']
         )
         verified_chat_stage_ids.add(message_1_stage.get("stage_id"))
         logger.info("First chat response verified")
@@ -355,7 +410,8 @@ Action Input: {"resource": "pods", "label_selector": "app=database", "namespace"
         await self._verify_chat_response(
             chat_stage=message_2_stage,
             message_key='message_2',
-            expected_conversation=EXPECTED_PARALLEL_CHAT_INTERACTIONS['message_2']
+            expected_conversation=EXPECTED_PARALLEL_CHAT_MESSAGE_2_CONVERSATION,
+            expected_spec=EXPECTED_PARALLEL_CHAT_INTERACTIONS['message_2']
         )
         verified_chat_stage_ids.add(message_2_stage.get("stage_id"))
         logger.info("Second chat response verified")
@@ -461,7 +517,8 @@ Action Input: {"resource": "pods", "label_selector": "app=database", "namespace"
         self,
         chat_stage,
         message_key: str,
-        expected_conversation: dict
+        expected_conversation: dict,
+        expected_spec: dict
     ):
         """
         Verify the structure of a chat response using the same pattern as stage verification.
@@ -469,7 +526,8 @@ Action Input: {"resource": "pods", "label_selector": "app=database", "namespace"
         Args:
             chat_stage: The chat stage execution data from the API
             message_key: Key to look up expected interactions (e.g., 'message_1', 'message_2')
-            expected_conversation: Expected conversation structure for this message
+            expected_conversation: Expected conversation structure for this message (with 'messages' key)
+            expected_spec: Expected interaction specification (with 'llm_count', 'mcp_count', 'interactions')
         """
         
         # Verify basic stage structure
@@ -513,29 +571,28 @@ Action Input: {"resource": "pods", "label_selector": "app=database", "namespace"
             )
         
         # Get expected interactions for this message
-        expected_chat = expected_conversation
         llm_interactions = chat_stage.get("llm_interactions", [])
         mcp_interactions = chat_stage.get("mcp_communications", [])
         
         # Verify interaction counts
-        assert len(llm_interactions) == expected_chat["llm_count"], (
-            f"Chat {message_key}: Expected {expected_chat['llm_count']} LLM interactions, "
+        assert len(llm_interactions) == expected_spec["llm_count"], (
+            f"Chat {message_key}: Expected {expected_spec['llm_count']} LLM interactions, "
             f"got {len(llm_interactions)}"
         )
-        assert len(mcp_interactions) == expected_chat["mcp_count"], (
-            f"Chat {message_key}: Expected {expected_chat['mcp_count']} MCP interactions, "
+        assert len(mcp_interactions) == expected_spec["mcp_count"], (
+            f"Chat {message_key}: Expected {expected_spec['mcp_count']} MCP interactions, "
             f"got {len(mcp_interactions)}"
         )
         
         # Verify complete interaction flow in chronological order
         chronological_interactions = chat_stage.get("chronological_interactions", [])
-        assert len(chronological_interactions) == len(expected_chat["interactions"]), (
+        assert len(chronological_interactions) == len(expected_spec["interactions"]), (
             f"Chat {message_key} chronological interaction count mismatch: "
-            f"expected {len(expected_chat['interactions'])}, got {len(chronological_interactions)}"
+            f"expected {len(expected_spec['interactions'])}, got {len(chronological_interactions)}"
         )
         
         # Verify each interaction
-        for i, expected_interaction in enumerate(expected_chat["interactions"]):
+        for i, expected_interaction in enumerate(expected_spec["interactions"]):
             actual_interaction = chronological_interactions[i]
             interaction_type = expected_interaction["type"]
             
@@ -551,16 +608,28 @@ Action Input: {"resource": "pods", "label_selector": "app=database", "namespace"
             )
             
             if interaction_type == "llm":
-                # Skip conversation content validation for chat (investigation history makes it complex)
-                # Just verify structure
-                actual_conversation = details.get("conversation")
-                assert actual_conversation is not None, (
-                    f"Chat {message_key} LLM interaction {i+1} missing conversation"
-                )
-                actual_messages = actual_conversation.get("messages", [])
-                assert len(actual_messages) > 0, (
-                    f"Chat {message_key} LLM interaction {i+1} has no messages"
-                )
+                # Verify the actual conversation matches the expected conversation
+                actual_conversation = details["conversation"]
+                actual_messages = actual_conversation["messages"]
+                
+                if "conversation_index" in expected_interaction:
+                    # Use conversation_index to slice from the expected conversation
+                    expected_conversation_index = expected_interaction["conversation_index"]
+                    assert_conversation_messages(
+                        expected_conversation, actual_messages, expected_conversation_index
+                    )
+                elif "conversation" in expected_interaction:
+                    # Use the provided conversation directly
+                    expected_conversation_for_interaction = expected_interaction["conversation"]
+                    expected_message_count = len(expected_conversation_for_interaction["messages"])
+                    assert_conversation_messages(
+                        expected_conversation_for_interaction, actual_messages, expected_message_count
+                    )
+                else:
+                    raise AssertionError(
+                        f"Chat {message_key} interaction {i+1} missing both "
+                        "'conversation_index' and 'conversation' fields"
+                    )
                 
                 # Verify token usage
                 if "input_tokens" in expected_interaction:
