@@ -31,7 +31,6 @@ class TestMainLifespan:
         return MockFactory.create_mock_settings(
             log_level="INFO",
             max_concurrent_alerts=5,
-            history_enabled=True,
             cors_origins=["*"],
             host="localhost",
             port=8000
@@ -108,7 +107,6 @@ class TestMainLifespan:
         mock_get_settings.return_value = Mock(
             log_level="INFO", 
             max_concurrent_alerts=5, 
-            history_enabled=True,
             cors_origins=["*"],
             database_url="sqlite:///test.db",
             history_retention_days=90,
@@ -134,42 +132,6 @@ class TestMainLifespan:
         deps['history'].cleanup_orphaned_sessions.assert_called_once()
 
     @patch('tarsy.main.get_settings')
-    async def test_lifespan_startup_with_history_disabled(
-        self, mock_get_settings, mock_lifespan_dependencies
-    ):
-        """Test application startup with history service disabled."""
-        deps = mock_lifespan_dependencies
-        
-        # Setup mocks
-        mock_get_settings.return_value = Mock(
-            log_level="INFO",
-            max_concurrent_alerts=5,
-            history_enabled=False,
-            cors_origins=["*"],
-            database_url="sqlite:///test.db",
-            history_retention_days=90,
-            history_cleanup_interval_hours=12
-        )
-        deps['init_db'].return_value = False
-        deps['db_info'].return_value = {"enabled": False}
-
-        # Test lifespan manager
-        @asynccontextmanager 
-        async def test_lifespan(app):
-            async with lifespan(app):
-                yield
-
-        async with test_lifespan(app):
-            pass
-
-        # Verify startup calls - history service should not be initialized
-        deps['setup_logging'].assert_called_once()
-        deps['alert_service'].initialize.assert_called_once()
-        
-        # History service should not be called
-        deps['history_service'].assert_not_called()
-
-    @patch('tarsy.main.get_settings')
     async def test_lifespan_startup_with_orphaned_session_cleanup_error(
         self, mock_get_settings, mock_lifespan_dependencies
     ):
@@ -180,7 +142,6 @@ class TestMainLifespan:
         mock_get_settings.return_value = Mock(
             log_level="INFO",
             max_concurrent_alerts=5,
-            history_enabled=True,
             cors_origins=["*"],
             database_url="sqlite:///test.db",
             history_retention_days=90,
@@ -221,7 +182,6 @@ class TestMainLifespan:
             history_retention_days=90,
             history_cleanup_interval_hours=12,
             max_concurrent_alerts=5,
-            history_enabled=True,  # History enabled
             cors_origins=["*"]
         )
         deps['init_db'].return_value = False  # DB initialization fails
@@ -258,7 +218,6 @@ class TestMainLifespan:
         mock_get_settings.return_value = Mock(
             log_level="INFO",
             max_concurrent_alerts=5,
-            history_enabled=True,
             cors_origins=["*"],
             database_url="sqlite:///test.db",
             history_retention_days=90,
@@ -300,7 +259,6 @@ class TestMainLifespan:
         mock_get_settings.return_value = Mock(
             log_level="INFO",
             max_concurrent_alerts=5,
-            history_enabled=True,
             cors_origins=["*"],
             database_url="sqlite:///test.db",
             history_retention_days=90,

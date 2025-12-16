@@ -73,9 +73,9 @@ class StageExecutionManager:
         Raises:
             RuntimeError: If stage execution record cannot be created
         """
-        if not self.history_service or not self.history_service.is_enabled:
+        if not self.history_service:
             raise RuntimeError(
-                f"Cannot create stage execution for '{stage.name}': History service is disabled. "
+                f"Cannot create stage execution for '{stage.name}': History service is unavailable. "
                 "All alert processing must be done as chains with proper stage tracking."
             )
         
@@ -118,25 +118,24 @@ class StageExecutionManager:
         # CRITICAL: Verify the stage execution was actually created in the database
         # The hooks use safe_execute which catches exceptions and returns False instead of propagating
         # We need to explicitly verify the record exists in the database
-        if self.history_service:
-            try:
-                # Use the history service's proper method to verify the record exists
-                verified_stage = await self.history_service.get_stage_execution(stage_execution.execution_id)
-                
-                if not verified_stage:
-                    raise RuntimeError(
-                        f"Stage execution {stage_execution.execution_id} for '{stage.name}' was not found in database after creation. "
-                        "The history hook may have failed silently. Check history service logs for errors."
-                    )
-                    
-                logger.debug(f"Verified stage execution {stage_execution.execution_id} exists in database")
-                
-            except Exception as e:
-                logger.error(f"Failed to verify stage execution in database: {e}")
+        try:
+            # Use the history service's proper method to verify the record exists
+            verified_stage = await self.history_service.get_stage_execution(stage_execution.execution_id)
+            
+            if not verified_stage:
                 raise RuntimeError(
-                    f"Cannot verify stage execution {stage_execution.execution_id} was created in database. "
-                    f"Chain processing cannot continue without confirmation. Error: {str(e)}"
-                ) from e
+                    f"Stage execution {stage_execution.execution_id} for '{stage.name}' was not found in database after creation. "
+                    "The history hook may have failed silently. Check history service logs for errors."
+                )
+                
+            logger.debug(f"Verified stage execution {stage_execution.execution_id} exists in database")
+            
+        except Exception as e:
+            logger.error(f"Failed to verify stage execution in database: {e}")
+            raise RuntimeError(
+                f"Cannot verify stage execution {stage_execution.execution_id} was created in database. "
+                f"Chain processing cannot continue without confirmation. Error: {str(e)}"
+            ) from e
         
         return stage_execution.execution_id
     
@@ -152,9 +151,9 @@ class StageExecutionManager:
         Raises:
             RuntimeError: If session current stage cannot be updated
         """
-        if not self.history_service or not self.history_service.is_enabled:
+        if not self.history_service:
             raise RuntimeError(
-                f"Cannot update session current stage for '{session_id}': History service is disabled. "
+                f"Cannot update session current stage for '{session_id}': History service is unavailable. "
                 "All alert processing must be done with proper stage tracking."
             )
         
@@ -189,7 +188,7 @@ class StageExecutionManager:
         """
         if not self.history_service:
             raise RuntimeError(
-                f"Cannot update stage execution {stage_execution_id} as completed: History service is disabled. "
+                f"Cannot update stage execution {stage_execution_id} as completed: History service is unavailable. "
                 "All alert processing must be done with proper stage tracking."
             )
         
@@ -240,7 +239,7 @@ class StageExecutionManager:
         """
         if not self.history_service:
             raise RuntimeError(
-                f"Cannot update stage execution {stage_execution_id} as failed: History service is disabled. "
+                f"Cannot update stage execution {stage_execution_id} as failed: History service is unavailable. "
                 "All alert processing must be done with proper stage tracking."
             )
         
@@ -296,7 +295,7 @@ class StageExecutionManager:
         """
         if not self.history_service:
             raise RuntimeError(
-                f"Cannot update stage execution {stage_execution_id} as paused: History service is disabled. "
+                f"Cannot update stage execution {stage_execution_id} as paused: History service is unavailable. "
                 "All alert processing must be done with proper stage tracking."
             )
         
@@ -351,7 +350,7 @@ class StageExecutionManager:
         """
         if not self.history_service:
             raise RuntimeError(
-                f"Cannot update stage execution {stage_execution_id} as started: History service is disabled. "
+                f"Cannot update stage execution {stage_execution_id} as started: History service is unavailable. "
                 "All alert processing must be done with proper stage tracking."
             )
         
