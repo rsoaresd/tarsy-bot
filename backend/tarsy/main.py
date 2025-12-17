@@ -775,11 +775,15 @@ async def process_alert_background(session_id: str, alert: ChainContext) -> None
                     
                     if is_user_cancellation:
                         # User-requested cancellation
+                        # Update session status
                         history_service.update_session_status(
                             session_id=session_id,
                             status=AlertSessionStatus.CANCELLED.value,
                             error_message="Session cancelled by user"
                         )
+                        
+                        # Update all paused stages to CANCELLED for consistency
+                        await history_service.cancel_all_paused_stages(session_id)
                         
                         # Publish cancellation event
                         await publish_session_cancelled(session_id)

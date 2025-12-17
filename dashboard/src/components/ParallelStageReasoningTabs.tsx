@@ -5,15 +5,19 @@ import {
   Chip,
   Alert,
   alpha,
+  Button,
 } from '@mui/material';
 import {
   CheckCircle,
   Error as ErrorIcon,
   PlayArrow,
   CallSplit,
+  CancelOutlined,
+  PauseCircle,
 } from '@mui/icons-material';
 import type { ChatFlowItemData } from '../utils/chatFlowParser';
 import type { StageExecution } from '../types';
+import { apiClient, handleAPIError } from '../services/api';
 import ChatFlowItem from './ChatFlowItem';
 import StreamingContentRenderer, { type StreamingItem } from './StreamingContentRenderer';
 import { getParallelStageLabel } from '../utils/parallelStageHelpers';
@@ -61,6 +65,8 @@ function TabPanel(props: TabPanelProps) {
 const getStatusIcon = (status: string) => {
   if (status === 'failed') return <ErrorIcon fontSize="small" />;
   if (status === 'completed') return <CheckCircle fontSize="small" />;
+  if (status === 'cancelled') return <CancelOutlined fontSize="small" />;
+  if (status === 'paused') return <PauseCircle fontSize="small" />;
   return <PlayArrow fontSize="small" />;
 };
 
@@ -68,6 +74,8 @@ const getStatusIcon = (status: string) => {
 const getStatusColor = (status: string) => {
   if (status === 'failed') return 'error';
   if (status === 'completed') return 'success';
+  if (status === 'cancelled') return 'default';
+  if (status === 'paused') return 'warning';
   return 'primary';
 };
 
@@ -75,6 +83,8 @@ const getStatusColor = (status: string) => {
 const getStatusLabel = (status: string) => {
   if (status === 'failed') return 'Failed';
   if (status === 'completed') return 'Complete';
+  if (status === 'cancelled') return 'Cancelled';
+  if (status === 'paused') return 'Paused';
   if (status === 'active') return 'Running';
   return 'Pending';
 };
@@ -91,6 +101,28 @@ const ParallelStageReasoningTabs: React.FC<ParallelStageReasoningTabsProps> = ({
   streamingItems = [],
 }) => {
   const [selectedTab, setSelectedTab] = useState(0);
+  const [cancelingAgents, setCancelingAgents] = useState<Set<string>>(new Set());
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // Handler to cancel an individual agent
+  const handleCancelAgent = async (executionId: string) => {
+    setCancelingAgents(prev => new Set(prev).add(executionId));
+    setCancelError(null);
+    
+    try {
+      await apiClient.cancelAgent(stage.session_id, executionId);
+      // UI will update via WebSocket events
+    } catch (error) {
+      const errorMessage = handleAPIError(error);
+      setCancelError(errorMessage);
+      // Remove from canceling set on error
+      setCancelingAgents(prev => {
+        const next = new Set(prev);
+        next.delete(executionId);
+        return next;
+      });
+    }
+  };
 
   // Group DB items by executionId
   const executionGroups = new Map<string, ChatFlowItemData[]>();
@@ -197,6 +229,13 @@ const ParallelStageReasoningTabs: React.FC<ParallelStageReasoningTabsProps> = ({
             sx={{ height: 20, fontSize: '0.7rem' }}
           />
         </Box>
+
+        {/* Error Display */}
+        {cancelError && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {cancelError}
+          </Alert>
+        )}
 
         {/* Agent Cards */}
         <Box
@@ -341,6 +380,69 @@ const ParallelStageReasoningTabs: React.FC<ParallelStageReasoningTabsProps> = ({
                 <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
                   No reasoning steps available for this agent
                 </Typography>
+              )}
+
+              {/* Agent-Level Cancel Button - Only for paused agents */}
+              {execution.stageExecution.status === 'paused' && (
+                <Box 
+                  sx={{ 
+                    mt: 3, 
+                    pt: 2.5,
+                    borderTop: 1,
+                    borderColor: 'divider',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                >
+                  <Typography 
+                    variant="caption" 
+                    color="text.secondary" 
+                    sx={{ 
+                      textAlign: 'center',
+                      fontWeight: 500,
+                    }}
+                  >
+                    Agent-Level Action for <strong>{getParallelStageLabel(execution.stageExecution, execution.index, stage.parallel_type)}</strong>
+                  </Typography>
+                  
+                  <Button
+                    size="medium"
+                    color="error"
+                    variant="outlined"
+                    startIcon={<CancelOutlined />}
+                    onClick={() => handleCancelAgent(execution.stageExecution.execution_id)}
+                    disabled={cancelingAgents.has(execution.stageExecution.execution_id)}
+                    sx={{ 
+                      minWidth: 200,
+                      fontWeight: 600,
+                      borderWidth: 1.5,
+                      '&:hover': {
+                        backgroundColor: 'error.main',
+                        borderColor: 'error.main',
+                        color: 'white',
+                        borderWidth: 1.5,
+                      }
+                    }}
+                  >
+                    {cancelingAgents.has(execution.stageExecution.execution_id) 
+                      ? 'Canceling Agent...' 
+                      : 'Cancel This Agent'}
+                  </Button>
+                  
+                  <Typography 
+                    variant="caption" 
+                    color="text.secondary" 
+                    sx={{ 
+                      textAlign: 'center',
+                      maxWidth: 450,
+                      fontSize: '0.7rem',
+                    }}
+                  >
+                    This will cancel only this specific agent. Other parallel agents will continue running.
+                  </Typography>
+                </Box>
               )}
             </Box>
           </TabPanel>

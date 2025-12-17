@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from tarsy.config.settings import get_settings
 from tarsy.models.agent_config import ChainConfigModel
-from tarsy.models.constants import AlertSessionStatus
+from tarsy.models.constants import AlertSessionStatus, StageStatus
 from tarsy.models.db_models import AlertSession, Chat, ChatUserMessage, StageExecution
 from tarsy.models.history_models import (
     ConversationMessage,
@@ -607,6 +607,69 @@ class HistoryService:
         )
         return result or []
     
+    async def get_paused_stages(self, session_id: str) -> List[StageExecution]:
+        """Get all paused stage executions for a session, including parallel children.
+        
+        Flattens parent stages and their parallel_executions before filtering
+        to ensure paused parallel child stages are included.
+        """
+        def _get_paused_stages_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    raise RuntimeError("History repository unavailable - cannot retrieve paused stages")
+                # Get all stages for session (parents with parallel_executions attached)
+                stages = repo.get_stage_executions_for_session(session_id)
+                # Build combined list: each parent + its parallel children
+                all_stages: List[StageExecution] = []
+                for stage in stages:
+                    all_stages.append(stage)
+                    # Include parallel child stages if present
+                    parallel_children = getattr(stage, 'parallel_executions', None)
+                    if parallel_children:
+                        all_stages.extend(parallel_children)
+                # Filter for paused stages (both parents and children)
+                return [s for s in all_stages if s.status == StageStatus.PAUSED.value]
+        
+        result = await self._retry_database_operation_async(
+            "get_paused_stages",
+            _get_paused_stages_operation,
+            treat_none_as_success=True,
+        )
+        return result or []
+    
+    async def cancel_all_paused_stages(self, session_id: str) -> int:
+        """
+        Cancel all paused stages for a session.
+        
+        Updates all paused stages to CANCELLED status with proper timestamps
+        and duration calculations. Used during session cancellation.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Number of stages cancelled
+        """
+        paused_stages = await self.get_paused_stages(session_id)
+        if not paused_stages:
+            return 0
+        
+        current_time = now_us()
+        for stage in paused_stages:
+            stage.status = StageStatus.CANCELLED.value
+            stage.error_message = "Cancelled by user"
+            # Use paused_at_us if available, otherwise current time
+            stage.completed_at_us = stage.paused_at_us or current_time
+            # Calculate duration if we have start time
+            if stage.started_at_us and stage.completed_at_us:
+                duration_us = stage.completed_at_us - stage.started_at_us
+                stage.duration_ms = int(duration_us / 1000)
+            # Persist the updated stage
+            await self.update_stage_execution(stage)
+        
+        logger.info(f"Cancelled {len(paused_stages)} paused stages for session {session_id}")
+        return len(paused_stages)
+    
     # LLM Interaction Logging
     def store_llm_interaction(self, interaction: LLMInteraction) -> bool:
         """
@@ -804,9 +867,6 @@ class HistoryService:
             Number of stages marked as failed
         """
         from sqlmodel import select
-
-        from tarsy.models.constants import StageStatus
-        from tarsy.models.db_models import StageExecution
         
         try:
             # Get all stages for this session that are not already in terminal states
