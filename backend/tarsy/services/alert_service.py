@@ -29,6 +29,7 @@ from tarsy.models.agent_execution_result import AgentExecutionResult
 from tarsy.models.api_models import CancelAgentResponse, ChainExecutionResult
 from tarsy.models.constants import (
     AlertSessionStatus,
+    CancellationReason,
     ChainStatus,
     ParallelType,
     ProgressPhase,
@@ -49,6 +50,7 @@ from tarsy.services.response_formatter import (
 from tarsy.services.runbook_service import RunbookService
 from tarsy.services.session_manager import SessionManager
 from tarsy.services.stage_execution_manager import StageExecutionManager
+from tarsy.utils.agent_execution_utils import extract_cancellation_reason, get_stage_agent_label
 from tarsy.utils.logger import get_module_logger
 from tarsy.utils.timestamp import now_us
 
@@ -1468,6 +1470,23 @@ class AlertService:
                             await self.stage_manager.update_stage_execution_failed(stage_execution_id, error_msg)
                             failed_stages += 1
                     
+                except asyncio.CancelledError as e:
+                    # Cancellation is a normal control-flow event (user cancel, timeout, shutdown).
+                    # In Python 3.13+, CancelledError derives from BaseException and will not be
+                    # caught by `except Exception`.
+                    reason = extract_cancellation_reason(e)
+                    logger.info(
+                        "Stage '%s' cancelled (reason=%s) in session %s",
+                        stage.name,
+                        reason,
+                        chain_context.session_id,
+                    )
+                    if stage_execution_id:
+                        await self.stage_manager.update_stage_execution_cancelled(
+                            stage_execution_id, reason
+                        )
+                    raise
+
                 except Exception as e:
                     # Check if this is a pause signal (SessionPaused)
                     if isinstance(e, SessionPaused):
@@ -1524,8 +1543,12 @@ class AlertService:
                             timestamp_us=now_us()
                         )
                     
-                    # Log the error with full context
-                    error_msg = f"Stage '{stage.name}' failed with agent '{stage.agent}': {str(e)}"
+                    # Log the error with full context.
+                    #
+                    # Note: for multi-agent parallel stages, `stage.agent` is None. Use a stable label
+                    # to avoid secondary failures while constructing error results.
+                    agent_label = get_stage_agent_label(stage)
+                    error_msg = f"Stage '{stage.name}' failed with agent '{agent_label}': {str(e)}"
                     logger.error(error_msg, exc_info=True)
                     
                     # Update stage execution as failed (only for non-parallel stages with execution_id)
@@ -1536,7 +1559,7 @@ class AlertService:
                     # Add structured error as stage output for next stages
                     error_result = AgentExecutionResult(
                         status=StageStatus.FAILED,
-                        agent_name=stage.agent,
+                        agent_name=agent_label,
                         stage_name=stage.name,
                         timestamp_us=now_us(),
                         result_summary=f"Stage '{stage.name}' failed: {str(e)}",
