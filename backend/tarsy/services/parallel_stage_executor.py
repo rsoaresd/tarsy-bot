@@ -274,20 +274,10 @@ class ParallelStageExecutor:
                     )
                 )
                 
-                # Execute agent with timeout protection
-                # Use alert_processing_timeout as maximum time for any single agent
-                # This prevents individual agents from consuming entire session budget
-                try:
-                    # Create isolated context copy to prevent concurrent mutation across parallel agents
-                    agent_context = chain_context.model_copy(deep=True)
-                    result = await asyncio.wait_for(
-                        agent.process_alert(agent_context),
-                        timeout=self.settings.alert_processing_timeout
-                    )
-                except asyncio.TimeoutError:
-                    raise TimeoutError(
-                        f"Agent '{agent_name}' exceeded {self.settings.alert_processing_timeout}s timeout"
-                    ) from None
+                # Execute agent (timeout protection is built into BaseAgent.process_alert)
+                # Create isolated context copy to prevent concurrent mutation across parallel agents
+                agent_context = chain_context.model_copy(deep=True)
+                result = await agent.process_alert(agent_context)
                 
                 # Override agent_name for replicas
                 if parallel_type == "replica":
@@ -716,19 +706,10 @@ class ParallelStageExecutor:
                     )
                 )
                 
-                # Execute agent with timeout protection
-                # Use alert_processing_timeout as maximum time for any single agent
-                try:
-                    # Create isolated context copy to prevent concurrent mutation across parallel agents
-                    agent_context = chain_context.model_copy(deep=True)
-                    result = await asyncio.wait_for(
-                        agent.process_alert(agent_context),
-                        timeout=self.settings.alert_processing_timeout
-                    )
-                except asyncio.TimeoutError:
-                    raise TimeoutError(
-                        f"Agent '{agent_name}' exceeded {self.settings.alert_processing_timeout}s timeout during resume"
-                    ) from None
+                # Execute agent (timeout protection is built into BaseAgent.process_alert)
+                # Create isolated context copy to prevent concurrent mutation across parallel agents
+                agent_context = chain_context.model_copy(deep=True)
+                result = await agent.process_alert(agent_context)
                 
                 # Override agent_name for replicas
                 if paused_parent_stage.parallel_type == "replica":
@@ -995,7 +976,7 @@ class ParallelStageExecutor:
             original_stage = chain_context.current_stage_name
             chain_context.current_stage_name = "synthesis"
             
-            # Execute synthesis agent with parallel results already in context
+            # Execute synthesis agent (timeout protection is built into BaseAgent.process_alert)
             logger.info(f"Executing {synthesis_config.agent} with {synthesis_config.iteration_strategy} strategy to synthesize parallel investigation results")
             synthesis_result = await synthesis_agent.process_alert(chain_context)
             
