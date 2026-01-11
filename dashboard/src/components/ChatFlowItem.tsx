@@ -12,10 +12,10 @@ import type { ChatFlowItemData } from '../utils/chatFlowParser';
 import { formatDurationMs } from '../utils/timestamp';
 import { 
   hasMarkdownSyntax, 
-  finalAnswerMarkdownComponents, 
   thoughtMarkdownComponents 
 } from '../utils/markdownComponents';
 import { FADE_COLLAPSE_ANIMATION } from '../constants/chatFlowAnimations';
+import { CHAT_FLOW_ITEM_TYPES } from '../constants/chatFlowItemTypes';
 
 interface ChatFlowItemProps {
   item: ChatFlowItemData;
@@ -53,7 +53,7 @@ function ChatFlowItem({
   const collapsedLeadingIconOpacity = shouldShowCollapsed ? 0.6 : 1;
   
   // Render stage start separator with collapse/expand control
-  if (item.type === 'stage_start') {
+  if (item.type === CHAT_FLOW_ITEM_TYPES.STAGE_START) {
     const isFailed = item.stageStatus === 'failed';
     const hasError = isFailed && item.stageErrorMessage;
     
@@ -157,7 +157,7 @@ function ChatFlowItem({
   }
 
   // Render thought - with hybrid markdown support (only parse markdown when detected)
-  if (item.type === 'thought') {
+  if (item.type === CHAT_FLOW_ITEM_TYPES.THOUGHT) {
     const hasMarkdown = hasMarkdownSyntax(item.content || '');
     const interactionDurationLabel =
       item.interaction_duration_ms != null && item.interaction_duration_ms > 0
@@ -196,30 +196,41 @@ function ChatFlowItem({
           {/* Collapsible content */}
           <Collapse in={!shouldShowCollapsed} timeout={300}>
             <Box sx={{ mt: 0.5 }}>
-              {hasMarkdown ? (
-                <Box sx={{ color: 'text.primary' }}>
-                  <ReactMarkdown
-                    components={thoughtMarkdownComponents}
-                    remarkPlugins={[remarkBreaks]}
-                    skipHtml
+              {/* Thinking content box - no fixed height when finalized (adjusts to content) */}
+              <Box 
+                sx={(theme) => ({ 
+                  bgcolor: alpha(theme.palette.grey[300], 0.15),
+                  border: '1px solid',
+                  borderColor: alpha(theme.palette.grey[400], 0.2),
+                  borderRadius: 1,
+                  p: 1.5
+                })}
+              >
+                {hasMarkdown ? (
+                  <Box sx={{ color: 'text.primary' }}>
+                    <ReactMarkdown
+                      components={thoughtMarkdownComponents}
+                      remarkPlugins={[remarkBreaks]}
+                      skipHtml
+                    >
+                      {item.content || ''}
+                    </ReactMarkdown>
+                  </Box>
+                ) : (
+                  <Typography 
+                    variant="body1" 
+                    sx={{ 
+                      whiteSpace: 'pre-wrap', 
+                      wordBreak: 'break-word',
+                      lineHeight: 1.7,
+                      fontSize: '1rem',
+                      color: 'text.primary'
+                    }}
                   >
-                    {item.content || ''}
-                  </ReactMarkdown>
-                </Box>
-              ) : (
-                <Typography 
-                  variant="body1" 
-                  sx={{ 
-                    whiteSpace: 'pre-wrap', 
-                    wordBreak: 'break-word',
-                    lineHeight: 1.7,
-                    fontSize: '1rem',
-                    color: 'text.primary'
-                  }}
-                >
-                  {item.content}
-                </Typography>
-              )}
+                    {item.content}
+                  </Typography>
+                )}
+              </Box>
               {isCollapsible && onToggleAutoCollapse && <CollapseButton onClick={onToggleAutoCollapse} />}
             </Box>
           </Collapse>
@@ -229,7 +240,7 @@ function ChatFlowItem({
   }
 
   // Render native thinking (Gemini 3.0+ native thinking mode)
-  if (item.type === 'native_thinking') {
+  if (item.type === CHAT_FLOW_ITEM_TYPES.NATIVE_THINKING) {
     const hasMarkdown = hasMarkdownSyntax(item.content || '');
     const interactionDurationLabel =
       item.interaction_duration_ms != null && item.interaction_duration_ms > 0
@@ -268,38 +279,49 @@ function ChatFlowItem({
           {/* Collapsible content */}
           <Collapse in={!shouldShowCollapsed} timeout={300}>
             <Box sx={{ mt: 0.5 }}>
-              {hasMarkdown ? (
-                <Box sx={{
-                  '& p, & li': {
+              {/* Thinking content box - no fixed height when finalized (adjusts to content) */}
+              <Box 
+                sx={(theme) => ({ 
+                  bgcolor: alpha(theme.palette.grey[300], 0.15),
+                  border: '1px solid',
+                  borderColor: alpha(theme.palette.grey[400], 0.2),
+                  borderRadius: 1,
+                  p: 1.5
+                })}
+              >
+                {hasMarkdown ? (
+                  <Box sx={{
+                    '& p, & li': {
+                      color: 'text.secondary',
+                      fontStyle: 'italic',
+                    },
                     color: 'text.secondary',
                     fontStyle: 'italic',
-                  },
-                  color: 'text.secondary',
-                  fontStyle: 'italic',
-                }}>
-                  <ReactMarkdown
-                    components={thoughtMarkdownComponents}
-                    remarkPlugins={[remarkBreaks]}
-                    skipHtml
+                  }}>
+                    <ReactMarkdown
+                      components={thoughtMarkdownComponents}
+                      remarkPlugins={[remarkBreaks]}
+                      skipHtml
+                    >
+                      {item.content || ''}
+                    </ReactMarkdown>
+                  </Box>
+                ) : (
+                  <Typography 
+                    variant="body1" 
+                    sx={{ 
+                      whiteSpace: 'pre-wrap', 
+                      wordBreak: 'break-word',
+                      lineHeight: 1.7,
+                      fontSize: '1rem',
+                      color: 'text.secondary',
+                      fontStyle: 'italic'
+                    }}
                   >
-                    {item.content || ''}
-                  </ReactMarkdown>
-                </Box>
-              ) : (
-                <Typography 
-                  variant="body1" 
-                  sx={{ 
-                    whiteSpace: 'pre-wrap', 
-                    wordBreak: 'break-word',
-                    lineHeight: 1.7,
-                    fontSize: '1rem',
-                    color: 'text.secondary',
-                    fontStyle: 'italic'
-                  }}
-                >
-                  {item.content}
-                </Typography>
-              )}
+                    {item.content}
+                  </Typography>
+                )}
+              </Box>
               {isCollapsible && onToggleAutoCollapse && <CollapseButton onClick={onToggleAutoCollapse} />}
             </Box>
           </Collapse>
@@ -308,8 +330,59 @@ function ChatFlowItem({
     );
   }
 
-  // Render final answer - emphasized text with emoji and markdown support
-  if (item.type === 'final_answer') {
+  // Render intermediate response (native thinking - intermediate iterations)
+  // No header label, just icon and content with light markdown
+  if (item.type === CHAT_FLOW_ITEM_TYPES.INTERMEDIATE_RESPONSE) {
+    const hasMarkdown = hasMarkdownSyntax(item.content || '');
+    
+    return (
+      <Box 
+        sx={{ 
+          mb: 1.5,
+          display: 'flex', 
+          gap: 1.5,
+          alignItems: 'flex-start'
+        }}
+      >
+        <EmojiIcon
+          emoji="💬"
+          opacity={1}
+        />
+        
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          {hasMarkdown ? (
+            <Box sx={{ color: 'text.primary' }}>
+              <ReactMarkdown
+                components={thoughtMarkdownComponents}
+                remarkPlugins={[remarkBreaks]}
+                skipHtml
+              >
+                {item.content || ''}
+              </ReactMarkdown>
+            </Box>
+          ) : (
+            <Typography 
+              variant="body1" 
+              sx={{ 
+                whiteSpace: 'pre-wrap', 
+                wordBreak: 'break-word',
+                lineHeight: 1.7,
+                fontSize: '1rem',
+                color: 'text.primary'
+              }}
+            >
+              {item.content}
+            </Typography>
+          )}
+        </Box>
+      </Box>
+    );
+  }
+
+  // Render final answer - uses same style as intermediate_response for smooth transition
+  if (item.type === CHAT_FLOW_ITEM_TYPES.FINAL_ANSWER) {
+    const hasMarkdown = hasMarkdownSyntax(item.content || '');
+    
     return (
       <Box 
         sx={{ 
@@ -342,36 +415,32 @@ function ChatFlowItem({
           
           {/* Collapsible content */}
           <Collapse in={!shouldShowCollapsed} timeout={300}>
-            <Box sx={{ 
-              mt: 0.5,
-              bgcolor: (theme) => alpha(theme.palette.success.main, 0.06),
-              border: '1px solid',
-              borderColor: (theme) => alpha(theme.palette.success.main, 0.25),
-              borderRadius: 1.5,
-              p: 2,
-              position: 'relative',
-              // Subtle left border accent
-              '&::before': {
-                content: '""',
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: 3,
-                bgcolor: 'success.main',
-                opacity: 0.6,
-                borderRadius: '4px 0 0 4px'
-              },
-              pl: 2.5 // Extra padding for the left accent
-            }}>
-              <ReactMarkdown
-                urlTransform={defaultUrlTransform}
-                components={finalAnswerMarkdownComponents}
-                remarkPlugins={[remarkBreaks]}
-                skipHtml
-              >
-                {item.content || ''}
-              </ReactMarkdown>
+            <Box sx={{ mt: 0.5 }}>
+              {hasMarkdown ? (
+                <Box sx={{ color: 'text.primary' }}>
+                  <ReactMarkdown
+                    urlTransform={defaultUrlTransform}
+                    components={thoughtMarkdownComponents}
+                    remarkPlugins={[remarkBreaks]}
+                    skipHtml
+                  >
+                    {item.content || ''}
+                  </ReactMarkdown>
+                </Box>
+              ) : (
+                <Typography 
+                  variant="body1" 
+                  sx={{ 
+                    whiteSpace: 'pre-wrap', 
+                    wordBreak: 'break-word',
+                    lineHeight: 1.7,
+                    fontSize: '1rem',
+                    color: 'text.primary'
+                  }}
+                >
+                  {item.content}
+                </Typography>
+              )}
               {isCollapsible && onToggleAutoCollapse && <CollapseButton onClick={onToggleAutoCollapse} />}
             </Box>
           </Collapse>
@@ -381,7 +450,7 @@ function ChatFlowItem({
   }
 
   // Render tool call - indented expandable box
-  if (item.type === 'tool_call') {
+  if (item.type === CHAT_FLOW_ITEM_TYPES.TOOL_CALL) {
     return (
       <ToolCallBox
         toolName={item.toolName || 'unknown'}
@@ -395,7 +464,7 @@ function ChatFlowItem({
     );
   }
 
-  if (item.type === 'user_message') {
+  if (item.type === CHAT_FLOW_ITEM_TYPES.USER_MESSAGE) {
     return (
       <Box sx={{ mb: 1.5, position: 'relative' }}>
         {/* User avatar icon - positioned absolutely */}
@@ -464,7 +533,7 @@ function ChatFlowItem({
   }
 
   // Render summarization - with hybrid markdown support (maintains amber styling)
-  if (item.type === 'summarization') {
+  if (item.type === CHAT_FLOW_ITEM_TYPES.SUMMARIZATION) {
     const hasMarkdown = hasMarkdownSyntax(item.content || '');
     
     return (
@@ -545,7 +614,7 @@ function ChatFlowItem({
   }
 
   // Render native tool usage indicators
-  if (item.type === 'native_tool_usage' && item.nativeToolsUsage) {
+  if (item.type === CHAT_FLOW_ITEM_TYPES.NATIVE_TOOL_USAGE && item.nativeToolsUsage) {
     return <NativeToolsBox usage={item.nativeToolsUsage} />;
   }
 
