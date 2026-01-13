@@ -259,7 +259,7 @@ BUILTIN_LLM_PROVIDERS: Dict[str, LLMProviderConfig] = {
     ),
     "google-default": LLMProviderConfig(
         type=LLMProviderType.GOOGLE, 
-        model="gemini-2.5-flash",
+        model="gemini-2.5-pro",
         api_key_env="GOOGLE_API_KEY",
         native_tools={
             GoogleNativeTool.GOOGLE_SEARCH.value: True,
