@@ -11,6 +11,7 @@
  * THOUGHT: ReAct pattern thought
  * TOOL_CALL: MCP tool execution
  * FINAL_ANSWER: Final answer/result
+ * FORCED_CONCLUSION: Forced conclusion when max iterations reached
  * STAGE_START: Stage execution marker
  * SUMMARIZATION: Tool result summarization
  * USER_MESSAGE: User's chat message
@@ -22,6 +23,7 @@ export const CHAT_FLOW_ITEM_TYPES = {
   THOUGHT: 'thought',
   TOOL_CALL: 'tool_call',
   FINAL_ANSWER: 'final_answer',
+  FORCED_CONCLUSION: 'forced_conclusion',
   STAGE_START: 'stage_start',
   SUMMARIZATION: 'summarization',
   USER_MESSAGE: 'user_message',

@@ -146,7 +146,13 @@ class IterationController(ABC):
         logger=None
     ) -> None:
         """
-        Raise appropriate exception when max iterations reached.
+        Handle max iterations: fail if error, conclude if configured/chat, otherwise pause.
+        
+        Decision logic:
+        1. If last interaction failed → always raise MaxIterationsFailureError
+        2. If chat context → always raise ForceConclusion
+        3. If force_conclusion_at_max_iterations enabled → raise ForceConclusion
+        4. Otherwise → raise SessionPaused (existing behavior)
         
         Args:
             max_iterations: The maximum iteration count that was reached
@@ -157,11 +163,21 @@ class IterationController(ABC):
             
         Raises:
             MaxIterationsFailureError: If last interaction failed
-            SessionPaused: If last interaction succeeded (allows resume)
+            ForceConclusion: If configured or chat context
+            SessionPaused: If not configured to force conclusion
         """
-        from ..exceptions import MaxIterationsFailureError, SessionPaused
+        from ..exceptions import MaxIterationsFailureError, SessionPaused, ForceConclusion
+        from tarsy.config.settings import get_settings
+        
+        # Check if this is a chat context
+        is_chat = context.chain_context.chat_context is not None
+        
+        # Get setting for main sessions
+        settings = get_settings()
+        force_conclusion_enabled = settings.force_conclusion_at_max_iterations
         
         if last_interaction_failed:
+            # Always fail if last interaction failed
             if logger:
                 logger.error(f"Stage failed: reached maximum iterations ({max_iterations}) with failed last interaction")
             raise MaxIterationsFailureError(
@@ -173,7 +189,26 @@ class IterationController(ABC):
                     "stage_name": context.stage_name
                 }
             )
+        
+        # Determine if we should force conclusion
+        should_force_conclusion = is_chat or force_conclusion_enabled
+        
+        if should_force_conclusion:
+            if logger:
+                reason = "chat context" if is_chat else "configuration enabled"
+                logger.info(f"Max iterations ({max_iterations}) reached, forcing conclusion ({reason})")
+            raise ForceConclusion(
+                iteration=max_iterations,
+                conversation=conversation,
+                context={
+                    "session_id": context.session_id,
+                    "stage_execution_id": context.agent.get_current_stage_execution_id() if context.agent else None,
+                    "stage_name": context.stage_name,
+                    "is_chat": is_chat
+                }
+            )
         else:
+            # Pause for manual resume (existing behavior)
             if logger:
                 logger.warning(f"Session paused: reached maximum iterations ({max_iterations}) without final answer")
             raise SessionPaused(
@@ -186,6 +221,22 @@ class IterationController(ABC):
                     "stage_name": context.stage_name
                 }
             )
+    
+    @abstractmethod
+    def _get_forced_conclusion_prompt(self, iteration: int) -> str:
+        """
+        Get strategy-specific forced conclusion prompt.
+        
+        Subclasses must implement this to provide appropriate prompts
+        for their iteration strategy (ReAct vs Native Thinking).
+        
+        Args:
+            iteration: Iteration count when limit reached
+            
+        Returns:
+            Prompt text requesting immediate conclusion
+        """
+        pass
     
     @abstractmethod
     def needs_mcp_tools(self) -> bool:
@@ -209,6 +260,103 @@ class IterationController(ABC):
             Final analysis result string
         """
         pass
+    
+    async def _call_llm_for_forced_conclusion(
+        self,
+        conversation: LLMConversation,
+        context: 'StageContext',
+        timeout: int
+    ) -> str:
+        """
+        Strategy-specific LLM call for forced conclusion.
+        
+        Controllers that support forced conclusions (ReAct, Native Thinking) should override this.
+        Controllers that don't use iterations (like Synthesis) don't need to implement this.
+        
+        Default implementation raises NotImplementedError.
+        
+        Args:
+            conversation: Current conversation with forced conclusion prompt already added
+            context: Stage context
+            timeout: Timeout in seconds
+            
+        Returns:
+            Conclusion text from LLM
+            
+        Raises:
+            NotImplementedError: If controller doesn't support forced conclusions
+            asyncio.TimeoutError: If LLM call times out
+            Exception: On LLM communication failures
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support forced conclusions. "
+            "This method should be overridden by controllers that use iterations."
+        )
+    
+    async def _force_conclusion(
+        self,
+        conversation: LLMConversation,
+        context: 'StageContext',
+        iteration: int
+    ) -> str:
+        """
+        Force LLM to conclude investigation with available data.
+        
+        Template method that handles common logic (progress updates, prompts, error handling)
+        while delegating the actual LLM call to _call_llm_for_forced_conclusion().
+        
+        Args:
+            conversation: Current conversation state
+            context: Stage context
+            iteration: Iteration count when limit reached
+            
+        Returns:
+            Conclusion text (final answer)
+        """
+        import asyncio
+        from tarsy.models.constants import ProgressPhase
+        from tarsy.config.settings import get_settings
+        from tarsy.services.events.event_helpers import publish_session_progress_update
+        
+        logger = self.logger if hasattr(self, 'logger') else None
+        if logger:
+            logger.info(f"Forcing conclusion at iteration {iteration}")
+        
+        # Publish progress update for "Concluding..." status in dashboard
+        try:
+            await publish_session_progress_update(
+                context.session_id,
+                phase=ProgressPhase.CONCLUDING,
+                metadata={"iteration": iteration}
+            )
+        except Exception as e:
+            if logger:
+                logger.warning(f"Failed to publish concluding progress update: {e}")
+        
+        # Get strategy-specific conclusion prompt
+        conclusion_prompt = self._get_forced_conclusion_prompt(iteration)
+        
+        # Add conclusion request to conversation
+        conversation.append_observation(conclusion_prompt)
+        
+        # Get settings for timeout
+        settings = get_settings()
+        
+        # Delegate to strategy-specific LLM call
+        try:
+            return await self._call_llm_for_forced_conclusion(
+                conversation=conversation,
+                context=context,
+                timeout=settings.llm_iteration_timeout
+            )
+        except asyncio.TimeoutError:
+            if logger:
+                logger.warning("Forced conclusion call timed out")
+            return f"Investigation reached iteration limit ({iteration}). Unable to complete analysis within time constraints."
+        except Exception as e:
+            if logger:
+                logger.error(f"Forced conclusion call failed: {e}")
+            return f"Investigation reached iteration limit ({iteration}). Please try breaking down your question or investigation scope."
     
     def build_synthesis_conversation(self, conversation: 'LLMConversation') -> str:
         """

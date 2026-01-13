@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Optional
 
 from tarsy.config.settings import get_settings
 from tarsy.integrations.llm.gemini_client import GeminiNativeThinkingClient
+from tarsy.models.constants import LLMInteractionType
 from tarsy.models.unified_interactions import LLMConversation, LLMMessage, MessageRole
 from tarsy.utils.logger import get_module_logger
 
@@ -373,14 +374,85 @@ class NativeThinkingController(IterationController):
                 
                 conversation.append_observation(f"Error: {error_msg}")
         
-        # 3. Max iterations reached - pause for user action or fail
-        self._raise_max_iterations_exception(
-            max_iterations=max_iterations,
-            last_interaction_failed=last_interaction_failed,
-            conversation=conversation,
-            context=context,
-            logger=self.logger
+        # 3. Max iterations reached - check if we should pause or force conclusion
+        from ..exceptions import ForceConclusion
+        
+        try:
+            self._raise_max_iterations_exception(
+                max_iterations=max_iterations,
+                last_interaction_failed=last_interaction_failed,
+                conversation=conversation,
+                context=context,
+                logger=self.logger
+            )
+        except ForceConclusion as e:
+            return await self._force_conclusion(
+                conversation=e.conversation,
+                context=context,
+                iteration=e.iteration
+            )
+        # If SessionPaused is raised, it will propagate up (existing behavior)
+    
+    def _get_forced_conclusion_prompt(self, iteration: int) -> str:
+        """
+        Get Native Thinking-specific forced conclusion prompt.
+        
+        No format requirements - Gemini uses native reasoning without markers.
+        
+        Args:
+            iteration: Iteration count when limit reached
+            
+        Returns:
+            Natural language prompt requesting conclusion
+        """
+        return self.prompt_builder.build_native_thinking_forced_conclusion_prompt(iteration)
+    
+    async def _call_llm_for_forced_conclusion(
+        self,
+        conversation: LLMConversation,
+        context: 'StageContext',
+        timeout: int
+    ) -> str:
+        """
+        Native Thinking-specific LLM call using Gemini native client.
+        
+        Uses the Gemini SDK directly (not LangChain) to maintain consistency
+        with the rest of the native thinking flow.
+        
+        Args:
+            conversation: Current conversation with forced conclusion prompt already added
+            context: Stage context
+            timeout: Timeout in seconds
+            
+        Returns:
+            Conclusion text from LLM
+            
+        Raises:
+            asyncio.TimeoutError: If LLM call times out
+            Exception: On LLM communication failures
+        """
+        agent = context.agent
+        native_client = self._get_native_client()
+        
+        response = await asyncio.wait_for(
+            native_client.generate(
+                conversation=conversation,
+                session_id=context.session_id,
+                mcp_tools=[],  # NO tools for forced conclusion
+                stage_execution_id=agent.get_current_stage_execution_id(),
+                thinking_level="high",
+                thought_signature=None,
+                parallel_metadata=agent.get_parallel_execution_metadata(),
+                interaction_type=LLMInteractionType.FORCED_CONCLUSION.value
+            ),
+            timeout=timeout
         )
+        
+        # Extract final message from response
+        if response.content:
+            return response.content
+        else:
+            return "Unable to generate conclusion (no response from LLM)"
     
     def _build_initial_conversation(self, context: 'StageContext') -> LLMConversation:
         """
