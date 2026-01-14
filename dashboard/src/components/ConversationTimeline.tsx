@@ -30,6 +30,9 @@ import { CHAT_FLOW_ITEM_TYPES } from '../constants/chatFlowItemTypes';
 import { generateItemKey } from '../utils/chatFlowItemKey';
 // Auto-scroll is now handled by the centralized system in SessionDetailPageBase
 
+// Module-level constant to avoid creating new Map on every render
+const EMPTY_AGENT_PROGRESS_MAP = new Map<string, string>();
+
 interface ProcessingIndicatorProps {
   message?: string;
   centered?: boolean;
@@ -111,6 +114,8 @@ interface ConversationTimelineProps {
   session: DetailedSession;
   autoScroll?: boolean;
   progressStatus?: string;
+  agentProgressStatuses?: Map<string, string>;
+  onSelectedAgentChange?: (executionId: string | null) => void;
 }
 
 // Extended streaming item for ConversationTimeline
@@ -359,7 +364,9 @@ export function cleanupOldSessionEntries() {
 function ConversationTimeline({ 
   session, 
   autoScroll = true, // Auto-scroll handled by centralized system
-  progressStatus = ProgressStatusMessage.PROCESSING
+  progressStatus = ProgressStatusMessage.PROCESSING,
+  agentProgressStatuses = EMPTY_AGENT_PROGRESS_MAP,
+  onSelectedAgentChange
 }: ConversationTimelineProps) {
   // Suppress unused warning - autoScroll is part of the interface but handled centrally
   void autoScroll;
@@ -1337,6 +1344,8 @@ function ConversationTimeline({
                             onToggleItemExpansion={handleToggleItemExpansion}
                             expandAllReasoning={expandAllReasoning}
                             isItemCollapsible={isItemCollapsible}
+                            agentProgressStatuses={agentProgressStatuses}
+                            onSelectedAgentChange={onSelectedAgentChange}
                           />
                         ) : (
                           <Box sx={{ p: 2, color: 'error.main' }}>

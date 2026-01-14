@@ -22,7 +22,11 @@ import { CHAT_FLOW_ITEM_TYPES } from '../constants/chatFlowItemTypes';
 import ChatFlowItem from './ChatFlowItem';
 import StreamingContentRenderer, { type StreamingItem } from './StreamingContentRenderer';
 import { getParallelStageLabel } from '../utils/parallelStageHelpers';
+import { isTerminalProgressStatus } from '../utils/statusMapping';
 import TokenUsageDisplay from './TokenUsageDisplay';
+
+// Module-level constant to avoid creating new Map on every render
+const EMPTY_AGENT_PROGRESS_MAP = new Map<string, string>();
 
 // Extended streaming item type that includes parallel execution metadata
 interface ParallelStreamingItem extends StreamingItem {
@@ -43,6 +47,10 @@ interface ParallelStageReasoningTabsProps {
   onToggleItemExpansion?: (item: ChatFlowItemData) => void;
   expandAllReasoning?: boolean;
   isItemCollapsible?: (item: ChatFlowItemData) => boolean;
+  // Per-agent progress statuses
+  agentProgressStatuses?: Map<string, string>;
+  // Callback when agent tab selection changes
+  onSelectedAgentChange?: (executionId: string | null) => void;
 }
 
 interface TabPanelProps {
@@ -109,6 +117,8 @@ const ParallelStageReasoningTabs: React.FC<ParallelStageReasoningTabsProps> = ({
   onToggleItemExpansion,
   expandAllReasoning = false,
   isItemCollapsible,
+  agentProgressStatuses = EMPTY_AGENT_PROGRESS_MAP,
+  onSelectedAgentChange,
 }) => {
   const [selectedTab, setSelectedTab] = useState(0);
   const [cancelingAgents, setCancelingAgents] = useState<Set<string>>(new Set());
@@ -191,6 +201,14 @@ const ParallelStageReasoningTabs: React.FC<ParallelStageReasoningTabsProps> = ({
     });
     // NOTE: Do NOT filter by items.length > 0 to avoid tab flickering during streaming
     // Tabs should remain stable even when streaming items are being deduplicated
+
+  // Notify parent when selected tab changes
+  React.useEffect(() => {
+    if (onSelectedAgentChange && executions[selectedTab]) {
+      const executionId = executions[selectedTab].executionId;
+      onSelectedAgentChange(executionId);
+    }
+  }, [selectedTab, executions, onSelectedAgentChange]);
 
   // Safety check - only show alert if there are truly no parallel executions
   if (executions.length === 0 && parallelExecutions.length === 0) {
@@ -319,6 +337,23 @@ const ParallelStageReasoningTabs: React.FC<ParallelStageReasoningTabsProps> = ({
                     color={statusColor as any}
                     sx={{ height: 18, fontSize: '0.65rem' }}
                   />
+                  {/* Show per-agent progress status if available (but not terminal statuses) */}
+                  {(() => {
+                    const statusValue = agentProgressStatuses.get(execution.executionId);
+                    const hasStatus = statusValue !== undefined;
+                    // Only show badge for non-terminal statuses (hide "Completed", "Failed", "Cancelled")
+                    const isTerminal = statusValue !== undefined && isTerminalProgressStatus(statusValue);
+                    const willRender = hasStatus && !isTerminal;
+                    return willRender && (
+                      <Chip
+                        label={statusValue}
+                        size="small"
+                        color="info"
+                        variant="outlined"
+                        sx={{ height: 18, fontSize: '0.65rem', fontStyle: 'italic' }}
+                      />
+                    );
+                  })()}
                 </Box>
                 
                 {/* Token Usage */}
