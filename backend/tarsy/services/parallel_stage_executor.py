@@ -97,15 +97,31 @@ class ParallelStageExecutor:
         
         # Build execution configs for each agent
         # Normalize iteration_strategy to string to prevent Enum leakage
-        execution_configs = [
-            {
+        # Resolve iteration configuration from hierarchy
+        from tarsy.services.iteration_config_resolver import IterationConfigResolver
+        
+        execution_configs = []
+        for agent_config in stage.agents:
+            # Get agent definition if it exists
+            agent_def = self.agent_factory.agent_configs.get(agent_config.name) if self.agent_factory.agent_configs else None
+            
+            # Resolve iteration config from hierarchy
+            max_iter, force_conclude = IterationConfigResolver.resolve_iteration_config(
+                system_settings=self.settings,
+                agent_config=agent_def,
+                chain_config=chain_definition,
+                stage_config=stage,
+                parallel_agent_config=agent_config
+            )
+            
+            execution_configs.append({
                 "agent_name": agent_config.name,
                 "llm_provider": agent_config.llm_provider or stage.llm_provider or chain_definition.llm_provider,
                 "iteration_strategy": self._normalize_iteration_strategy(agent_config.iteration_strategy),
                 "iteration_strategy_original": agent_config.iteration_strategy,  # Keep original for Pydantic validation
-            }
-            for agent_config in stage.agents
-        ]
+                "max_iterations": max_iter,
+                "force_conclusion": force_conclude,
+            })
         
         return await self._execute_parallel_stage(
             stage=stage,
@@ -135,6 +151,21 @@ class ParallelStageExecutor:
         effective_provider = stage.llm_provider or chain_definition.llm_provider
         effective_strategy = self._normalize_iteration_strategy(stage.iteration_strategy)
         
+        # Resolve iteration configuration from hierarchy for replicas
+        from tarsy.services.iteration_config_resolver import IterationConfigResolver
+        
+        # Get agent definition if it exists
+        agent_def = self.agent_factory.agent_configs.get(stage.agent) if self.agent_factory.agent_configs else None
+        
+        # Resolve iteration config (replicas don't have parallel_agent_config)
+        max_iter, force_conclude = IterationConfigResolver.resolve_iteration_config(
+            system_settings=self.settings,
+            agent_config=agent_def,
+            chain_config=chain_definition,
+            stage_config=stage,
+            parallel_agent_config=None  # Replicas don't have individual config
+        )
+        
         # Build execution configs for each replica
         execution_configs = [
             {
@@ -143,6 +174,8 @@ class ParallelStageExecutor:
                 "llm_provider": effective_provider,
                 "iteration_strategy": effective_strategy,
                 "iteration_strategy_original": stage.iteration_strategy,  # Keep original for Pydantic validation
+                "max_iterations": max_iter,
+                "force_conclusion": force_conclude,
             }
             for idx in range(stage.replicas)
         ]
@@ -289,7 +322,9 @@ class ParallelStageExecutor:
                     agent_identifier=base_agent,
                     mcp_client=session_mcp_client,
                     iteration_strategy=child_strategy_str,
-                    llm_provider=config.get("llm_provider")
+                    llm_provider=config.get("llm_provider"),
+                    max_iterations=config.get("max_iterations"),
+                    force_conclusion=config.get("force_conclusion")
                 )
                 
                 # Set current stage execution ID for interaction tagging (hooks need this!)
@@ -644,6 +679,9 @@ class ParallelStageExecutor:
         # 6. Build execution configs for ONLY paused children
         execution_configs = []
         
+        # Import IterationConfigResolver for proper config resolution on resume
+        from tarsy.services.iteration_config_resolver import IterationConfigResolver
+        
         for child in paused_children:
             # Determine agent configuration
             # For multi-agent: look up in stage.agents list
@@ -658,16 +696,50 @@ class ParallelStageExecutor:
                 if not agent_config:
                     raise ValueError(f"Agent config not found for {child.agent}")
                 
+                # Get agent definition if it exists
+                agent_def = (
+                    self.agent_factory.agent_configs.get(agent_config.name)
+                    if getattr(self.agent_factory, "agent_configs", None)
+                    else None
+                )
+                
+                # Resolve iteration config from hierarchy (same as normal execution)
+                max_iter, force_conclude = IterationConfigResolver.resolve_iteration_config(
+                    system_settings=self.settings,
+                    agent_config=agent_def,
+                    chain_config=chain_definition,
+                    stage_config=stage_config,
+                    parallel_agent_config=agent_config,
+                )
+                
                 # Normalize iteration_strategy to string to prevent Enum leakage
                 config = {
                     "agent_name": child.agent,
                     "llm_provider": agent_config.llm_provider or stage_config.llm_provider or chain_definition.llm_provider,
                     "iteration_strategy": self._normalize_iteration_strategy(agent_config.iteration_strategy),
                     "iteration_strategy_original": agent_config.iteration_strategy,  # Keep original for Pydantic validation
+                    "max_iterations": max_iter,
+                    "force_conclusion": force_conclude,
                 }
             else:  # REPLICA
                 # Extract base agent name (e.g., "KubernetesAgent-1" -> "KubernetesAgent")
                 base_agent = stage_config.agent
+                
+                # Get agent definition if it exists
+                agent_def = (
+                    self.agent_factory.agent_configs.get(base_agent)
+                    if getattr(self.agent_factory, "agent_configs", None)
+                    else None
+                )
+                
+                # Resolve iteration config from hierarchy (replicas don't have parallel_agent_config)
+                max_iter, force_conclude = IterationConfigResolver.resolve_iteration_config(
+                    system_settings=self.settings,
+                    agent_config=agent_def,
+                    chain_config=chain_definition,
+                    stage_config=stage_config,
+                    parallel_agent_config=None,  # Replicas don't have individual config
+                )
                 
                 # Normalize iteration_strategy to string to prevent Enum leakage
                 config = {
@@ -676,6 +748,8 @@ class ParallelStageExecutor:
                     "llm_provider": stage_config.llm_provider or chain_definition.llm_provider,
                     "iteration_strategy": self._normalize_iteration_strategy(stage_config.iteration_strategy),
                     "iteration_strategy_original": stage_config.iteration_strategy,  # Keep original for Pydantic validation
+                    "max_iterations": max_iter,
+                    "force_conclusion": force_conclude,
                 }
             
             execution_configs.append(config)
@@ -726,7 +800,9 @@ class ParallelStageExecutor:
                     agent_identifier=base_agent,
                     mcp_client=session_mcp_client,
                     iteration_strategy=child_strategy_str,
-                    llm_provider=config.get("llm_provider")
+                    llm_provider=config.get("llm_provider"),
+                    max_iterations=config.get("max_iterations"),
+                    force_conclusion=config.get("force_conclusion")
                 )
                 
                 # Set current stage execution ID for interaction tagging (hooks need this!)
@@ -1001,12 +1077,29 @@ class ParallelStageExecutor:
                 or chain_definition.llm_provider
             )
             
+            # Resolve iteration configuration for synthesis agent
+            from tarsy.services.iteration_config_resolver import IterationConfigResolver
+            
+            # Get agent definition if it exists
+            agent_def = self.agent_factory.agent_configs.get(synthesis_config.agent) if self.agent_factory.agent_configs else None
+            
+            # Resolve iteration config (synthesis doesn't have parallel_agent_config)
+            max_iter, force_conclude = IterationConfigResolver.resolve_iteration_config(
+                system_settings=self.settings,
+                agent_config=agent_def,
+                chain_config=chain_definition,
+                stage_config=stage_config,
+                parallel_agent_config=None  # Synthesis doesn't have parallel config
+            )
+            
             # Get synthesis agent from factory (configurable!)
             synthesis_agent = self.agent_factory.get_agent(
                 agent_identifier=synthesis_config.agent,
                 mcp_client=session_mcp_client,
                 iteration_strategy=self._normalize_iteration_strategy(synthesis_config.iteration_strategy),
-                llm_provider=effective_provider
+                llm_provider=effective_provider,
+                max_iterations=max_iter,
+                force_conclusion=force_conclude
             )
             
             # Set stage execution ID for interaction tagging
