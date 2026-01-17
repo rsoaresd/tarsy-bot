@@ -412,7 +412,10 @@ class ChatService:
             chain_definition = session.chain_config if session else None
             
             # Resolve iteration config (chat uses chain config but no stage/parallel config)
-            max_iter, force_conclude = IterationConfigResolver.resolve_iteration_config(
+            # 12. Resolve unified execution configuration for chat agent
+            from tarsy.services.execution_config_resolver import ExecutionConfigResolver
+            
+            execution_config = ExecutionConfigResolver.resolve_config(
                 system_settings=self.settings,
                 agent_config=agent_def,
                 chain_config=chain_definition,
@@ -420,14 +423,31 @@ class ChatService:
                 parallel_agent_config=None  # Chat doesn't have parallel config
             )
             
-            # 12. Create chat agent with iteration strategy and LLM provider from parent session
-            chat_agent = self.agent_factory.get_agent(
+            # Override iteration_strategy and llm_provider from parent session/chat config
+            # These take precedence over resolved config for chat continuity
+            execution_config.iteration_strategy = iteration_strategy
+            execution_config.llm_provider = llm_provider
+            
+            # Apply chat-level configuration overrides (if present)
+            # Chat config has higher priority than chain/agent defaults
+            if chain_definition and chain_definition.chat:
+                chat_config = chain_definition.chat
+                
+                # Override MCP servers if chat config specifies them
+                if chat_config.mcp_servers:
+                    execution_config.mcp_servers = chat_config.mcp_servers
+                    logger.info(f"Chat using explicit chat-level MCP servers: {chat_config.mcp_servers}")
+                
+                # Override max_iterations if chat config specifies it
+                if chat_config.max_iterations is not None:
+                    execution_config.max_iterations = chat_config.max_iterations
+                    logger.info(f"Chat using explicit chat-level max_iterations: {chat_config.max_iterations}")
+            
+            # Create chat agent with unified execution config
+            chat_agent = self.agent_factory.get_agent_with_config(
                 agent_identifier=chat_agent_name,
                 mcp_client=chat_mcp_client,
-                iteration_strategy=iteration_strategy,
-                llm_provider=llm_provider,
-                max_iterations=max_iter,
-                force_conclusion=force_conclude
+                execution_config=execution_config
             )
             
             # Set stage execution ID for interaction tagging
@@ -677,6 +697,20 @@ class ChatService:
         # Extract unique server names from all stages' default configurations
         server_names = set()
         
+        # Priority 1: Check if chat config has explicit MCP servers
+        if chain_config.chat and chain_config.chat.mcp_servers:
+            server_names.update(chain_config.chat.mcp_servers)
+            logger.info(f"Chat using explicit chat-level MCP servers: {chain_config.chat.mcp_servers}")
+            
+            # Build MCPSelectionConfig from chat-level servers (highest priority)
+            return MCPSelectionConfig(
+                servers=[
+                    MCPServerSelection(name=server_name, tools=None)
+                    for server_name in sorted(server_names)
+                ]
+            )
+        
+        # Priority 2: Extract from stages' default agent configurations
         for stage in chain_config.stages:
             # Handle sequential stages (single agent)
             if stage.agent:

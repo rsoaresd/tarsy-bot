@@ -265,6 +265,11 @@ class ParallelAgentConfig(BaseModel):
         default=None,
         description="Force conclusion at max iterations for this parallel agent (highest precedence override)",
     )
+    mcp_servers: Optional[List[str]] = Field(
+        None,
+        description="Optional MCP server override for this parallel agent (highest configuration precedence)",
+        min_length=1,
+    )
 
 
 class SynthesisConfig(BaseModel):
@@ -304,6 +309,16 @@ class ChatConfig(BaseModel):
     llm_provider: Optional[str] = Field(
         None,
         description="LLM provider for chat (uses chain/system default if not specified)",
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        None,
+        description="Optional MCP server override for chat (overrides chain-level MCP config)",
+        min_length=1,
+    )
+    max_iterations: Optional[int] = Field(
+        default=None,
+        description="Maximum number of iterations for chat agent (overrides chain/agent defaults)",
+        ge=1,
     )
 
 
@@ -349,6 +364,11 @@ class ChainStageConfigModel(BaseModel):
     force_conclusion_at_max_iterations: Optional[bool] = Field(
         default=None,
         description="Force conclusion at max iterations for this stage (overrides chain/agent/system defaults)",
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        None,
+        description="Optional MCP server override for this stage",
+        min_length=1,
     )
     synthesis: Optional[SynthesisConfig] = Field(
         None, description="Optional synthesis configuration for parallel stages"
@@ -437,6 +457,11 @@ class ChainConfigModel(BaseModel):
     force_conclusion_at_max_iterations: Optional[bool] = Field(
         default=None,
         description="Force conclusion at max iterations for all stages in this chain (overrides agent/system defaults)",
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        None,
+        description="Optional MCP server override for all stages in this chain",
+        min_length=1,
     )
 
 
