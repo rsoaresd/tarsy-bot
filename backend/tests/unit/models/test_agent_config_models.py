@@ -133,39 +133,121 @@ class TestMCPServerConfigModel:
     def test_minimal_valid_mcp_server_config(self):
         """Test minimal valid MCP server configuration."""
         config_data = {
-            "server_id": "security-tools",
-            "server_type": "security",
             "transport": {"type": "stdio", "command": "minimal"}
         }
         
         config = MCPServerConfigModel(**config_data)
         
-        assert config.server_id == "security-tools"
-        assert config.server_type == "security"
-        assert config.enabled is True  # Default value
+        # Deprecated fields should be None
+        assert config.server_id is None
+        assert config.server_type is None
+        assert config.enabled is None
         assert config.transport.command == "minimal"
         assert config.transport.args == []  # Default value
         assert config.instructions == ""
 
-    def test_disabled_mcp_server_config(self):
-        """Test disabled MCP server configuration."""
+    def test_deprecated_fields_ignored_with_warning(self, caplog):
+        """Test that deprecated fields are ignored and log warnings."""
+        import logging
+        import tarsy.models.agent_config as agent_config_module
+        
+        # Reset the warned_deprecated set to ensure clean test state
+        agent_config_module._warned_deprecated.clear()
+        
         config_data = {
-            "server_id": "disabled-server",
+            "server_id": "deprecated-server",
             "server_type": "monitoring",
             "enabled": False,
-            "transport": {"type": "stdio", "command": "disabled"}
+            "transport": {"type": "stdio", "command": "test"}
         }
         
-        config = MCPServerConfigModel(**config_data)
+        with caplog.at_level(logging.WARNING):
+            config = MCPServerConfigModel(**config_data)
         
+        # Deprecated fields are kept but should trigger warning
+        assert config.server_id == "deprecated-server"
+        assert config.server_type == "monitoring"
         assert config.enabled is False
+        
+        # Verify warning was logged
+        assert len(caplog.records) == 1
+        assert "deprecated fields" in caplog.text.lower()
+        assert "server_id" in caplog.text
+        assert "server_type" in caplog.text
+        assert "enabled" in caplog.text
+    
+    def test_deprecated_fields_warning_deduplication(self, caplog):
+        """Test that deprecation warnings are only logged once per unique field combination."""
+        import logging
+        import tarsy.models.agent_config as agent_config_module
+        
+        # Reset the warned_deprecated set to ensure clean test state
+        agent_config_module._warned_deprecated.clear()
+        
+        config_data = {
+            "server_id": "deprecated-server",
+            "server_type": "monitoring",
+            "enabled": False,
+            "transport": {"type": "stdio", "command": "test"}
+        }
+        
+        with caplog.at_level(logging.WARNING):
+            # Create multiple instances with same deprecated fields
+            config1 = MCPServerConfigModel(**config_data)
+            config2 = MCPServerConfigModel(**config_data)
+            config3 = MCPServerConfigModel(**config_data)
+        
+        # All configs should be valid
+        assert config1.server_id == "deprecated-server"
+        assert config2.server_id == "deprecated-server"
+        assert config3.server_id == "deprecated-server"
+        
+        # But warning should only appear once
+        warning_records = [r for r in caplog.records if "deprecated fields" in r.message.lower()]
+        assert len(warning_records) == 1, "Warning should only be logged once for same field combination"
+        
+    def test_deprecated_fields_warning_different_combinations(self, caplog):
+        """Test that different combinations of deprecated fields generate separate warnings."""
+        import logging
+        import tarsy.models.agent_config as agent_config_module
+        
+        # Reset the warned_deprecated set to ensure clean test state
+        agent_config_module._warned_deprecated.clear()
+        
+        with caplog.at_level(logging.WARNING):
+            # First combination: all three deprecated fields
+            config1 = MCPServerConfigModel(
+                server_id="test1",
+                server_type="monitoring",
+                enabled=True,
+                transport={"type": "stdio", "command": "test"}
+            )
+            
+            # Second combination: only server_id
+            config2 = MCPServerConfigModel(
+                server_id="test2",
+                transport={"type": "stdio", "command": "test"}
+            )
+            
+            # Third combination: only server_type and enabled
+            config3 = MCPServerConfigModel(
+                server_type="security",
+                enabled=False,
+                transport={"type": "stdio", "command": "test"}
+            )
+        
+        # Verify all configs are valid
+        assert config1.server_id == "test1"
+        assert config2.server_id == "test2"
+        assert config3.server_type == "security"
+        
+        # Should have three separate warnings for three different combinations
+        warning_records = [r for r in caplog.records if "deprecated fields" in r.message.lower()]
+        assert len(warning_records) == 3, "Different field combinations should generate separate warnings"
 
     def test_serialization_roundtrip(self, model_test_helpers):
         """Test that MCP server config can be serialized and deserialized correctly."""
         valid_data = {
-            "server_id": "security-tools",
-            "server_type": "security",
-            "enabled": True,
             "transport": {"type": "stdio", "command": "test", "args": []},
             "instructions": "Security analysis tools"
         }
@@ -175,12 +257,11 @@ class TestMCPServerConfigModel:
     def test_required_fields_validation(self, model_validation_tester):
         """Test that required fields are enforced."""
         valid_data = {
-            "server_id": "security-tools",
-            "server_type": "security",
             "transport": {"type": "stdio", "command": "test"}
         }
         
-        required_fields = ["server_id", "server_type"]
+        # Only transport is required now (server_id, server_type, enabled are deprecated and optional)
+        required_fields = ["transport"]
         model_validation_tester.test_required_fields(MCPServerConfigModel, required_fields, valid_data)
 
     def test_invalid_field_types(self):
@@ -188,8 +269,6 @@ class TestMCPServerConfigModel:
         # transport as string instead of dict
         with pytest.raises(ValidationError) as exc_info:
             MCPServerConfigModel(
-                server_id="security-tools",
-                server_type="security",
                 transport="localhost:8080"
             )
             
@@ -248,55 +327,45 @@ class TestCombinedConfigModel:
         assert config.agents == {}
         assert config.mcp_servers == {}
 
-    def test_server_id_mismatch_fails(self):
-        """Test that server_id mismatch with dictionary key fails validation."""
+    def test_server_id_deprecated_no_validation(self):
+        """Test that server_id mismatch doesn't fail validation (field is deprecated)."""
         config_data = {
             "agents": {},
             "mcp_servers": {
                 "security-tools": {
-                    "server_id": "wrong-id",  # Should match key "security-tools"
+                    "server_id": "wrong-id",  # No longer validated (deprecated)
                     "server_type": "security",
                     "transport": {"type": "stdio", "command": "/usr/bin/security"}
                 }
             }
         }
         
-        with pytest.raises(ValidationError) as exc_info:
-            CombinedConfigModel(**config_data)
-            
-        errors = exc_info.value.errors()
-        assert len(errors) == 1
-        assert "server_id" in str(errors[0]["msg"])
-        assert "security-tools" in str(errors[0]["msg"])
-        assert "wrong-id" in str(errors[0]["msg"])
+        # Should not raise - server_id is deprecated and ignored
+        config = CombinedConfigModel(**config_data)
+        assert config.mcp_servers["security-tools"].server_id == "wrong-id"
 
-    def test_multiple_server_id_mismatches_fails(self):
-        """Test multiple server_id mismatches in validation."""
+    def test_multiple_server_id_deprecated(self):
+        """Test multiple server_id fields are ignored (deprecated)."""
         config_data = {
             "agents": {},
             "mcp_servers": {
                 "security-tools": {
-                    "server_id": "wrong-id-1",      
+                    "server_id": "wrong-id-1",  # Deprecated - ignored
                     "server_type": "security",
                     "transport": {"type": "stdio", "command": "/usr/bin/security"}
                 },
                 "monitoring-server": {
-                    "server_id": "wrong-id-2",
+                    "server_id": "wrong-id-2",  # Deprecated - ignored
                     "server_type": "monitoring",
                     "transport": {"type": "stdio", "command": "/usr/bin/monitoring"}
                 }
             }
         }
         
-        with pytest.raises(ValidationError) as exc_info:
-            CombinedConfigModel(**config_data)
-            
-        errors = exc_info.value.errors()
-        assert len(errors) == 1
-        error_msg = str(errors[0]["msg"])
-        assert "server_id" in error_msg
-        # Should contain the first mismatch found (validator stops on first error)
-        assert ("security-tools" in error_msg and "wrong-id-1" in error_msg) or ("monitoring-server" in error_msg and "wrong-id-2" in error_msg)
+        # Should not raise - server_id is deprecated and ignored
+        config = CombinedConfigModel(**config_data)
+        assert config.mcp_servers["security-tools"].server_id == "wrong-id-1"
+        assert config.mcp_servers["monitoring-server"].server_id == "wrong-id-2"
 
     def test_missing_sections_use_defaults(self):
         """Test that missing sections use default empty dictionaries."""
@@ -344,14 +413,13 @@ class TestCombinedConfigModel:
         config_data = {
             "agents": {
                 "security-agent": {
-                    
                     "mcp_servers": ["security-tools"]
                 }
             },
             "mcp_servers": {
                 "security-tools": {
-                    # Missing required server_type
-                    "server_id": "security-tools"
+                    # Missing required transport field
+                    "instructions": "Some instructions"
                 }
             }
         }
@@ -360,9 +428,9 @@ class TestCombinedConfigModel:
             CombinedConfigModel(**config_data)
             
         errors = exc_info.value.errors()
-        # Should have error for missing server_type
-        server_error = next((e for e in errors if "mcp_servers" in e["loc"] and "server_type" in e["loc"]), None)
-        assert server_error is not None
+        # Should have error for missing transport
+        transport_error = next((e for e in errors if "transport" in e["loc"] or "transport" in str(e)), None)
+        assert transport_error is not None
 
     def test_valid_configurable_agent_references(self):
         """Test valid configurable agent references in chain stages."""
