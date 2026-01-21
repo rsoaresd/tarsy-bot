@@ -1,6 +1,6 @@
 # EP-0029: Slack Notification Integration
 
-+**Status**: Phase 1 (In Review) / Phase 2 (Pending)
++**Status**: Phase 1 (Implemented) / Phase 2 (WIP)
 **Created:** 2025-11-18
 
 ---
@@ -39,7 +39,7 @@ SRE teams need immediate visibility into alert analysis without constantly monit
 
 ## Goals (Phase 1: Summary generation)
 
-1. **Summary**: Concise 1-2 line summary of the final analysis
+1. **Summary**: Concise 1-4 line summary of the final analysis
 
 
 ## Goals (Phase 2: Slack Integration)
@@ -59,7 +59,7 @@ SRE teams need immediate visibility into alert analysis without constantly monit
 
 1. TARSy receives an alert
 2. TARSy processes alert
-3. AI generates analysis and 1-2 line analysis summary
+3. AI generates analysis and 1-4 line analysis summary
 4. Slack notification sent to the Slack team channel
 
 ---
@@ -102,7 +102,7 @@ SRE teams need immediate visibility into alert analysis without constantly monit
 ┌─────────────────────────────────────────────────┐
 │ 4. Slack Service                                │
 │    if slack_service.enabled:                    │
-│     1. Find original alert message by identifier│
+│     1. Find target alert message by identifier. │
 │     2. Reply in thread with analysis summary    │
 └──────────────────┬──────────────────────────────┘
                    │
@@ -121,7 +121,7 @@ SRE teams need immediate visibility into alert analysis without constantly monit
 
 ### Phase 1: Summary
 
-Generate concise 1-2 line AI-powered summaries of alert analysis results for quick triage and external notifications.
+Generate concise 1-4 line AI-powered summaries of alert analysis results for quick triage and external notifications.
 
 #### 1. Database Schema Changes
 - **Added**: `final_analysis_summary` field to `AlertSession` model (optional string)
@@ -141,7 +141,7 @@ Generate concise 1-2 line AI-powered summaries of alert analysis results for qui
 #### 3. Prompt Engineering
 - **Update**: `backend/tarsy/agents/prompts/builders.py`
   - Added `build_final_analysis_summary_prompt()` method
-  - Prompts LLM to generate 1-2 line summaries optimized for Slack notifications
+  - Prompts LLM to generate 1-4 line summaries optimized for Slack notifications
   - Emphasizes brevity and actionable information
 
 #### 4. Alert Service Integration
@@ -166,10 +166,10 @@ Generate concise 1-2 line AI-powered summaries of alert analysis results for qui
 
 ### Phase 2: Slack Integration
 
-Create a Slack service that finds the original alert notification in a Slack channel and replies with TARSy's AI-generated analysis as a threaded response.
+Create a Slack service that finds the target alert notification in a Slack channel and replies with TARSy's AI-generated analysis as a threaded response.
 
 #### 1. Alert Correlation Strategy Research
-   - Find the best way to locate the original alert message in Slack
+   - Find the best way to locate the target alert message in Slack
 
 #### 2. **Core Service**
    - Implement `SlackService` with API client initialization

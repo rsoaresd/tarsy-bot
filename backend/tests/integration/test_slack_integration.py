@@ -1,0 +1,75 @@
+"""
+Integration tests for integration between AlertService and SlackService.
+"""
+
+import pytest
+from unittest.mock import patch
+
+from tests.conftest import alert_to_api_format
+
+
+@pytest.mark.integration
+class TestSlackNotificationIntegration:
+    """
+    Test integration between AlertService and SlackService.
+    
+    Verifies that:
+    - Successful processing triggers Slack notification with summary
+    - Failed processing triggers Slack notification with error
+    """
+    
+    @pytest.mark.asyncio
+    async def test_successful_processing_sends_slack_notification(
+        self,
+        alert_service_with_slack,
+        sample_alert_with_fingerprint
+    ):
+        """Test that successful alert processing sends Slack notification with summary."""
+        alert_service = alert_service_with_slack
+        
+        # Process alert
+        chain_context = alert_to_api_format(sample_alert_with_fingerprint)
+        result = await alert_service.process_alert(chain_context)
+        
+        # Verify processing completed
+        assert result is not None
+        assert "# Alert Analysis Report" in result
+        
+        # Verify Slack notification was sent
+        alert_service.slack_service.send_alert_notification.assert_called_once()
+        call_kwargs = alert_service.slack_service.send_alert_notification.call_args.kwargs
+        
+        assert call_kwargs['session_id'] == chain_context.session_id
+        assert call_kwargs['fingerprint'] == "test-fingerprint-abc123"
+        assert 'analysis' in call_kwargs
+        assert call_kwargs.get('error') is None
+    
+    @pytest.mark.asyncio
+    async def test_failed_processing_sends_error_notification(
+        self,
+        alert_service_with_slack,
+        sample_alert_with_fingerprint
+    ):
+        """Test that failed processing sends Slack notification with error."""
+        alert_service = alert_service_with_slack
+        
+        # Force agent failure
+        with patch.object(
+            alert_service.agent_factory,
+            'get_agent',
+            side_effect=Exception("Agent processing failed")
+        ):
+            chain_context = alert_to_api_format(sample_alert_with_fingerprint)
+            result = await alert_service.process_alert(chain_context)
+            
+            # Verify error response
+            assert "# Alert Processing Error" in result
+            
+            # Verify Slack error notification was sent
+            alert_service.slack_service.send_alert_notification.assert_called_once()
+            call_kwargs = alert_service.slack_service.send_alert_notification.call_args.kwargs
+            
+            assert call_kwargs['session_id'] == chain_context.session_id
+            assert call_kwargs['fingerprint'] == "test-fingerprint-abc123"
+            assert 'error' in call_kwargs
+            assert call_kwargs['error'] is not None

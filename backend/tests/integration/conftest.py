@@ -73,6 +73,9 @@ def mock_settings():
         "xai-default": {"model": "grok-4-latest", "api_key_env": "XAI_API_KEY", "type": "xai"},
         "anthropic-default": {"model": "claude-4-sonnet", "api_key_env": "ANTHROPIC_API_KEY", "type": "anthropic"},
     }
+
+    settings.slack_bot_token = None
+    settings.slack_channel = None
     
     # Mock the get_llm_config method that Settings class provides
     from tarsy.models.llm_models import LLMProviderConfig, LLMProviderType
@@ -1275,3 +1278,85 @@ def mock_history_timeline_data():
             "total_duration_ms": 2300
         }
     } 
+
+# ==========================================
+# Slack Service Fixtures
+# ==========================================
+
+@pytest.fixture
+def mock_slack_settings_enabled():
+    """Mock settings with Slack enabled for integration tests."""
+    from tests.utils import MockFactory
+    
+    return MockFactory.create_mock_settings(
+        slack_bot_token="xoxb-integration-test-token",
+        slack_channel="C12345678"
+    )
+
+
+@pytest.fixture
+def alert_service_with_slack(alert_service, mock_slack_settings_enabled):
+    """
+    Create AlertService with Slack integration enabled.
+    
+    Injects a mocked SlackService into AlertService for testing
+    the complete notification workflow.
+    """
+    from tarsy.services.slack_service import SlackService
+    from unittest.mock import AsyncMock, Mock, patch
+    
+    with patch('tarsy.services.slack_service.WebClient'):
+        slack_service = SlackService(mock_slack_settings_enabled)
+        slack_service.client = Mock()
+        slack_service.enabled = True
+        
+        # Mock the send_alert_notification method to track calls
+        slack_service.send_alert_notification = AsyncMock(return_value=True)
+        
+        # Mock Slack API calls
+        slack_service.client.conversations_history = Mock(return_value={
+            "messages": [{
+                "ts": "1234567890.123456",
+                "text": """Fingerprint: test-fingerprint-abc123
+UserSignup: user
+Namespace: test-namespace
+Cluster: main-cluster
+Severity: critical
+Environment: production
+Namespace is terminating""",
+                "attachments": []
+            }]
+        })
+        slack_service.client.chat_postMessage = Mock()
+        
+        # Inject into alert service
+        alert_service.slack_service = slack_service
+        
+        yield alert_service
+
+
+@pytest.fixture
+def sample_alert_with_fingerprint():
+    """
+    Create sample alert with fingerprint for Slack correlation.
+    
+    Includes all required fields for alert processing plus a fingerprint
+    that can be used to correlate with Slack messages.
+    """
+    from tarsy.models.alert import Alert
+    from tarsy.utils.timestamp import now_us
+    
+    return Alert(
+        alert_type="kubernetes",
+        runbook="https://github.com/company/runbooks/blob/main/k8s.md",
+        timestamp=now_us(),
+        data={
+            "severity": "critical",
+            "environment": "production",
+            "cluster": "main-cluster",
+            "namespace": "test-namespace",
+            "message": "Namespace is terminating",
+            "alert": "NamespaceTerminating",
+            "fingerprint": "test-fingerprint-abc123"
+        }
+    )

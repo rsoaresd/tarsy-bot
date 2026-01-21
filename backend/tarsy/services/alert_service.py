@@ -53,6 +53,7 @@ from tarsy.services.stage_execution_manager import StageExecutionManager
 from tarsy.utils.agent_execution_utils import extract_cancellation_reason, get_stage_agent_label
 from tarsy.utils.logger import get_module_logger
 from tarsy.utils.timestamp import now_us
+from tarsy.services.slack_service import SlackService
 
 logger = get_module_logger(__name__)
 
@@ -80,6 +81,7 @@ class AlertService:
 
         # Initialize services
         self.runbook_service = RunbookService(settings, runbook_http_client)
+        self.slack_service = SlackService(settings)
         self.history_service = get_history_service()
         
         # Initialize registries with loaded configuration
@@ -382,6 +384,14 @@ class AlertService:
                 # Publish session.failed event
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(chain_context.session_id)
+
+                if self.slack_service.enabled:
+                    await self.slack_service.send_alert_notification(
+                        session_id=chain_context.session_id,
+                        fingerprint=chain_context.processing_alert.fingerprint,
+                        error=error_msg,
+                    )
+
                 return format_error_response(chain_context, error_msg)
             
             # Step 7: Format and return results
@@ -421,6 +431,13 @@ class AlertService:
                     final_analysis=final_result,
                     final_analysis_summary=final_result_summary
                 )
+
+                if self.slack_service.enabled:
+                    await self.slack_service.send_alert_notification(
+                        session_id=chain_context.session_id,
+                        fingerprint=chain_context.processing_alert.fingerprint,
+                        analysis=final_result_summary,
+                    )
                 
                 # Publish session.completed event
                 from tarsy.services.events.event_helpers import (
@@ -452,6 +469,13 @@ class AlertService:
                 # Publish session.failed event
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(chain_context.session_id)
+
+                if self.slack_service.enabled:
+                    await self.slack_service.send_alert_notification(
+                        session_id=chain_context.session_id,
+                        fingerprint=chain_context.processing_alert.fingerprint,
+                        error=error_msg,
+                    )
                 
                 return format_error_response(chain_context, error_msg)
                 
@@ -465,6 +489,13 @@ class AlertService:
             # Publish session.failed event
             from tarsy.services.events.event_helpers import publish_session_failed
             await publish_session_failed(chain_context.session_id)
+
+            if self.slack_service.enabled:
+                await self.slack_service.send_alert_notification(
+                    session_id=chain_context.session_id,
+                    fingerprint=chain_context.processing_alert.fingerprint,
+                    error=error_msg,
+                )
             
             return format_error_response(chain_context, error_msg)
         
@@ -1190,6 +1221,14 @@ class AlertService:
                 self.session_manager.update_session_status(session_id, AlertSessionStatus.FAILED.value)
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(session_id)
+
+                if self.slack_service.enabled:
+                    await self.slack_service.send_alert_notification(
+                        session_id=session_id,
+                        fingerprint=chain_context.processing_alert.fingerprint,
+                        error=error_msg,
+                    )
+                
                 return format_error_response(chain_context, error_msg)
         
         except Exception as e:

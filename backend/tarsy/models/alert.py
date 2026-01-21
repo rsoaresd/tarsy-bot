@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from tarsy.models.mcp_selection_models import MCPSelectionConfig
 
+import re
+
 
 class Alert(BaseModel):
     """
@@ -101,6 +103,11 @@ class ProcessingAlert(BaseModel):
         None, 
         description="Runbook URL if provided"
     )
+
+    fingerprint: Optional[str] = Field(
+        None,
+        description="Fingerprint of the alert"
+    )
     
     # === Client's Pristine Data ===
     alert_data: Dict[str, Any] = Field(
@@ -138,7 +145,13 @@ class ProcessingAlert(BaseModel):
         # Extract severity and environment from client data if present (but keep them there too)
         severity = alert.data.get('severity', 'warning')
         environment = alert.data.get('environment', 'production')
-        
+
+        fingerprint = alert.data.get('fingerprint', None)
+        if not fingerprint and 'message' in alert.data:
+            match = re.search(r'^fingerprint:\s*(.+)$', alert.data['message'], re.MULTILINE | re.IGNORECASE)
+            if match:
+                fingerprint = match.group(1).strip()
+
         # Generate timestamp if not provided
         if alert.timestamp is None:
             timestamp = now_us()
@@ -156,6 +169,7 @@ class ProcessingAlert(BaseModel):
             timestamp=timestamp,
             environment=environment,
             runbook_url=alert.runbook,
+            fingerprint=fingerprint,
             alert_data=alert.data,  # ← PRISTINE!
             mcp=alert.mcp  # Pass through MCP selection config
         )
