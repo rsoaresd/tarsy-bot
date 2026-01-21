@@ -3,7 +3,7 @@ Integration tests for integration between AlertService and SlackService.
 """
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from tests.conftest import alert_to_api_format
 
@@ -53,13 +53,25 @@ class TestSlackNotificationIntegration:
         """Test that failed processing sends Slack notification with error."""
         alert_service = alert_service_with_slack
         
-        # Force agent failure
-        with patch.object(
-            alert_service.agent_factory,
-            'get_agent',
-            side_effect=Exception("Agent processing failed")
-        ):
-            chain_context = alert_to_api_format(sample_alert_with_fingerprint)
+        chain_context = alert_to_api_format(sample_alert_with_fingerprint)
+        
+        original_create = alert_service.agent_factory.create_agent.side_effect
+        original_get_with_config = alert_service.agent_factory.get_agent_with_config.side_effect
+        
+        def create_failing_agent(agent_identifier, mcp_client):
+            agent = original_create(agent_identifier, mcp_client)
+            agent.process_alert = AsyncMock(side_effect=Exception("Agent processing failed"))
+            return agent
+        
+        def get_failing_agent_with_config(agent_identifier, mcp_client, execution_config):
+            agent = original_get_with_config(agent_identifier, mcp_client, execution_config)
+            agent.process_alert = AsyncMock(side_effect=Exception("Agent processing failed"))
+            return agent
+        
+        alert_service.agent_factory.create_agent.side_effect = create_failing_agent
+        alert_service.agent_factory.get_agent_with_config.side_effect = get_failing_agent_with_config
+        
+        try:
             result = await alert_service.process_alert(chain_context)
             
             # Verify error response
@@ -73,3 +85,6 @@ class TestSlackNotificationIntegration:
             assert call_kwargs['fingerprint'] == "test-fingerprint-abc123"
             assert 'error' in call_kwargs
             assert call_kwargs['error'] is not None
+        finally:
+            alert_service.agent_factory.create_agent.side_effect = original_create
+            alert_service.agent_factory.get_agent_with_config.side_effect = original_get_with_config
