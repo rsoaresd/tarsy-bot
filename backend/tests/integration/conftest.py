@@ -1320,7 +1320,7 @@ def alert_service_with_slack(alert_service, mock_slack_settings_enabled):
     from tarsy.services.slack_service import SlackService
     from unittest.mock import AsyncMock, Mock, patch
     
-    with patch('tarsy.services.slack_service.WebClient'):
+    with patch('tarsy.services.slack_service.AsyncWebClient'):
         slack_service = SlackService(mock_slack_settings_enabled)
         slack_service.client = Mock()
         slack_service.enabled = True
