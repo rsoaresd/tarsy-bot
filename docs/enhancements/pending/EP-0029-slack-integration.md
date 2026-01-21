@@ -102,7 +102,7 @@ SRE teams need immediate visibility into alert analysis without constantly monit
 ┌─────────────────────────────────────────────────┐
 │ 4. Slack Service                                │
 │    if slack_service.enabled:                    │
-│     1. Find target alert message by identifier. │
+│     1. Find target alert message by identifier  │
 │     2. Reply in thread with analysis summary    │
 └──────────────────┬──────────────────────────────┘
                    │

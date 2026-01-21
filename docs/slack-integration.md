@@ -92,7 +92,7 @@ CORS_ORIGINS=<your-dashboard-url>
 
 
 ## Alert Data Format
-Alerts must include a fingerprint field. Example:
+Alert data must include a fingerprint field. Example:
 
 ```
 UserSignup: user
