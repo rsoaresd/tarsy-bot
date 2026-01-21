@@ -52,15 +52,19 @@ class TestIterationControllerPauseDetection:
         
         # Create controller
         mock_prompt_builder = MagicMock()
+        mock_prompt_builder.build_react_forced_conclusion.return_value = "Please provide your best conclusion."
         controller = TestReactController(mock_llm_manager, mock_prompt_builder)
         
         # Create mock context with agent
         mock_agent = MagicMock()
         mock_agent.max_iterations = 2  # Set low for testing
+        mock_agent.force_conclusion_at_max_iterations = False  # Should pause, not force conclusion
+        mock_agent.get_force_conclusion.return_value = False  # Mock the method call
         mock_agent.get_current_stage_execution_id.return_value = "test-stage-id"
         
         mock_chain_context = MagicMock()
         mock_chain_context.stage_outputs = {}
+        mock_chain_context.chat_context = None
         
         context = MagicMock(spec=StageContext)
         context.agent = mock_agent
@@ -70,15 +74,19 @@ class TestIterationControllerPauseDetection:
         context.available_tools = MagicMock()
         context.available_tools.tools = []
         
-        # Mock settings
+        # Mock settings with forced conclusion disabled
         with patch('tarsy.agents.iteration_controllers.react_base_controller.get_settings') as mock_settings:
             settings_mock = MagicMock()
             settings_mock.llm_iteration_timeout = 30
+            settings_mock.force_conclusion_at_max_iterations = False
             mock_settings.return_value = settings_mock
             
-            # Execute should raise SessionPaused
-            with pytest.raises(SessionPaused) as exc_info:
-                await controller.execute_analysis_loop(context)
+            # Also need to mock in base_controller where the check happens
+            # Also need to patch settings in base_controller where the check happens
+            with patch('tarsy.config.settings.get_settings', return_value=settings_mock):
+                # Execute should raise SessionPaused
+                with pytest.raises(SessionPaused) as exc_info:
+                    await controller.execute_analysis_loop(context)
         
         # Verify exception details
         assert exc_info.value.iteration == 2
@@ -103,6 +111,7 @@ class TestIterationControllerPauseDetection:
         
         mock_chain_context = MagicMock()
         mock_chain_context.stage_outputs = {}
+        mock_chain_context.chat_context = None
         
         context = MagicMock(spec=StageContext)
         context.agent = mock_agent
@@ -146,15 +155,19 @@ class TestIterationControllerPauseDetection:
         
         # Create controller
         mock_prompt_builder = MagicMock()
+        mock_prompt_builder.build_react_forced_conclusion.return_value = "Please provide your best conclusion."
         controller = TestReactController(mock_llm_manager, mock_prompt_builder)
         
         # Create context
         mock_agent = MagicMock()
         mock_agent.max_iterations = 3
+        mock_agent.force_conclusion_at_max_iterations = False  # Should pause, not force conclusion
+        mock_agent.get_force_conclusion.return_value = False  # Mock the method call
         mock_agent.get_current_stage_execution_id.return_value = "test-stage-id"
         
         mock_chain_context = MagicMock()
         mock_chain_context.stage_outputs = {}
+        mock_chain_context.chat_context = None
         
         context = MagicMock(spec=StageContext)
         context.agent = mock_agent
@@ -167,10 +180,12 @@ class TestIterationControllerPauseDetection:
         with patch('tarsy.agents.iteration_controllers.react_base_controller.get_settings') as mock_settings:
             settings_mock = MagicMock()
             settings_mock.llm_iteration_timeout = 30
+            settings_mock.force_conclusion_at_max_iterations = False
             mock_settings.return_value = settings_mock
             
-            with pytest.raises(SessionPaused) as exc_info:
-                await controller.execute_analysis_loop(context)
+            with patch('tarsy.config.settings.get_settings', return_value=settings_mock):
+                with pytest.raises(SessionPaused) as exc_info:
+                    await controller.execute_analysis_loop(context)
         
         # Verify conversation is preserved
         assert exc_info.value.conversation is not None
@@ -251,14 +266,18 @@ class TestIterationControllerPauseDetection:
         )
         
         mock_prompt_builder = MagicMock()
+        mock_prompt_builder.build_react_forced_conclusion.return_value = "Please provide your best conclusion."
         controller = TestReactController(mock_llm_manager, mock_prompt_builder)
         
         mock_agent = MagicMock()
         mock_agent.max_iterations = 1
+        mock_agent.force_conclusion_at_max_iterations = False  # Should pause, not force conclusion
+        mock_agent.get_force_conclusion.return_value = False  # Mock the method call
         mock_agent.get_current_stage_execution_id.return_value = "stage-123"
         
         mock_chain_context = MagicMock()
         mock_chain_context.stage_outputs = {}
+        mock_chain_context.chat_context = None
         
         context = MagicMock(spec=StageContext)
         context.agent = mock_agent
@@ -271,10 +290,12 @@ class TestIterationControllerPauseDetection:
         with patch('tarsy.agents.iteration_controllers.react_base_controller.get_settings') as mock_settings:
             settings_mock = MagicMock()
             settings_mock.llm_iteration_timeout = 30
+            settings_mock.force_conclusion_at_max_iterations = False
             mock_settings.return_value = settings_mock
             
-            with pytest.raises(SessionPaused) as exc_info:
-                await controller.execute_analysis_loop(context)
+            with patch('tarsy.config.settings.get_settings', return_value=settings_mock):
+                with pytest.raises(SessionPaused) as exc_info:
+                    await controller.execute_analysis_loop(context)
         
         # Verify context information
         assert exc_info.value.context["session_id"] == "session-456"

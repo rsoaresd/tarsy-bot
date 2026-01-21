@@ -20,6 +20,7 @@ from tarsy.models.agent_execution_result import (
 )
 from tarsy.models.constants import SuccessPolicy, ParallelType, StageStatus, IterationStrategy  # FailurePolicy is backward compat alias
 from tarsy.models.processing_context import ChainContext
+from tarsy.services.execution_config_resolver import ExecutionConfigResolver
 from tarsy.utils.agent_execution_utils import build_agent_result_from_exception
 from tarsy.utils.logger import get_module_logger
 from tarsy.utils.timestamp import now_us
@@ -95,17 +96,26 @@ class ParallelStageExecutor:
         
         logger.info(f"Executing parallel stage '{stage.name}' with {len(stage.agents)} agents")
         
-        # Build execution configs for each agent
-        # Normalize iteration_strategy to string to prevent Enum leakage
-        execution_configs = [
-            {
+        # Build execution configs for each agent using unified resolver
+        execution_configs = []
+        for agent_config in stage.agents:
+            # Get agent definition if it exists
+            agent_def = self.agent_factory.agent_configs.get(agent_config.name) if self.agent_factory.agent_configs else None
+            
+            # Resolve unified execution config from hierarchy
+            exec_config = ExecutionConfigResolver.resolve_config(
+                system_settings=self.settings,
+                agent_config=agent_def,
+                chain_config=chain_definition,
+                stage_config=stage,
+                parallel_agent_config=agent_config
+            )
+            
+            execution_configs.append({
                 "agent_name": agent_config.name,
-                "llm_provider": agent_config.llm_provider or stage.llm_provider or chain_definition.llm_provider,
-                "iteration_strategy": self._normalize_iteration_strategy(agent_config.iteration_strategy),
+                "execution_config": exec_config,
                 "iteration_strategy_original": agent_config.iteration_strategy,  # Keep original for Pydantic validation
-            }
-            for agent_config in stage.agents
-        ]
+            })
         
         return await self._execute_parallel_stage(
             stage=stage,
@@ -130,18 +140,25 @@ class ParallelStageExecutor:
         
         logger.info(f"Executing replicated stage '{stage.name}' with {stage.replicas} replicas of agent '{stage.agent}'")
         
-        # Resolve stage-level provider and strategy (same for all replicas)
-        # Normalize iteration_strategy to string to prevent Enum leakage
-        effective_provider = stage.llm_provider or chain_definition.llm_provider
-        effective_strategy = self._normalize_iteration_strategy(stage.iteration_strategy)
+        # Resolve unified execution configuration from hierarchy (same for all replicas)
+        # Get agent definition if it exists
+        agent_def = self.agent_factory.agent_configs.get(stage.agent) if self.agent_factory.agent_configs else None
         
-        # Build execution configs for each replica
+        # Resolve unified execution config (replicas don't have parallel_agent_config)
+        execution_config = ExecutionConfigResolver.resolve_config(
+            system_settings=self.settings,
+            agent_config=agent_def,
+            chain_config=chain_definition,
+            stage_config=stage,
+            parallel_agent_config=None  # Replicas don't have individual config
+        )
+        
+        # Build execution configs for each replica (all share the same execution_config)
         execution_configs = [
             {
                 "agent_name": f"{stage.agent}-{idx + 1}",  # Replica naming
                 "base_agent_name": stage.agent,  # Original agent name
-                "llm_provider": effective_provider,
-                "iteration_strategy": effective_strategy,
+                "execution_config": execution_config,
                 "iteration_strategy_original": stage.iteration_strategy,  # Keep original for Pydantic validation
             }
             for idx in range(stage.replicas)
@@ -197,6 +214,59 @@ class ParallelStageExecutor:
             # ANY policy: at least one must succeed (all failures/cancellations = stage failure)
             return StageStatus.COMPLETED if completed_count > 0 else StageStatus.FAILED
     
+    def _aggregate_parallel_stage_errors(
+        self,
+        metadatas: list[AgentExecutionMetadata],
+        parallel_type: str,
+        success_policy: SuccessPolicy
+    ) -> str:
+        """
+        Aggregate error messages from failed/cancelled agents in a parallel stage.
+        
+        Creates a detailed error message listing each failed/cancelled agent with their specific error.
+        
+        Args:
+            metadatas: List of agent execution metadata
+            parallel_type: Type of parallel execution (e.g., "multi_agent", "replica")
+            success_policy: Success policy that was applied
+            
+        Returns:
+            Detailed error message with individual agent failures
+        """
+        failed_agents = []
+        cancelled_agents = []
+        
+        for metadata in metadatas:
+            agent_name = metadata.agent_name or 'unknown'
+            error_msg = metadata.error_message or 'No error message'
+            
+            if metadata.status == StageStatus.FAILED:
+                failed_agents.append(f"  - {agent_name} (failed): {error_msg}")
+            elif metadata.status == StageStatus.CANCELLED:
+                cancelled_agents.append(f"  - {agent_name} (cancelled): {error_msg}")
+        
+        # Count totals
+        failed_count = len(failed_agents)
+        cancelled_count = len(cancelled_agents)
+        total_agents = len(metadatas)
+        
+        # Build header
+        error_parts = [
+            f"{parallel_type.capitalize()} stage failed: {failed_count + cancelled_count}/{total_agents} executions failed (policy: {success_policy})"
+        ]
+        
+        # Add detailed agent errors
+        if failed_agents:
+            error_parts.append("\nFailed agents:")
+            error_parts.extend(failed_agents)
+        
+        if cancelled_agents:
+            error_parts.append("\nCancelled agents:")
+            error_parts.extend(cancelled_agents)
+        
+        return "\n".join(error_parts)
+    
+    
     async def _execute_parallel_stage(
         self,
         stage: "ChainStageConfigModel",
@@ -250,8 +320,8 @@ class ParallelStageExecutor:
             agent_name = config["agent_name"]
             base_agent = config.get("base_agent_name", agent_name)  # For replicas
             
-            # Get normalized iteration_strategy (already normalized during config building)
-            child_strategy_str = config.get("iteration_strategy")
+            # Get execution config (unified configuration object)
+            execution_config = config["execution_config"]
             
             # Get original (non-normalized) iteration_strategy for Pydantic validation
             # For ChainStageConfigModel, we need the original value (Enum or None), not the normalized string
@@ -284,12 +354,11 @@ class ParallelStageExecutor:
             try:
                 logger.debug(f"Executing {parallel_type} {idx+1}/{len(execution_configs)}: '{agent_name}'")
                 
-                # Get agent instance from factory (child_strategy_str already normalized above)
-                agent = self.agent_factory.get_agent(
+                # Get agent instance from factory with unified execution config
+                agent = self.agent_factory.get_agent_with_config(
                     agent_identifier=base_agent,
                     mcp_client=session_mcp_client,
-                    iteration_strategy=child_strategy_str,
-                    llm_provider=config.get("llm_provider")
+                    execution_config=execution_config
                 )
                 
                 # Set current stage execution ID for interaction tagging (hooks need this!)
@@ -334,8 +403,8 @@ class ParallelStageExecutor:
                 agent_completed_at_us = now_us()
                 metadata = AgentExecutionMetadata(
                     agent_name=agent_name,
-                    llm_provider=config["llm_provider"] or self.settings.llm_provider,
-                    iteration_strategy=child_strategy_str or "unknown",
+                    llm_provider=execution_config.llm_provider or self.settings.llm_provider,
+                    iteration_strategy=execution_config.iteration_strategy or "unknown",
                     started_at_us=agent_started_at_us,
                     completed_at_us=agent_completed_at_us,
                     status=result.status,
@@ -365,8 +434,8 @@ class ParallelStageExecutor:
                     exception=e,
                     agent_name=agent_name,
                     stage_name=stage.name,
-                    llm_provider=config["llm_provider"] or self.settings.llm_provider,
-                    iteration_strategy=config["iteration_strategy"] or "unknown",
+                    llm_provider=execution_config.llm_provider or self.settings.llm_provider,
+                    iteration_strategy=execution_config.iteration_strategy or "unknown",
                     agent_started_at_us=agent_started_at_us,
                 )
 
@@ -394,8 +463,8 @@ class ParallelStageExecutor:
                 agent_completed_at_us = now_us()
                 metadata = AgentExecutionMetadata(
                     agent_name=agent_name,
-                    llm_provider=config["llm_provider"] or self.settings.llm_provider,
-                    iteration_strategy=child_strategy_str or "unknown",
+                    llm_provider=execution_config.llm_provider or self.settings.llm_provider,
+                    iteration_strategy=execution_config.iteration_strategy or "unknown",
                     started_at_us=agent_started_at_us,
                     completed_at_us=agent_completed_at_us,
                     status=StageStatus.PAUSED,
@@ -427,8 +496,8 @@ class ParallelStageExecutor:
                 # Create metadata for failed execution (use normalized string)
                 metadata = AgentExecutionMetadata(
                     agent_name=agent_name,
-                    llm_provider=config["llm_provider"] or self.settings.llm_provider,
-                    iteration_strategy=child_strategy_str or "unknown",
+                    llm_provider=execution_config.llm_provider or self.settings.llm_provider,
+                    iteration_strategy=execution_config.iteration_strategy or "unknown",
                     started_at_us=agent_started_at_us,
                     completed_at_us=agent_completed_at_us,
                     status=StageStatus.FAILED,
@@ -456,8 +525,8 @@ class ParallelStageExecutor:
                     exception=item,
                     agent_name=agent_name,
                     stage_name=stage.name,
-                    llm_provider=execution_configs[idx].get("llm_provider") or self.settings.llm_provider,
-                    iteration_strategy=execution_configs[idx].get("iteration_strategy") or "unknown",
+                    llm_provider=execution_configs[idx]["execution_config"].llm_provider or self.settings.llm_provider,
+                    iteration_strategy=execution_configs[idx]["execution_config"].iteration_strategy or "unknown",
                     agent_started_at_us=stage_started_at_us,
                 )
                 results.append(error_result)
@@ -530,7 +599,12 @@ class ParallelStageExecutor:
                 f"{paused_count} agents paused, {completed_count} completed, {failed_count} failed"
             )
         else:  # FAILED
-            error_msg = f"{parallel_type.capitalize()} stage failed: {failed_count}/{len(metadatas)} executions failed (policy: {stage.success_policy})"
+            # Build detailed error message showing all failed/cancelled agents
+            error_msg = self._aggregate_parallel_stage_errors(
+                metadatas=metadatas,
+                parallel_type=parallel_type,
+                success_policy=stage.success_policy
+            )
             await self.stage_manager.update_stage_execution_failed(parent_stage_execution_id, error_msg)
         
         return parallel_result
@@ -658,23 +732,51 @@ class ParallelStageExecutor:
                 if not agent_config:
                     raise ValueError(f"Agent config not found for {child.agent}")
                 
-                # Normalize iteration_strategy to string to prevent Enum leakage
+                # Get agent definition if it exists
+                agent_def = (
+                    self.agent_factory.agent_configs.get(agent_config.name)
+                    if getattr(self.agent_factory, "agent_configs", None)
+                    else None
+                )
+                
+                # Resolve unified execution config from hierarchy (same as normal execution)
+                execution_config = ExecutionConfigResolver.resolve_config(
+                    system_settings=self.settings,
+                    agent_config=agent_def,
+                    chain_config=chain_definition,
+                    stage_config=stage_config,
+                    parallel_agent_config=agent_config,
+                )
+                
                 config = {
                     "agent_name": child.agent,
-                    "llm_provider": agent_config.llm_provider or stage_config.llm_provider or chain_definition.llm_provider,
-                    "iteration_strategy": self._normalize_iteration_strategy(agent_config.iteration_strategy),
+                    "execution_config": execution_config,
                     "iteration_strategy_original": agent_config.iteration_strategy,  # Keep original for Pydantic validation
                 }
             else:  # REPLICA
                 # Extract base agent name (e.g., "KubernetesAgent-1" -> "KubernetesAgent")
                 base_agent = stage_config.agent
                 
-                # Normalize iteration_strategy to string to prevent Enum leakage
+                # Get agent definition if it exists
+                agent_def = (
+                    self.agent_factory.agent_configs.get(base_agent)
+                    if getattr(self.agent_factory, "agent_configs", None)
+                    else None
+                )
+                
+                # Resolve unified execution config from hierarchy (replicas don't have parallel_agent_config)
+                execution_config = ExecutionConfigResolver.resolve_config(
+                    system_settings=self.settings,
+                    agent_config=agent_def,
+                    chain_config=chain_definition,
+                    stage_config=stage_config,
+                    parallel_agent_config=None,  # Replicas don't have individual config
+                )
+                
                 config = {
                     "agent_name": child.agent,  # Keep replica name
                     "base_agent_name": base_agent,
-                    "llm_provider": stage_config.llm_provider or chain_definition.llm_provider,
-                    "iteration_strategy": self._normalize_iteration_strategy(stage_config.iteration_strategy),
+                    "execution_config": execution_config,
                     "iteration_strategy_original": stage_config.iteration_strategy,  # Keep original for Pydantic validation
                 }
             
@@ -704,8 +806,8 @@ class ParallelStageExecutor:
             agent_name = config["agent_name"]
             base_agent = config.get("base_agent_name", agent_name)
             
-            # Get normalized iteration_strategy (already normalized during config building)
-            child_strategy_str = config.get("iteration_strategy")
+            # Get execution config (unified configuration object)
+            execution_config = config["execution_config"]
             
             # Find the existing paused child stage execution to reuse
             paused_child = paused_children[idx]
@@ -721,12 +823,11 @@ class ParallelStageExecutor:
             try:
                 logger.debug(f"Resuming paused agent {idx+1}/{len(execution_configs)}: '{agent_name}'")
                 
-                # Get agent instance from factory (child_strategy_str already normalized above)
-                agent = self.agent_factory.get_agent(
+                # Get agent instance from factory with unified execution config
+                agent = self.agent_factory.get_agent_with_config(
                     agent_identifier=base_agent,
                     mcp_client=session_mcp_client,
-                    iteration_strategy=child_strategy_str,
-                    llm_provider=config.get("llm_provider")
+                    execution_config=execution_config
                 )
                 
                 # Set current stage execution ID for interaction tagging (hooks need this!)
@@ -760,8 +861,8 @@ class ParallelStageExecutor:
                 agent_completed_at_us = now_us()
                 metadata = AgentExecutionMetadata(
                     agent_name=agent_name,
-                    llm_provider=config["llm_provider"] or self.settings.llm_provider,
-                    iteration_strategy=child_strategy_str or "unknown",
+                    llm_provider=execution_config.llm_provider or self.settings.llm_provider,
+                    iteration_strategy=execution_config.iteration_strategy or "unknown",
                     started_at_us=agent_started_at_us,
                     completed_at_us=agent_completed_at_us,
                     status=StageStatus.COMPLETED,
@@ -791,8 +892,8 @@ class ParallelStageExecutor:
                 agent_completed_at_us = now_us()
                 metadata = AgentExecutionMetadata(
                     agent_name=agent_name,
-                    llm_provider=config["llm_provider"] or self.settings.llm_provider,
-                    iteration_strategy=child_strategy_str or "unknown",
+                    llm_provider=execution_config.llm_provider or self.settings.llm_provider,
+                    iteration_strategy=execution_config.iteration_strategy or "unknown",
                     started_at_us=agent_started_at_us,
                     completed_at_us=agent_completed_at_us,
                     status=StageStatus.PAUSED,
@@ -820,8 +921,8 @@ class ParallelStageExecutor:
                 agent_completed_at_us = now_us()
                 metadata = AgentExecutionMetadata(
                     agent_name=agent_name,
-                    llm_provider=config["llm_provider"] or self.settings.llm_provider,
-                    iteration_strategy=child_strategy_str or "unknown",
+                    llm_provider=execution_config.llm_provider or self.settings.llm_provider,
+                    iteration_strategy=execution_config.iteration_strategy or "unknown",
                     started_at_us=agent_started_at_us,
                     completed_at_us=agent_completed_at_us,
                     status=StageStatus.FAILED,
@@ -994,19 +1095,35 @@ class ParallelStageExecutor:
             # Mark synthesis stage as started
             await self.stage_manager.update_stage_execution_started(synthesis_stage_execution_id)
             
-            # Resolve effective LLM provider for synthesis agent
-            effective_provider = (
-                synthesis_config.llm_provider 
-                or stage_config.llm_provider 
-                or chain_definition.llm_provider
+            # Resolve unified execution configuration for synthesis agent
+            # Get agent definition if it exists
+            agent_def = self.agent_factory.agent_configs.get(synthesis_config.agent) if self.agent_factory.agent_configs else None
+            
+            # Create a temporary stage config with synthesis settings for resolution
+            # This ensures synthesis config overrides are properly applied
+            from tarsy.models.agent_config import ChainStageConfigModel as TempStageModel
+            synthesis_temp_stage = TempStageModel(
+                name="synthesis-temp",
+                agent=synthesis_config.agent,
+                iteration_strategy=synthesis_config.iteration_strategy,
+                llm_provider=synthesis_config.llm_provider or stage_config.llm_provider,
+                mcp_servers=None  # Synthesis doesn't use tools/MCP servers
             )
             
-            # Get synthesis agent from factory (configurable!)
-            synthesis_agent = self.agent_factory.get_agent(
+            # Resolve unified execution config (synthesis doesn't have parallel_agent_config)
+            execution_config = ExecutionConfigResolver.resolve_config(
+                system_settings=self.settings,
+                agent_config=agent_def,
+                chain_config=chain_definition,
+                stage_config=synthesis_temp_stage,
+                parallel_agent_config=None  # Synthesis doesn't have parallel config
+            )
+            
+            # Get synthesis agent from factory with unified config (configurable!)
+            synthesis_agent = self.agent_factory.get_agent_with_config(
                 agent_identifier=synthesis_config.agent,
                 mcp_client=session_mcp_client,
-                iteration_strategy=self._normalize_iteration_strategy(synthesis_config.iteration_strategy),
-                llm_provider=effective_provider
+                execution_config=execution_config
             )
             
             # Set stage execution ID for interaction tagging
@@ -1047,4 +1164,3 @@ class ParallelStageExecutor:
             )
             
             return (synthesis_stage_execution_id, error_result)
-

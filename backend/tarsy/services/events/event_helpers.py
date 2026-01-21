@@ -162,7 +162,11 @@ async def publish_session_resumed(session_id: str) -> None:
 async def publish_session_progress_update(
     session_id: str, 
     phase: Union[ProgressPhase, str], 
-    metadata: Optional[dict] = None
+    metadata: Optional[dict] = None,
+    stage_execution_id: Optional[str] = None,
+    parent_stage_execution_id: Optional[str] = None,
+    parallel_index: Optional[int] = None,
+    agent_name: Optional[str] = None
 ) -> None:
     """
     Publish session.progress_update event to both global and session-specific channels.
@@ -171,6 +175,10 @@ async def publish_session_progress_update(
         session_id: Session identifier
         phase: Processing phase (ProgressPhase enum or string value)
         metadata: Optional phase-specific metadata
+        stage_execution_id: Stage execution identifier (for parallel child stages)
+        parent_stage_execution_id: Parent stage execution ID (for parallel child stages)
+        parallel_index: Position in parallel group (1-N for parallel children)
+        agent_name: Agent name for this execution (for parallel agents)
     """
     try:
         # Convert enum to string value if needed
@@ -181,13 +189,25 @@ async def publish_session_progress_update(
             event = SessionProgressUpdateEvent(
                 session_id=session_id,
                 phase=phase_value,
-                metadata=metadata
+                metadata=metadata,
+                stage_execution_id=stage_execution_id,
+                parent_stage_execution_id=parent_stage_execution_id,
+                parallel_index=parallel_index,
+                agent_name=agent_name
             )
             # Publish to global 'sessions' channel for dashboard
             await publish_event(session, EventChannel.SESSIONS, event)
             # Also publish to session-specific channel for detail views
             await publish_event(session, f"session:{session_id}", event)
-            logger.info(f"[EVENT] Published session.progress_update (phase={phase_value}) to channels: 'sessions' and 'session:{session_id}'")
+            
+            # Log with parallel context if available
+            if parallel_index is not None and agent_name:
+                logger.info(
+                    f"[EVENT] Published session.progress_update (phase={phase_value}, agent={agent_name}, "
+                    f"parallel_index={parallel_index}) to channels: 'sessions' and 'session:{session_id}'"
+                )
+            else:
+                logger.info(f"[EVENT] Published session.progress_update (phase={phase_value}) to channels: 'sessions' and 'session:{session_id}'")
     except Exception as e:
         logger.warning(f"Failed to publish session.progress_update event: {e}")
 
@@ -331,6 +351,8 @@ async def publish_stage_started(
     chat_user_message_author: Optional[str] = None,
     parallel_type: Optional[str] = None,
     expected_parallel_count: Optional[int] = None,
+    parent_stage_execution_id: Optional[str] = None,
+    parallel_index: Optional[int] = None,
 ) -> None:
     """
     Publish stage.started event.
@@ -345,6 +367,8 @@ async def publish_stage_started(
         chat_user_message_author: Optional user message author
         parallel_type: Optional parallel execution type ('multi_agent' or 'replica')
         expected_parallel_count: Optional expected number of parallel children
+        parent_stage_execution_id: Optional parent stage execution ID if this is a child of a parallel stage
+        parallel_index: Optional position in parallel group (1-N) if this is a child stage
     """
     try:
         async_session_factory = get_async_session_factory()
@@ -359,6 +383,8 @@ async def publish_stage_started(
                 chat_user_message_author=chat_user_message_author,
                 parallel_type=parallel_type,
                 expected_parallel_count=expected_parallel_count,
+                parent_stage_execution_id=parent_stage_execution_id,
+                parallel_index=parallel_index,
             )
             await publish_event(
                 session, EventChannel.session_details(session_id), event
@@ -369,7 +395,13 @@ async def publish_stage_started(
 
 
 async def publish_stage_completed(
-    session_id: str, stage_id: str, stage_name: str, status: str, chat_id: Optional[str] = None
+    session_id: str, 
+    stage_id: str, 
+    stage_name: str, 
+    status: str, 
+    chat_id: Optional[str] = None,
+    parent_stage_execution_id: Optional[str] = None,
+    parallel_index: Optional[int] = None,
 ) -> None:
     """
     Publish stage.completed event.
@@ -380,6 +412,8 @@ async def publish_stage_completed(
         stage_name: Human-readable stage name
         status: Stage status (completed/failed/partial)
         chat_id: Optional chat ID if this is a chat response stage
+        parent_stage_execution_id: Optional parent stage execution ID if this is a child of a parallel stage
+        parallel_index: Optional position in parallel group (1-N) if this is a child stage
     """
     try:
         async_session_factory = get_async_session_factory()
@@ -390,6 +424,8 @@ async def publish_stage_completed(
                 stage_name=stage_name,
                 status=status,
                 chat_id=chat_id,
+                parent_stage_execution_id=parent_stage_execution_id,
+                parallel_index=parallel_index,
             )
             await publish_event(
                 session, EventChannel.session_details(session_id), event

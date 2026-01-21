@@ -311,6 +311,11 @@ export interface WebSocketMessage {
   // Direct event fields (for session.progress_update)
   phase?: string; // Processing phase for progress updates
   metadata?: Record<string, any>; // Optional metadata for progress updates
+  // Parallel execution metadata (for per-agent status tracking)
+  stage_execution_id?: string; // Stage execution identifier (child execution ID for parallel stages)
+  parent_stage_execution_id?: string; // Parent stage execution ID for parallel child stages
+  parallel_index?: number; // Position in parallel group (1-N for parallel children)
+  agent_name?: string; // Agent name for this execution
 }
 
 export interface SessionUpdate {
@@ -685,13 +690,10 @@ export interface KeyValuePair {
 }
 
 export interface ManualAlertFormProps {
-  onAlertSubmitted: (alertResponse: AlertSubmissionResponse) => void;
+  // onAlertSubmitted is optional - form navigates directly to session detail page
+  onAlertSubmitted?: (alertResponse: AlertSubmissionResponse) => void;
 }
 
-export interface ProcessingStatusProps {
-  sessionId: string;
-  onComplete?: () => void;
-}
 
 // System Warning types
 export interface SystemWarning {
@@ -733,8 +735,6 @@ export interface MCPToolInfo {
 
 export interface MCPServerInfo {
   server_id: string;
-  server_type: string;
-  enabled: boolean;
   tools: MCPToolInfo[];
 }
 

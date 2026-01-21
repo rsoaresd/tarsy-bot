@@ -30,6 +30,9 @@ import { CHAT_FLOW_ITEM_TYPES } from '../constants/chatFlowItemTypes';
 import { generateItemKey } from '../utils/chatFlowItemKey';
 // Auto-scroll is now handled by the centralized system in SessionDetailPageBase
 
+// Module-level constant to avoid creating new Map on every render
+const EMPTY_AGENT_PROGRESS_MAP = new Map<string, string>();
+
 interface ProcessingIndicatorProps {
   message?: string;
   centered?: boolean;
@@ -111,6 +114,8 @@ interface ConversationTimelineProps {
   session: DetailedSession;
   autoScroll?: boolean;
   progressStatus?: string;
+  agentProgressStatuses?: Map<string, string>;
+  onSelectedAgentChange?: (executionId: string | null) => void;
 }
 
 // Extended streaming item for ConversationTimeline
@@ -359,7 +364,9 @@ export function cleanupOldSessionEntries() {
 function ConversationTimeline({ 
   session, 
   autoScroll = true, // Auto-scroll handled by centralized system
-  progressStatus = ProgressStatusMessage.PROCESSING
+  progressStatus = ProgressStatusMessage.PROCESSING,
+  agentProgressStatuses = EMPTY_AGENT_PROGRESS_MAP,
+  onSelectedAgentChange
 }: ConversationTimelineProps) {
   // Suppress unused warning - autoScroll is part of the interface but handled centrally
   void autoScroll;
@@ -401,6 +408,7 @@ function ConversationTimeline({
       CHAT_FLOW_ITEM_TYPES.THOUGHT,
       CHAT_FLOW_ITEM_TYPES.NATIVE_THINKING,
       CHAT_FLOW_ITEM_TYPES.FINAL_ANSWER,
+      CHAT_FLOW_ITEM_TYPES.FORCED_CONCLUSION,
       CHAT_FLOW_ITEM_TYPES.SUMMARIZATION
     ];
     const newItemsToCollapse = new Set<string>();
@@ -543,13 +551,14 @@ function ConversationTimeline({
       CHAT_FLOW_ITEM_TYPES.THOUGHT,
       CHAT_FLOW_ITEM_TYPES.NATIVE_THINKING,
       CHAT_FLOW_ITEM_TYPES.FINAL_ANSWER,
+      CHAT_FLOW_ITEM_TYPES.FORCED_CONCLUSION,
       CHAT_FLOW_ITEM_TYPES.SUMMARIZATION
     ];
     if (!collapsibleTypes.includes(item.type)) return false;
     
     // Exception: Chat stage final answers should NOT be collapsible
     // They are direct responses to user questions and should always be visible
-    if (item.type === CHAT_FLOW_ITEM_TYPES.FINAL_ANSWER && item.isChatStage) {
+    if ((item.type === CHAT_FLOW_ITEM_TYPES.FINAL_ANSWER || item.type === CHAT_FLOW_ITEM_TYPES.FORCED_CONCLUSION) && item.isChatStage) {
       return false;
     }
     
@@ -642,6 +651,8 @@ function ConversationTimeline({
         content += `📋 Tool Result Summary${item.mcp_event_id ? ` (MCP: ${item.mcp_event_id})` : ''}:\n${item.content}\n\n`;
       } else if (item.type === CHAT_FLOW_ITEM_TYPES.FINAL_ANSWER) {
         content += `🎯 Final Answer:\n${item.content}\n\n`;
+      } else if (item.type === CHAT_FLOW_ITEM_TYPES.FORCED_CONCLUSION) {
+        content += `🎯 Final Answer (⚠️Max Iterations):\n${item.content}\n\n`;
       }
     });
     
@@ -1333,6 +1344,8 @@ function ConversationTimeline({
                             onToggleItemExpansion={handleToggleItemExpansion}
                             expandAllReasoning={expandAllReasoning}
                             isItemCollapsible={isItemCollapsible}
+                            agentProgressStatuses={agentProgressStatuses}
+                            onSelectedAgentChange={onSelectedAgentChange}
                           />
                         ) : (
                           <Box sx={{ p: 2, color: 'error.main' }}>

@@ -32,7 +32,7 @@ Analyze alerts thoroughly and provide actionable insights based on:
 Always be specific, reference actual data, and provide clear next steps.
 Focus on root cause analysis and sustainable solutions.
 
-## Kubernetes Server Instructions
+## kubernetes-server Instructions
 
 For Kubernetes operations:
 - **IMPORTANT: In multi-cluster environments** (when the 'configuration_contexts_list' tool is available):
@@ -45,7 +45,7 @@ For Kubernetes operations:
   * Cluster-scoped resources (Namespace, Node, ClusterRole, PersistentVolume) should NOT have a namespace parameter
   * Namespace-scoped resources (Pod, Deployment, Service, ConfigMap) REQUIRE a namespace parameter
 
-## Custom Server Instructions
+## test-data-server Instructions
 
 Simple data collection server for testing - provides system information gathering tools
 
@@ -286,25 +286,22 @@ Data collection stage is now complete. The gathered information shows finalizers
 EXPECTED_PAUSE_RESUME_STAGES = {
     'data-collection': {
         'llm_count': 5,  # 2 before first pause + 1 before second pause + 2 after second resume (1 tool call + 1 final answer)
-        'mcp_count': 10,  # Initial: 2 tool_list + 2 tool_call, First resume: 2 tool_list + 1 tool_call, Second resume: 2 tool_list + 1 tool_call
+        'mcp_count': 7,  # Initial: 1 tool_list + 2 tool_call, First resume: 1 tool_list + 1 tool_call, Second resume: 1 tool_list + 1 tool_call
         'expected_status': 'completed',  # Final status after completion
         'expected_conversation': EXPECTED_RESUMED_DATA_COLLECTION_CONVERSATION,  # Verify conversation history was restored
         'interactions': [
             # Initial execution (before first pause at iteration 2)
             {'type': 'mcp', 'communication_type': 'tool_list', 'success': True, 'server_name': 'kubernetes-server'},
-            {'type': 'mcp', 'communication_type': 'tool_list', 'success': True, 'server_name': 'test-data-server'},
             {'type': 'llm', 'success': True, 'input_tokens': 200, 'output_tokens': 80, 'total_tokens': 280},
             {'type': 'mcp', 'communication_type': 'tool_call', 'success': True, 'tool_name': 'kubectl_get'},
             {'type': 'llm', 'success': True, 'input_tokens': 220, 'output_tokens': 90, 'total_tokens': 310},
             {'type': 'mcp', 'communication_type': 'tool_call', 'success': True, 'tool_name': 'kubectl_describe'},
             # After first resume (before second pause at iteration 1 of resumed session)
             {'type': 'mcp', 'communication_type': 'tool_list', 'success': True, 'server_name': 'kubernetes-server'},
-            {'type': 'mcp', 'communication_type': 'tool_list', 'success': True, 'server_name': 'test-data-server'},
             {'type': 'llm', 'success': True, 'input_tokens': 240, 'output_tokens': 100, 'total_tokens': 340},
             {'type': 'mcp', 'communication_type': 'tool_call', 'success': True, 'tool_name': 'kubectl_get'},
             # After second resume (continues ReAct loop with tool call, then final answer)
             {'type': 'mcp', 'communication_type': 'tool_list', 'success': True, 'server_name': 'kubernetes-server'},
-            {'type': 'mcp', 'communication_type': 'tool_list', 'success': True, 'server_name': 'test-data-server'},
             {'type': 'llm', 'success': True, 'input_tokens': 260, 'output_tokens': 100, 'total_tokens': 360},
             {'type': 'mcp', 'communication_type': 'tool_call', 'success': True, 'tool_name': 'kubectl_get'},
             {'type': 'llm', 'success': True, 'input_tokens': 280, 'output_tokens': 150, 'total_tokens': 430, 'interaction_type': 'final_analysis'},

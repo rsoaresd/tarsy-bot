@@ -63,8 +63,12 @@ def assert_conversation_messages(
         if expected_content != actual_content:
             # Show difference for debugging
             print(f"\n❌ Content mismatch in message {i}:")
+            print(f"  Expected role: {expected_role}")
+            print(f"  Actual role: {actual_role}")
             print(f"  Expected length: {len(expected_content)}")
             print(f"  Actual length: {len(actual_content)}")
+            print(f"  Expected preview: {expected_content[:200]}...")
+            print(f"  Actual preview: {actual_content[:200]}...")
             
             # Find where they differ
             for idx, (e_char, a_char) in enumerate(zip(expected_content, actual_content)):
@@ -292,13 +296,13 @@ class E2ETestUtils:
             # Call the original method which will now use our mock sessions
             return await original_list_tools(self, session_id, server_name, stage_execution_id)
 
-        async def mock_call_tool(self, server_name: str, tool_name: str, parameters, session_id: str, stage_execution_id=None, investigation_conversation=None, mcp_selection=None, configured_servers=None):
+        async def mock_call_tool(self, server_name: str, tool_name: str, parameters, session_id: str, stage_execution_id=None, investigation_conversation=None, mcp_selection=None, configured_servers=None, parent_stage_execution_id=None, parallel_index=None, agent_name=None):
             """Override call_tool to use our mock sessions."""
             # Ensure our mock sessions are available
             self.sessions = mock_sessions.copy()
             self._initialized = True
             # Call the original method which will now use our mock sessions
-            return await original_call_tool(self, server_name, tool_name, parameters, session_id, stage_execution_id, investigation_conversation, mcp_selection, configured_servers)
+            return await original_call_tool(self, server_name, tool_name, parameters, session_id, stage_execution_id, investigation_conversation, mcp_selection, configured_servers, parent_stage_execution_id, parallel_index, agent_name)
 
         return mock_list_tools, mock_call_tool
 
@@ -317,9 +321,6 @@ class E2ETestUtils:
         if command_args is None:
             command_args = ["test"]
         return {
-            "server_id": "kubernetes-server",
-            "server_type": "test",
-            "enabled": True,
             "transport": {
                 "type": "stdio",
                 "command": "echo",
@@ -344,9 +345,6 @@ class E2ETestUtils:
         if command_args is None:
             command_args = ["test"]
         return {
-            "server_id": "test-data-server",
-            "server_type": "test",
-            "enabled": True,
             "transport": {
                 "type": "stdio",
                 "command": "echo",

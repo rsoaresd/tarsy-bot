@@ -43,7 +43,7 @@
 # - Built-in pattern groups: "basic" (api_key, password), "secrets" (basic + token), "security" (all + certificate), "kubernetes" (kubernetes_secret + basic), "all" (all patterns)
 # - Custom patterns can be defined with regex pattern, replacement text, and description
 # - Masking is applied to MCP server responses before reaching the LLM or logs
-# - Set enabled: false to disable masking for specific servers
+# - Set data_masking.enabled: false to disable masking for specific servers
 #
 # RESULT SUMMARIZATION
 # - MCP servers can include optional summarization configuration to handle large tool outputs
@@ -56,6 +56,50 @@
 # - When disabled (enabled: false), all MCP tool results pass through unchanged regardless of size
 # - Different servers may need different thresholds: security data often needs higher thresholds, filesystem operations often disabled
 # - Summarization uses LLM provider's max_tokens parameter for guaranteed length control and cost management
+#
+# HIERARCHICAL ITERATION CONFIGURATION:
+# - max_iterations and force_conclusion_at_max_iterations can be configured at multiple levels
+# - Precedence (highest to lowest):
+#   1. Parallel agent level (within agents list) - highest precedence
+#   2. Stage level (within stages)
+#   3. Chain level (agent_chains section)
+#   4. Agent level (agents section)
+#   5. System level (environment variables/settings.py) - lowest precedence
+# - Each level overrides all lower levels. If not specified, inherits from the level below.
+# - max_iterations: Maximum LLM->MCP iteration loops (default: 30 from system settings)
+# - force_conclusion_at_max_iterations: Force conclusion vs pause when limit reached (default: false)
+#
+# HIERARCHICAL MCP SERVER CONFIGURATION:
+# - mcp_servers can be configured at multiple levels (NEW FEATURE)
+# - Precedence (highest to lowest):
+#   1. Alert level (via API mcp field) - HIGHEST PRIORITY, overrides everything
+#   2. Chat level (chat.mcp_servers in chain config) - for chat agents only
+#   3. Parallel agent level (within agents list) - highest configuration priority
+#   4. Stage level (within stages)
+#   5. Chain level (agent_chains section)
+#   6. Agent level (agents section) - lowest configuration priority
+# - Each level overrides all lower levels. If not specified, inherits from the level below.
+# - Alert-level MCP override (via API) takes precedence over ALL configuration levels
+# - This allows fine-grained control: define defaults at chain level, override per-stage, or per-agent
+# - Example use cases:
+#   * Chain-level: Set common MCP servers for all stages (e.g., kubernetes-server)
+#   * Stage-level: Add monitoring servers for specific investigation stage
+#   * Parallel-agent: Each agent in parallel uses different MCP servers
+#   * Chat-level: Restrict chat agent to specific MCP servers (e.g., only kubernetes, no destructive ops)
+#   * Alert-level: Ad-hoc override via API for specific alert (with optional tool filtering)
+#
+# CHAT CONFIGURATION:
+# - Chat can be configured at chain level with the "chat" section
+# - Chat configuration options:
+#   * enabled: true/false (default: true) - Enable/disable chat for this chain
+#   * agent: "ChatAgent" (default) - Which agent to use for chat conversations
+#   * iteration_strategy: Optional strategy override (defaults to last stage's strategy)
+#   * llm_provider: Optional LLM provider override (defaults to chain/system provider)
+#   * mcp_servers: Optional MCP server list (overrides chain-level for chat only)
+#   * max_iterations: Optional iteration limit for chat (overrides chain/agent defaults)
+# - Chat agents inherit chain-level configuration but can override specific settings
+# - Use chat.mcp_servers to restrict chat capabilities (e.g., read-only access)
+# - Use chat.max_iterations to prevent runaway chat conversations
 #
 
 # =============================================================================
@@ -87,9 +131,6 @@ mcp_servers:
   # Uncomment this section to enable the override:
   #
   # kubernetes-server:
-  #   server_id: "kubernetes-server"
-  #   server_type: "kubernetes"
-  #   enabled: true
   #   transport:
   #     type: "stdio"
   #     command: "npx"
@@ -118,9 +159,6 @@ mcp_servers:
   
   # Security-focused MCP server for threat analysis and security operations
   security-server:
-    server_id: "security-server"
-    server_type: "security"
-    enabled: true
     transport:
       type: "stdio"  # Required discriminator field
       # Example: Custom security MCP server command with templated arguments
@@ -159,9 +197,6 @@ mcp_servers:
 
   # Monitoring and observability MCP server for performance analysis
   monitoring-server:
-    server_id: "monitoring-server"
-    server_type: "monitoring"
-    enabled: true
     transport:
       type: "stdio"  # Required discriminator field  
       command: "npx"
@@ -189,9 +224,6 @@ mcp_servers:
 
   # HTTP MCP server example (using HTTP transport)
   http-mcp-server:
-    server_id: "http-mcp-server"
-    server_type: "http-based"
-    enabled: false  # Disabled by default - enable when HTTP endpoint is configured
     transport:
       type: "http"  # HTTP transport type
       url: "https://mcp-api.example.com/mcp"  # MCP endpoint URL
@@ -217,9 +249,6 @@ mcp_servers:
 
   # SSE MCP server example (using Server-Sent Events transport)
   sse-mcp-server:
-    server_id: "sse-mcp-server"
-    server_type: "streaming"
-    enabled: false  # Disabled by default - enable when SSE endpoint is configured
     transport:
       type: "sse"  # SSE transport type
       url: "https://streaming-mcp.example.com/sse"  # SSE endpoint URL (supports endpoint discovery)
@@ -247,9 +276,6 @@ mcp_servers:
 
   # Custom cloud provider MCP server (example for AWS-specific operations)
   aws-server:
-    server_id: "aws-server"
-    server_type: "cloud"
-    enabled: false  # Disabled by default - enable when AWS credentials are configured
     transport:
       type: "stdio"  # Required discriminator field
       command: "/usr/local/bin/aws-mcp-server"
@@ -322,10 +348,13 @@ agents:
       - Focus on both immediate resolution and long-term optimization
 
   # Database-focused agent for handling database-related alerts
+  # Example: Agent-level iteration configuration
   database-agent:
     mcp_servers:
       - "kubernetes-server"            # Built-in Kubernetes MCP server only
     # iteration_strategy: "react"      # Optional: defaults to "react" if not specified
+    max_iterations: 25                 # Agent-level override (applies unless overridden by chain/stage/parallel)
+    force_conclusion_at_max_iterations: false  # Agent-level setting
     custom_instructions: |
       You are a database-focused SRE agent specializing in database operations.
       
@@ -398,18 +427,24 @@ agent_chains:
     description: "2-stage security incident investigation and response"
 
   # Advanced 3-stage Kubernetes troubleshooting workflow
+  # Example: Chain-level and stage-level iteration configuration
   kubernetes-deep-troubleshooting:
     alert_types: ["KubernetesCritical", "PodCrashLoop"]
+    max_iterations: 20                   # Chain-level override (applies to all stages unless overridden)
+    force_conclusion_at_max_iterations: true
     stages:
       - name: "system-data-collection"     # Stage 1: Collect system metrics and status
         agent: "performance-agent"
         iteration_strategy: "react-stage" # Focus on gathering comprehensive data and stage analysis
+        max_iterations: 15               # Stage-level override (higher precedence than chain)
       - name: "detailed-analysis"          # Stage 2: Deep dive analysis with tools
         agent: "database-agent"            # Different agent for specialized analysis
         iteration_strategy: "react-stage" # Collect additional data + stage-specific analysis
+        # Uses chain-level iteration config (20 iterations, force_conclusion=true)
       - name: "final-diagnosis"            # Stage 3: Comprehensive diagnosis and recommendations
         agent: "performance-agent"         # Back to performance agent for final analysis
         iteration_strategy: "react-final-analysis" # Pure analysis, no additional data collection
+        force_conclusion_at_max_iterations: false  # Stage-level override for this setting only
     description: "3-stage deep Kubernetes troubleshooting with specialized analysis"
 
   # Multi-stage performance investigation chain
@@ -474,17 +509,23 @@ agent_chains:
 
   # Parallel multi-agent investigation with synthesis
   # Demonstrates parallel execution with configurable synthesis
+  # Example: Parallel agent-level iteration configuration (highest precedence)
   parallel-investigation-with-synthesis:
     alert_types: ["ComplexSystemFailure", "MultiDomainIncident"]
+    max_iterations: 30                    # Chain-level default
     stages:
       - name: "parallel-investigation"
+        max_iterations: 25                # Stage-level override
         agents:
           - name: "KubernetesAgent"
             llm_provider: "google-default"
             iteration_strategy: "react"
+            max_iterations: 20            # Parallel agent-level override (highest precedence)
+            force_conclusion_at_max_iterations: true
           - name: "database-agent"
             llm_provider: "anthropic-default"
             iteration_strategy: "react"
+            # Uses stage-level iteration config (25 iterations)
         # Optional synthesis configuration
         synthesis:
           agent: "SynthesisAgent"                # Optional, defaults to SynthesisAgent
@@ -511,15 +552,18 @@ agent_chains:
   custom-chat-config-chain:
     alert_types: ["CustomChatExample"]
     llm_provider: "anthropic-default"  # Chain default
+    mcp_servers: ["kubernetes-server", "monitoring-server"]  # Chain-level MCP servers
     chat:
       enabled: true                         # Optional, defaults to true
       agent: "ChatAgent"                    # Optional, defaults to ChatAgent
       iteration_strategy: "native-thinking" # Optional, determined from last stage if not set
       llm_provider: "google-default"        # Optional, uses chain/system default if not set
+      mcp_servers: ["kubernetes-server"]    # Optional, chat-level MCP override (overrides chain-level)
+      max_iterations: 10                    # Optional, chat-level iteration limit (overrides chain/agent defaults)
     stages:
       - name: "investigation"
         agent: "KubernetesAgent"
-    description: "Chain with custom chat configuration (agent, strategy, provider)"
+    description: "Chain with custom chat configuration (agent, strategy, provider, MCP servers, max iterations)"
 
   chat-disabled-chain:
     alert_types: ["NoChatExample"]
@@ -538,7 +582,49 @@ agent_chains:
       - name: "investigation"
         agent: "KubernetesAgent"
     description: "Chain with default chat configuration (enabled, all defaults)"
-
+  
+  # ===========================================================================
+  # HIERARCHICAL MCP CONFIGURATION EXAMPLE
+  # ===========================================================================
+  # Demonstrates the new MCP server hierarchy feature
+  hierarchical-mcp-example:
+    alert_types: ["MCPHierarchyExample"]
+    # Chain-level MCP servers: Default for all stages unless overridden
+    mcp_servers: ["kubernetes-server"]  # All stages use kubernetes-server by default
+    stages:
+      - name: "initial-investigation"
+        agent: "KubernetesAgent"
+        # This stage inherits chain-level mcp_servers: ["kubernetes-server"]
+      
+      - name: "detailed-analysis"
+        agent: "KubernetesAgent"
+        # Stage-level override: Add monitoring server for this stage only
+        mcp_servers: ["kubernetes-server", "monitoring-server"]
+      
+      - name: "parallel-deep-dive"
+        # Parallel agents with different MCP servers
+        agents:
+          - name: "KubernetesAgent"
+            # Parallel-agent override: Highest config priority
+            mcp_servers: ["kubernetes-server"]  # K8s agent uses only k8s-server
+          - name: "performance-agent"
+            mcp_servers: ["monitoring-server"]  # Performance agent uses only monitoring
+    description: "Demonstrates hierarchical MCP server configuration at chain/stage/parallel-agent levels"
+    
+    # NOTE: Alert-level MCP override (via API) would take precedence over ALL of the above.
+    # Example API call with alert-level override (highest priority):
+    # POST /api/v1/alerts
+    # {
+    #   "alert_type": "MCPHierarchyExample",
+    #   "data": {"pod": "my-pod"},
+    #   "mcp": {
+    #     "servers": [
+    #       {"name": "kubernetes-server", "tools": ["get_pod_logs"]},
+    #       {"name": "custom-server"}
+    #     ]
+    #   }
+    # }
+    # This alert-level mcp would override ALL chain/stage/parallel-agent mcp_servers above
 # =============================================================================
 # CONFIGURATION VALIDATION NOTES
 # =============================================================================
@@ -558,12 +644,12 @@ agent_chains:
 #
 # 3. MCP SERVER REFERENCES:
 #    - All MCP servers referenced by agents must exist (built-in or configured)
-#    - MCP servers can be temporarily disabled (enabled: false) but still referenced
+#    - To disable a server, comment it out or remove it from the configuration
 #    - Agents will fail to initialize if they reference non-existent MCP servers
 #
 # 4. REQUIRED FIELDS:
 #    - Agents must have at least one alert_type and one mcp_server
-#    - MCP servers must have server_id, server_type, and transport (with type field)
+#    - MCP servers must have transport (with type field)
 #    - All fields marked as required in the Pydantic models must be present
 #
 # 5. AGENT CHAIN VALIDATION:

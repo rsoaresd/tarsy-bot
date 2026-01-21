@@ -409,29 +409,6 @@ class TestConfigurationLoaderValidation:
         
         assert "has no transport configured" in str(exc_info.value)
     
-    def test_validate_configuration_completeness_disabled_server_warning(self, caplog):
-        """Test warning for disabled servers that are referenced."""
-        config = CombinedConfigModel(
-            agents={
-                "test-agent": AgentConfigModel(
-                    mcp_servers=["disabled-server"]
-                )
-            },
-            mcp_servers={
-                "disabled-server": MCPServerConfigModel(
-                    server_id="disabled-server",
-                    server_type="test",
-                    transport={"type": "stdio", "command": "test"},
-                    enabled=False  # Disabled server
-                )
-            }
-        )
-        
-        loader = ConfigurationLoader("/test/config.yaml")
-        loader._validate_configuration_completeness(config)
-        
-        # Check that warning was logged
-        assert "references disabled MCP servers" in caplog.text
 
 
 @pytest.mark.unit
@@ -868,6 +845,95 @@ class TestGetChainConfigs:
             assert chain_config["chat"] is not None
             assert chain_config["chat"]["enabled"] is True
             assert chain_config["chat"]["agent"] == "ChatAgent"  # Default
+        finally:
+            os.unlink(temp_path)
+    
+    def test_get_chain_configs_with_mcp_servers(self):
+        """Test that mcp_servers fields are properly serialized at all levels."""
+        valid_config = {
+            "agents": {
+                "CustomAgent": {
+                    "mcp_servers": ["kubernetes-server"],
+                    "custom_instructions": "Custom agent for testing"
+                }
+            },
+            "mcp_servers": {},
+            "agent_chains": {
+                "mcp-chain": {
+                    "alert_types": ["test-mcp"],
+                    "mcp_servers": ["kubernetes-server"],
+                    "stages": [
+                        {
+                            "name": "single-agent-stage",
+                            "agent": "KubernetesAgent",
+                            "mcp_servers": ["kubernetes-server"]
+                        },
+                        {
+                            "name": "parallel-stage",
+                            "agents": [
+                                {
+                                    "name": "KubernetesAgent",
+                                    "mcp_servers": ["kubernetes-server"]
+                                },
+                                {
+                                    "name": "CustomAgent",
+                                    "mcp_servers": ["kubernetes-server"]
+                                }
+                            ],
+                            "synthesis": {
+                                "agent": "SynthesisAgent"
+                            }
+                        }
+                    ],
+                    "chat": {
+                        "enabled": True,
+                        "agent": "ChatAgent",
+                        "mcp_servers": ["kubernetes-server"]
+                    }
+                }
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(valid_config, f)
+            temp_path = f.name
+        
+        try:
+            loader = ConfigurationLoader(temp_path)
+            chain_configs = loader.get_chain_configs()
+            
+            assert "mcp-chain" in chain_configs
+            chain_config = chain_configs["mcp-chain"]
+            
+            # Verify chain-level mcp_servers
+            assert "mcp_servers" in chain_config
+            assert chain_config["mcp_servers"] == ["kubernetes-server"]
+            
+            # Verify stage-level mcp_servers
+            stage1 = chain_config["stages"][0]
+            assert "mcp_servers" in stage1
+            assert stage1["mcp_servers"] == ["kubernetes-server"]
+            
+            # Verify parallel-agent-level mcp_servers
+            stage2 = chain_config["stages"][1]
+            assert "mcp_servers" in stage2
+            assert stage2["mcp_servers"] is None  # Stage has no override, only agents do
+            assert stage2["agents"] is not None
+            assert len(stage2["agents"]) == 2
+            assert "mcp_servers" in stage2["agents"][0]
+            assert stage2["agents"][0]["mcp_servers"] == ["kubernetes-server"]
+            assert "mcp_servers" in stage2["agents"][1]
+            assert stage2["agents"][1]["mcp_servers"] == ["kubernetes-server"]
+            
+            # Verify synthesis config exists (but no mcp_servers - synthesis doesn't use tools)
+            assert stage2["synthesis"] is not None
+            assert stage2["synthesis"]["agent"] == "SynthesisAgent"
+            
+            # Verify chat mcp_servers
+            assert "chat" in chain_config
+            assert chain_config["chat"] is not None
+            assert "mcp_servers" in chain_config["chat"]
+            assert chain_config["chat"]["mcp_servers"] == ["kubernetes-server"]
         finally:
             os.unlink(temp_path)
 

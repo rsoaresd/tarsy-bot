@@ -268,6 +268,25 @@ class AlertService:
             logger.error(f"Failed to initialize AlertService: {str(e)}")
             raise
     
+    def get_chain_for_alert(self, alert_type: str) -> "ChainConfigModel":
+        """
+        Get the chain definition for a given alert type.
+        
+        This method encapsulates the chain selection logic and can be called
+        from both the API endpoint (for early session creation) and the
+        background processing task.
+        
+        Args:
+            alert_type: The alert type to find a chain for
+            
+        Returns:
+            ChainConfigModel for the alert type
+            
+        Raises:
+            ValueError: If no chain is found for the alert type
+        """
+        return self.chain_registry.get_chain_for_alert_type(alert_type)
+    
     async def process_alert(
         self, 
         chain_context: ChainContext
@@ -301,7 +320,7 @@ class AlertService:
             
             # Step 3: Get chain for alert type
             try:
-                chain_definition = self.chain_registry.get_chain_for_alert_type(chain_context.processing_alert.alert_type)
+                chain_definition = self.get_chain_for_alert(chain_context.processing_alert.alert_type)
             except ValueError as e:
                 error_msg = str(e)
                 logger.error(f"Chain selection failed: {error_msg}")
@@ -313,11 +332,13 @@ class AlertService:
             
             logger.info(f"Selected chain '{chain_definition.chain_id}' for alert type '{chain_context.processing_alert.alert_type}'")
             
-            # Create history session with chain info
+            # Create history session with chain info (idempotent - skips if already exists)
+            # The session may have been created by the API endpoint before background processing started
             session_created = self.session_manager.create_chain_history_session(chain_context, chain_definition)
             
             # Mark session as being processed by this pod
-            if session_created and self.history_service:
+            # Note: We mark the session even if it wasn't created here (it may have been created by the endpoint)
+            if self.history_service:
                 from tarsy.main import get_pod_id
                 pod_id = get_pod_id()
                 
@@ -1486,19 +1507,27 @@ class AlertService:
                         # Mark stage as started
                         await self.stage_manager.update_stage_execution_started(stage_execution_id)
                         
-                        # Resolve effective LLM provider for this stage
-                        # Precedence: stage.llm_provider > chain.llm_provider > global (None)
-                        effective_provider = stage.llm_provider or chain_definition.llm_provider
-                        if effective_provider:
-                            logger.debug(f"Stage '{stage.name}' using LLM provider: {effective_provider}")
+                        # Resolve all execution configuration from hierarchy using unified resolver
+                        from tarsy.services.execution_config_resolver import ExecutionConfigResolver
                         
-                        # Get agent instance with stage-specific strategy and provider
+                        # Get agent definition if it exists
+                        agent_def = self.agent_factory.agent_configs.get(stage.agent) if self.agent_factory.agent_configs else None
+                        
+                        # Resolve unified execution config (iteration, MCP servers, LLM provider, strategy)
+                        execution_config = ExecutionConfigResolver.resolve_config(
+                            system_settings=self.settings,
+                            agent_config=agent_def,
+                            chain_config=chain_definition,
+                            stage_config=stage,
+                            parallel_agent_config=None  # Sequential stages don't have parallel config
+                        )
+                        
+                        # Get agent instance with resolved configuration
                         # Pass session-scoped MCP client for isolation
-                        agent = self.agent_factory.get_agent(
+                        agent = self.agent_factory.get_agent_with_config(
                             agent_identifier=stage.agent,
                             mcp_client=session_mcp_client,
-                            iteration_strategy=getattr(stage.iteration_strategy, "value", stage.iteration_strategy),
-                            llm_provider=effective_provider
+                            execution_config=execution_config
                         )
                         
                         # Set current stage execution ID for interaction tagging
@@ -1688,17 +1717,44 @@ class AlertService:
         """
         error_messages = []
         
+        # Import ParallelStageResult for type checking
+        from tarsy.models.agent_execution_result import ParallelStageResult
+        
         # Collect errors from stage outputs (keys are execution_ids, extract stage_name from result)
         for stage_result in chain_context.stage_outputs.values():
             if hasattr(stage_result, 'status') and stage_result.status == StageStatus.FAILED:
-                stage_name = getattr(stage_result, 'stage_name', 'unknown')
-                stage_agent = getattr(stage_result, 'agent_name', 'unknown')
-                stage_error = getattr(stage_result, 'error_message', None)
-                
-                if stage_error:
-                    error_messages.append(f"Stage '{stage_name}' (agent: {stage_agent}): {stage_error}")
+                # Check if this is a ParallelStageResult
+                if isinstance(stage_result, ParallelStageResult):
+                    # Extract errors from individual parallel agent results
+                    # Include both FAILED and CANCELLED agents (both contribute to parallel stage failure)
+                    stage_name = stage_result.stage_name
+                    failed_agents = []
+                    
+                    for agent_result in stage_result.results:
+                        if agent_result.status in (StageStatus.FAILED, StageStatus.CANCELLED):
+                            agent_name = agent_result.agent_name or 'unknown'
+                            error_msg = agent_result.error_message or 'No error message'
+                            status_label = "cancelled" if agent_result.status == StageStatus.CANCELLED else "failed"
+                            failed_agents.append(f"{agent_name} ({status_label}): {error_msg}")
+                    
+                    if failed_agents:
+                        if len(failed_agents) == 1:
+                            error_messages.append(f"Parallel stage '{stage_name}' failed - {failed_agents[0]}")
+                        else:
+                            agents_summary = "; ".join(failed_agents)
+                            error_messages.append(f"Parallel stage '{stage_name}' failed - {len(failed_agents)} agents: {agents_summary}")
+                    else:
+                        error_messages.append(f"Parallel stage '{stage_name}' failed with no specific error details")
                 else:
-                    error_messages.append(f"Stage '{stage_name}' (agent: {stage_agent}): Failed with no error message")
+                    # Regular AgentExecutionResult
+                    stage_name = getattr(stage_result, 'stage_name', 'unknown')
+                    stage_agent = getattr(stage_result, 'agent_name', 'unknown')
+                    stage_error = getattr(stage_result, 'error_message', None)
+                    
+                    if stage_error:
+                        error_messages.append(f"Stage '{stage_name}' (agent: {stage_agent}): {stage_error}")
+                    else:
+                        error_messages.append(f"Stage '{stage_name}' (agent: {stage_agent}): Failed with no error message")
         
         # If we have specific error messages, format them nicely
         if error_messages:

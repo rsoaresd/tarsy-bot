@@ -190,10 +190,8 @@ BUILTIN_AGENTS = {
 **Example YAML Configuration**:
 ```yaml
 mcp_servers:
-  # Custom MCP server
+  # Custom MCP server (server ID comes from YAML key)
   security-scanner:
-    server_id: "security-scanner"
-    enabled: true
     transport:
       type: "stdio"
       command: "npx"
@@ -201,8 +199,6 @@ mcp_servers:
   
   # Override built-in kubernetes-server with custom kubeconfig
   kubernetes-server:
-    server_id: "kubernetes-server"
-    enabled: true
     transport:
       type: "stdio"
       command: "npx"
@@ -210,8 +206,10 @@ mcp_servers:
     
 agents:
   security-analyst:
-    mcp_servers: ["security-scanner", "kubernetes-server"]  # Mix of custom + built-in
+    mcp_servers: ["security-scanner", "kubernetes-server"]  # Agent-level MCP config (lowest priority)
     iteration_strategy: "react"
+    max_iterations: 35  # Agent-level iteration config
+    force_conclusion_at_max_iterations: false  # Allow pause/resume
     custom_instructions: "Focus on security implications and threat analysis..."
 
 # Chain definitions
@@ -219,16 +217,36 @@ agent_chains:
   security-incident-chain:
     alert_types: ["SecurityBreach", "SuspiciousActivity"]
     llm_provider: "google-default"  # Optional: chain-level default provider
+    mcp_servers: ["security-scanner", "kubernetes-server"]  # Optional: chain-level MCP config (overrides agent level)
+    max_iterations: 25  # Chain-level iteration config (overrides agent/system defaults)
+    force_conclusion_at_max_iterations: true  # Force conclusion for security incidents
     stages:
       - name: "evidence-collection"
         agent: "security-analyst"
         iteration_strategy: "react-stage"
         llm_provider: "gemini-flash"  # Optional: stage-level override
+        mcp_servers: ["security-scanner"]  # Optional: stage-level MCP override (restrict to security scanner only)
+        max_iterations: 15  # Stage-level override for quick collection
       - name: "final-analysis" 
         agent: "security-analyst"
         iteration_strategy: "react-final-analysis"
-        # Uses chain-level provider (google-default) when not specified
+        # Uses chain-level MCP servers and iteration config
+    chat:
+      enabled: true
+      agent: "ChatAgent"
+      mcp_servers: ["kubernetes-server"]  # Optional: chat-level MCP override (read-only tools for chat)
+      max_iterations: 20  # Optional: chat-level iteration limit
 ```
+
+**Hierarchical Configuration System**:
+- **Iteration Configuration**:
+  - **Precedence**: system → agent → chain → stage → parallel agent (highest)
+  - **Options**: `max_iterations` (iteration limit), `force_conclusion_at_max_iterations` (pause vs force)
+  - **Use Cases**: Quick checks (low iterations), deep analysis (high iterations), per-agent tuning
+- **MCP Server Configuration**:
+  - **Precedence**: agent (lowest) → chain → stage → parallel agent → chat (for chat agents) → alert (highest)
+  - **Alert-level override**: Via API `mcp` field, overrides all configuration levels
+  - **Use Cases**: Fine-grained tool control, security restrictions, testing scenarios
 
 **📍 LLM Provider Configuration**: `config/llm_providers.yaml` (optional, see `config/llm_providers.yaml.example`)
 - **Built-in default providers** work out-of-the-box with just API keys
@@ -500,9 +518,9 @@ class ProcessingAlert(BaseModel):
 
 Agents are specialized AI-powered components that analyze alerts using domain expertise and configurable reasoning strategies. The system supports both hardcoded agents (like KubernetesAgent) and YAML-configured agents.
 
-**Pause & Resume Support**: Agents automatically pause when reaching iteration limits (configurable via `max_llm_mcp_iterations`). The complete conversation state, stage context, and processing metadata are preserved, allowing engineers to manually resume processing from the exact point where it paused. Sessions are marked as "paused" (recoverable) only if the last LLM interaction succeeded; otherwise, they fail.
+**Pause & Resume Support**: Agents automatically pause when reaching iteration limits. Both `max_iterations` and `force_conclusion_at_max_iterations` are configurable through a hierarchical system (system → agent → chain → stage → parallel agent), allowing fine-grained control per use case. The complete conversation state, stage context, and processing metadata are preserved, allowing engineers to manually resume processing from the exact point where it paused. Sessions are marked as "paused" (recoverable) only if the last LLM interaction succeeded; otherwise, they fail.
 
-**Parallel Stage Pause Behavior**: When any parallel agent hits max_iterations, the entire stage is marked as PAUSED (pause takes priority over success/failure). Other agents continue naturally, preserving their results. Resume re-executes only paused agents while preserving completed and failed agent results.
+**Parallel Stage Pause Behavior**: When any parallel agent hits max_iterations, the entire stage is marked as PAUSED (pause takes priority over success/failure). Other agents continue naturally, preserving their results. Resume re-executes only paused agents while preserving completed and failed agent results. Each parallel agent can have its own iteration configuration.
 
 #### Agent Framework Architecture
 
@@ -782,12 +800,10 @@ Response:
   "alert_type": "NamespaceAlertK8s",
   "mcp_servers": [
     {
-      "server_id": "kubernetes-server",
-      "server_type": "kubernetes"
+      "server_id": "kubernetes-server"
     },
     {
-      "server_id": "argocd-server",
-      "server_type": "argocd"
+      "server_id": "argocd-server"
     }
   ],
   "native_tools": {
@@ -951,9 +967,8 @@ async with mcp_interaction_context(session_id, server_name, tool_name, parameter
 **Stdio Transport (Built-in)**:
 ```python
 # From builtin_config.py - Traditional command-line MCP server
+# Note: Server ID comes from dictionary key
 "kubernetes-server": {
-    "server_id": "kubernetes-server",
-    "enabled": True,
     "transport": {
         "type": "stdio",
         "command": "npx",
@@ -971,11 +986,9 @@ async with mcp_interaction_context(session_id, server_name, tool_name, parameter
 
 **HTTP Transport Configuration**:
 ```yaml
-# In agents.yaml - HTTP endpoint MCP server
+# In agents.yaml - HTTP endpoint MCP server (server ID from YAML key)
 mcp_servers:
   http-api-server:
-    server_id: "http-api-server"
-    enabled: true
     transport:
       type: "http"
       url: "https://api.example.com/mcp"
@@ -992,11 +1005,9 @@ mcp_servers:
 
 **SSE Transport Configuration**:
 ```yaml
-# In agents.yaml - Server-Sent Events MCP server  
+# In agents.yaml - Server-Sent Events MCP server (server ID from YAML key)
 mcp_servers:
   streaming-server:
-    server_id: "streaming-server"
-    enabled: true
     transport:
       type: "sse"
       url: "https://streaming-api.example.com/sse"
@@ -1027,20 +1038,61 @@ mcp_servers:
 
 **Transport Auto-Detection**: The MCP client automatically selects the appropriate transport based on the `transport.type` field in server configuration.
 
-#### Agent-Server Assignment
+#### Agent-Server Assignment & Hierarchical Configuration
 
-**Server Assignment Pattern**: Agents declare required servers via `mcp_servers()` method:
+**Hierarchical MCP Server Configuration**: TARSy supports fine-grained MCP server configuration at multiple levels with clear precedence rules:
+
+**Configuration Hierarchy** (lowest to highest priority):
+1. **Agent level** (baseline) - Defined in agent's `mcp_servers()` method or YAML `mcp_servers` field
+2. **Chain level** - Optional `mcp_servers` in chain definition (overrides agent default for all stages)
+3. **Stage level** - Optional `mcp_servers` in stage definition (overrides chain default for specific stage)
+4. **Parallel agent level** - Optional `mcp_servers` per parallel agent (highest configuration priority)
+5. **Chat level** - Optional `mcp_servers` in chat config (for chat agents only)
+6. **Alert level** - Via API `mcp` field (highest priority, overrides all configuration)
+
+**Server Assignment Pattern**: Agents declare baseline servers via `mcp_servers()` method:
 ```python
 class KubernetesAgent(BaseAgent):
     def mcp_servers(self) -> List[str]:
-        return ["kubernetes-server"]  # Only has access to k8s tools
+        return ["kubernetes-server"]  # Agent-level baseline (lowest priority)
 ```
 
-**Tool Discovery Flow**:
-1. **Agent requests tools** → `client.list_tools(session_id, server_name)`
-2. **MCP client queries servers** → Discovers available tools per server
-3. **Tools formatted** → `AvailableTools` model with server context
-4. **Agent executes tools** → `client.call_tool(server, tool, params)`
+**Configuration Override Example**:
+```yaml
+agents:
+  kubernetes-analyst:
+    mcp_servers: ["kubernetes-server", "prometheus-server"]  # Agent-level baseline
+
+agent_chains:
+  kubernetes-investigation:
+    mcp_servers: ["kubernetes-server"]  # Chain-level: restrict to k8s only
+    stages:
+      - name: "data-collection"
+        agent: "kubernetes-analyst"
+        mcp_servers: ["kubernetes-server", "prometheus-server"]  # Stage-level: add prometheus back
+      - name: "parallel-investigation"
+        agents:
+          - name: "kubernetes-analyst"
+            mcp_servers: ["kubernetes-server"]  # Parallel-agent: k8s only for this agent
+          - name: "kubernetes-analyst"  
+            mcp_servers: ["prometheus-server"]  # Parallel-agent: prometheus only for this agent
+    chat:
+      mcp_servers: ["kubernetes-server"]  # Chat-level: restrict chat to read-only k8s tools
+```
+
+**Resolution Flow**:
+1. **Configuration resolution** → `ExecutionConfigResolver.resolve_config()` determines base effective servers from configuration hierarchy
+2. **Agent initialization** → `BaseAgent.set_mcp_servers_override()` applies resolved configuration
+3. **Runtime overrides** → Alert-level overrides (via `ChainContext.mcp`) or chat-level overrides (via `ChatService`) may further modify servers before tool operations
+4. **Tool discovery** → `client.list_tools(session_id, server_name)` uses final effective servers (potentially modified by step 3)
+5. **Tool execution** → `client.call_tool(server, tool, params)` validates against final effective servers (potentially modified by step 3)
+
+**Note**: The final servers used by `client.list_tools()` and `client.call_tool()` can differ from the initial configuration resolved in step 1, as alert-level and chat-level overrides take precedence.
+
+**📍 Resolution Services**:
+- `backend/tarsy/services/mcp_config_resolver.py` - Hierarchical MCP server resolution
+- `backend/tarsy/services/execution_config_resolver.py` - Unified configuration resolution
+- `backend/tarsy/models/agent_execution_config.py` - Aggregated execution parameters
 
 #### Data Masking Integration
 
@@ -1702,6 +1754,8 @@ agent_chains:
       agent: "ChatAgent"                    # Optional, defaults to ChatAgent
       iteration_strategy: "native-thinking" # Optional, auto-determined from last stage if not set
       llm_provider: "google-default"        # Optional, uses chain/system default if not set
+      mcp_servers: ["kubernetes-server"]    # Optional, chat-level MCP override (restricts tools for chat)
+      max_iterations: 20                    # Optional, chat-level iteration limit (prevents runaway conversations)
     
     # Option 3: Disable chat
     # chat:
@@ -1710,6 +1764,8 @@ agent_chains:
 # Configuration Hierarchy:
 # - Iteration Strategy: chat.iteration_strategy > last stage (translated) > agent default > REACT
 # - LLM Provider: chat.llm_provider > chain.llm_provider > system default
+# - MCP Servers: chat.mcp_servers > chain.mcp_servers > agent default
+# - Max Iterations: chat.max_iterations > chain.max_iterations > agent default > system default
 # - Agent: chat.agent > "ChatAgent" (default)
 ```
 
@@ -2087,7 +2143,7 @@ BUILTIN_CODE_MASKERS = {
 ```yaml
 mcp_servers:
   security-scanner:
-    server_id: "security-scanner"
+    # Server ID comes from YAML key
     # ... connection config ...
     data_masking:
       enabled: true

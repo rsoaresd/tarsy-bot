@@ -88,6 +88,7 @@ class BaseAgent(ABC):
         self.mcp_client = mcp_client
         self.mcp_registry = mcp_registry
         self._max_iterations = get_settings().max_llm_mcp_iterations
+        self._force_conclusion_at_max_iterations = get_settings().force_conclusion_at_max_iterations
         self._configured_servers: Optional[List[str]] = None
         self._prompt_builder = get_prompt_builder()
         
@@ -103,6 +104,11 @@ class BaseAgent(ABC):
         # LLM provider override for this agent instance (per-stage or per-chain)
         # When None, uses the global default provider from settings
         self._llm_provider_name: Optional[str] = None
+        
+        # MCP servers override from configuration hierarchy (chain/stage/parallel-agent level)
+        # When None, uses agent's default mcp_servers() method
+        # When set, completely overrides agent default (unless alert-level override is present)
+        self._override_mcp_servers: Optional[List[str]] = None
         
         # Create appropriate iteration controller based on configuration
         self._iteration_controller: IterationController = self._create_iteration_controller(iteration_strategy)
@@ -162,6 +168,81 @@ class BaseAgent(ABC):
     def max_iterations(self) -> int:
         """Get the maximum number of iterations allowed for this agent."""
         return self._max_iterations
+    
+    def set_max_iterations(self, value: int) -> None:
+        """
+        Set the maximum number of iterations for this agent instance.
+        
+        Used by AgentFactory to configure per-stage or per-chain iteration limits.
+        
+        Args:
+            value: Maximum number of iterations (must be >= 1)
+        """
+        if value < 1:
+            raise ValueError(f"max_iterations must be >= 1, got {value}")
+        self._max_iterations = value
+        logger.info(f"Agent {self.__class__.__name__} configured with max_iterations: {value}")
+    
+    def get_force_conclusion(self) -> bool:
+        """Get the force_conclusion_at_max_iterations setting for this agent."""
+        return self._force_conclusion_at_max_iterations
+    
+    def set_force_conclusion(self, value: bool) -> None:
+        """
+        Set the force_conclusion_at_max_iterations setting for this agent instance.
+        
+        Used by AgentFactory to configure per-stage or per-chain behavior.
+        
+        Args:
+            value: Whether to force conclusion at max iterations
+        """
+        self._force_conclusion_at_max_iterations = value
+        logger.info(f"Agent {self.__class__.__name__} configured with force_conclusion_at_max_iterations: {value}")
+    
+    def set_mcp_servers_override(self, mcp_servers: List[str]) -> None:
+        """
+        Set MCP servers override from configuration hierarchy.
+        
+        This override applies when configuration (chain/stage/parallel-agent level)
+        specifies MCP servers. It takes precedence over agent default mcp_servers()
+        but is still superseded by alert-level override (ChainContext.mcp).
+        
+        Args:
+            mcp_servers: List of MCP server IDs to use for this agent instance
+        """
+        self._override_mcp_servers = mcp_servers
+        logger.info(
+            f"Agent {self.__class__.__name__} configured with MCP servers override: "
+            f"{mcp_servers}"
+        )
+    
+    def _get_effective_mcp_servers(self) -> List[str]:
+        """
+        Get effective MCP servers for this agent instance.
+        
+        Returns configuration hierarchy override if set, otherwise agent default.
+        This method is used internally by _configure_mcp_client().
+        
+        Priority:
+        1. Configuration hierarchy override (_override_mcp_servers) if set
+        2. Agent default (mcp_servers() method)
+        
+        NOTE: Alert-level override (ChainContext.mcp) is handled separately in
+        _get_available_tools() and takes precedence over both of these.
+        
+        Returns:
+            List of MCP server IDs to use
+        """
+        if self._override_mcp_servers is not None:
+            logger.debug(
+                f"Using MCP servers override for {self.__class__.__name__}: "
+                f"{self._override_mcp_servers}"
+            )
+            return self._override_mcp_servers
+        
+        # Fall back to agent default (calls classmethod for built-in agents,
+        # instance method for ConfigurableAgent)
+        return self.mcp_servers()
 
     @classmethod
     @abstractmethod
@@ -350,12 +431,12 @@ class BaseAgent(ABC):
         instructions.append(self._get_general_instructions())
         
         # Tier 2: MCP server instructions
-        mcp_server_ids = self.mcp_servers()
+        mcp_server_ids = self._get_effective_mcp_servers()
         server_configs = self.mcp_registry.get_server_configs(mcp_server_ids)
         
-        for server_config in server_configs:
+        for server_id, server_config in zip(mcp_server_ids, server_configs, strict=True):
             if hasattr(server_config, 'instructions') and server_config.instructions:
-                instructions.append(f"## {server_config.server_type.title()} Server Instructions")
+                instructions.append(f"## {server_id} Instructions")
                 instructions.append(server_config.instructions)
         
         # Tier 3: Custom instructions
@@ -440,14 +521,24 @@ class BaseAgent(ABC):
         return self._llm_provider_name
     
     async def _configure_mcp_client(self):
-        """Configure MCP client with agent-specific server subset and summarizer."""
-        mcp_server_ids = self.mcp_servers()
+        """
+        Configure MCP client with agent-specific server subset and summarizer.
+        
+        Uses _get_effective_mcp_servers() which respects configuration hierarchy
+        overrides (chain/stage/parallel-agent level) if present.
+        """
+        mcp_server_ids = self._get_effective_mcp_servers()
         
         # Get configurations for this agent's servers
         server_configs = self.mcp_registry.get_server_configs(mcp_server_ids)
         
         # Validate that all required servers are available
-        available_server_ids = [config.server_id for config in server_configs]
+        # Note: get_server_configs only returns configs for servers that exist in the registry
+        # So if the lengths don't match, some servers are missing
+        available_server_ids = [
+            server_id for server_id in mcp_server_ids
+            if server_id in self.mcp_registry.get_all_server_ids()
+        ]
         missing_servers = set(mcp_server_ids) - set(available_server_ids)
         if missing_servers:
             missing_list = list(missing_servers)
@@ -670,11 +761,16 @@ class BaseAgent(ABC):
                 # Wrap with timeout to catch cases where MCP client's internal timeout fails
                 # MCP client uses a single 60s timeout with no retries, so allow ~10s overhead
                 try:
+                    # Extract parallel metadata for progress updates
+                    parallel_meta = self._parallel_metadata
                     result = await asyncio.wait_for(
                         self.mcp_client.call_tool(
                             server_name, tool_name, tool_params, session_id, 
                             self._current_stage_execution_id, investigation_conversation,
-                            mcp_selection, self._configured_servers
+                            mcp_selection, self._configured_servers,
+                            parallel_meta.parent_stage_execution_id if parallel_meta else None,
+                            parallel_meta.parallel_index if parallel_meta else None,
+                            parallel_meta.agent_name if parallel_meta else None
                         ),
                         timeout=mcp_timeout  # Wraps MCP call (no retries) with ~10s overhead
                     )

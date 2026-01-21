@@ -1195,9 +1195,6 @@ class MCPServerFactory:
     def create_kubernetes_server(**overrides):
         """Create a Kubernetes MCP server configuration."""
         base_data = {
-            "server_id": "kubernetes-server",
-            "server_type": "kubernetes",
-            "enabled": True,
             "transport": {
                 "type": "stdio",
                 "command": "kubectl",
@@ -1213,9 +1210,6 @@ class MCPServerFactory:
     def create_docker_server(**overrides):
         """Create a Docker MCP server configuration."""
         base_data = {
-            "server_id": "docker-server",
-            "server_type": "docker",
-            "enabled": True,
             "transport": {
                 "type": "stdio",
                 "command": "docker",
@@ -1231,9 +1225,6 @@ class MCPServerFactory:
     def create_test_server(**overrides):
         """Create a test MCP server configuration."""
         base_data = {
-            "server_id": "test-server",
-            "server_type": "test",
-            "enabled": True,
             "transport": {
                 "type": "stdio",
                 "command": "test",
@@ -1246,30 +1237,9 @@ class MCPServerFactory:
         return base_data
     
     @staticmethod
-    def create_disabled_server(**overrides):
-        """Create a disabled MCP server configuration."""
-        base_data = {
-            "server_id": "disabled-server",
-            "server_type": "test",
-            "enabled": False,
-            "transport": {
-                "type": "stdio",
-                "command": "disabled",
-                "args": [],
-                "env": {}
-            },
-            "instructions": "Disabled MCP server for testing"
-        }
-        base_data.update(overrides)
-        return base_data
-    
-    @staticmethod
     def create_custom_server(**overrides):
         """Create a custom MCP server configuration."""
         base_data = {
-            "server_id": "custom-server",
-            "server_type": "custom",
-            "enabled": True,
             "transport": {
                 "type": "stdio",
                 "command": "custom",
@@ -1610,9 +1580,6 @@ class MCPServerMaskingFactory:
     def create_test_server_config(**overrides):
         """Create a test server configuration with masking."""
         base_data = {
-            "server_id": "test-server",
-            "server_type": "test",
-            "enabled": True,
             "transport": {"type": "stdio", "command": "test", "args": []},
             "instructions": "Test server with masking",
             "data_masking": MCPServerMaskingFactory.create_basic_masking_config()
@@ -1624,9 +1591,6 @@ class MCPServerMaskingFactory:
     def create_secure_server_config(**overrides):
         """Create a secure server configuration with comprehensive masking."""
         base_data = {
-            "server_id": "secure-server",
-            "server_type": "secure",
-            "enabled": True,
             "transport": {"type": "stdio", "command": "secure", "args": []},
             "instructions": "Secure server with comprehensive masking",
             "data_masking": MCPServerMaskingFactory.create_comprehensive_masking_config()
@@ -1640,9 +1604,6 @@ class MCPServerMaskingFactory:
     def create_template_server_config(**overrides):
         """Create a server configuration with template variables."""
         base_data = {
-            "server_id": "template-server",
-            "server_type": "test",
-            "enabled": True,
             "transport": {
                 "type": "stdio",
                 "command": "test-server",
@@ -1656,9 +1617,6 @@ class MCPServerMaskingFactory:
     def create_complex_template_server_config(**overrides):
         """Create a complex server configuration with multiple template variables."""
         base_data = {
-            "server_id": "complex-server",
-            "server_type": "test",
-            "enabled": True,
             "transport": {
                 "type": "stdio",
                 "command": "complex-${SERVER_TYPE}",
@@ -1676,9 +1634,6 @@ class MCPServerMaskingFactory:
     def create_failing_template_server_config(**overrides):
         """Create a server configuration with template that will fail."""
         base_data = {
-            "server_id": "failing-server",
-            "server_type": "test",
-            "enabled": True,
             "transport": {
                 "type": "stdio",
                 "command": "test",

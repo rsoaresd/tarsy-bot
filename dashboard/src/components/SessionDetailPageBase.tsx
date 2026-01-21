@@ -36,8 +36,9 @@ import { useChatState } from '../hooks/useChatState';
 import type { DetailedSession } from '../types';
 import { useAdvancedAutoScroll } from '../hooks/useAdvancedAutoScroll';
 import { isTerminalSessionEvent } from '../utils/eventTypes';
-import { isActiveSessionStatus, isTerminalSessionStatus, SESSION_STATUS } from '../utils/statusConstants';
-import { mapEventToProgressStatus, ProgressStatusMessage, StageName } from '../utils/statusMapping';
+import { isActiveSessionStatus, isTerminalSessionStatus, isActiveStageStatus, SESSION_STATUS } from '../utils/statusConstants';
+import { mapEventToProgressStatus, ProgressStatusMessage, StageName, isTerminalProgressStatus } from '../utils/statusMapping';
+import { STAGE_STATUS } from '../utils/statusConstants';
 
 // Lazy load shared components
 const SessionHeader = lazy(() => import('./SessionHeader'));
@@ -91,7 +92,13 @@ const TimelineSkeleton = () => (
 
 interface SessionDetailPageBaseProps {
   viewType: 'conversation' | 'technical';
-  timelineComponent: (session: DetailedSession, autoScroll?: boolean, progressStatus?: string) => ReactNode;
+  timelineComponent: (
+    session: DetailedSession,
+    autoScroll?: boolean,
+    progressStatus?: string,
+    agentProgressStatuses?: Map<string, string>,
+    onSelectedAgentChange?: (executionId: string | null) => void
+  ) => ReactNode;
   timelineSkeleton?: ReactNode;
   onViewChange?: (newView: 'conversation' | 'technical') => void;
 }
@@ -156,10 +163,28 @@ function SessionDetailPageBase({
   const [shouldExpandChat, setShouldExpandChat] = useState(false);
   
   // Track current progress status message (Investigating/Synthesizing/Summarizing)
+  // For parallel agents, track per-agent status by stage_execution_id
+  // Values can be progress statuses ("Investigating...", "Concluding...") or terminal statuses ("Completed", "Failed", "Cancelled")
   const [progressStatus, setProgressStatus] = useState<string>(ProgressStatusMessage.PROCESSING);
+  const [agentProgressStatuses, setAgentProgressStatuses] = useState<Map<string, string>>(new Map());
+  
+  // Track which parallel parent stage we've updated status for (to avoid duplicates)
+  const parallelStageStatusUpdated = useRef<string | null>(null);
+  
+  // Track currently selected agent execution ID for display purposes
+  const [selectedAgentExecutionId, setSelectedAgentExecutionId] = useState<string | null>(null);
   
   // Track previous session status to detect transitions
   const prevStatusRef = useRef<string | undefined>(undefined);
+  
+  // ============================================================================
+  // Initial Status Initialization Effects
+  // ============================================================================
+  // The following two effects both run on [session?.session_id, loading] to
+  // initialize related but separate state when the session first loads:
+  // 1. progressStatus: Session-level status (e.g., "Investigating...", "Synthesizing...")
+  // 2. agentProgressStatuses: Per-agent statuses for parallel executions
+  // Both must initialize from the same session data to ensure UI consistency.
   
   // Initialize progress status from current session state on load
   useEffect(() => {
@@ -169,18 +194,66 @@ function SessionDetailPageBase({
     if (!isActiveSessionStatus(session.status)) return;
     
     // Find the currently active stage
-    const activeStage = session.stages?.find((s: any) => s.status === 'active');
+    const activeStage = session.stages?.find((s: any) => s.status === STAGE_STATUS.ACTIVE);
     if (!activeStage) return;
     
     // Set initial status based on active stage type
     if (activeStage.stage_name === StageName.SYNTHESIS) {
-      console.log(`📊 Initial load: ${StageName.SYNTHESIS} stage active, setting ${ProgressStatusMessage.SYNTHESIZING}`);
       setProgressStatus(ProgressStatusMessage.SYNTHESIZING);
+    } else if (activeStage.parallel_executions && activeStage.parallel_executions.length > 0) {
+      // Parallel stage - set to Processing (we can't know exact per-agent phase from DB)
+      setProgressStatus(ProgressStatusMessage.PROCESSING);
     } else {
-      console.log(`📊 Initial load: ${activeStage.stage_name} stage active, setting ${ProgressStatusMessage.INVESTIGATING}`);
+      // Regular non-parallel stage
       setProgressStatus(ProgressStatusMessage.INVESTIGATING);
     }
-  }, [session?.session_id, loading]); // Only run when session first loads
+  }, [session?.session_id, loading]);
+  
+  // Initialize per-agent progress statuses for parallel executions on load
+  useEffect(() => {
+    if (!session || loading) return;
+    
+    // Only initialize if session is actively processing
+    if (!isActiveSessionStatus(session.status)) return;
+    
+    // Find parallel parent stages (active, pending, or paused - might have active children)
+    const parallelStages = session.stages?.filter((s: any) => {
+      const hasParallelExecutions = s.parallel_executions && s.parallel_executions.length > 0;
+      const isRelevantStatus = isActiveStageStatus(s.status);
+      return isRelevantStatus && hasParallelExecutions;
+    });
+    
+    if (!parallelStages || parallelStages.length === 0) return;
+    
+    // Build initial Map from parallel executions' current state
+    const initialStatusMap = new Map<string, string>();
+    
+    for (const stage of parallelStages) {
+      if (!stage.parallel_executions) continue;
+      
+      for (const execution of stage.parallel_executions) {
+        // Set status based on execution state
+        if (isActiveStageStatus(execution.status)) {
+          // Active/pending/paused parallel agents show Investigating
+          initialStatusMap.set(execution.execution_id, ProgressStatusMessage.INVESTIGATING);
+        } else if (execution.status === STAGE_STATUS.COMPLETED) {
+          // Completed agents get terminal status
+          initialStatusMap.set(execution.execution_id, ProgressStatusMessage.COMPLETED);
+        } else if (execution.status === STAGE_STATUS.FAILED) {
+          // Failed agents get terminal status
+          initialStatusMap.set(execution.execution_id, ProgressStatusMessage.FAILED);
+        } else if (execution.status === STAGE_STATUS.CANCELLED) {
+          // Cancelled agents get terminal status
+          initialStatusMap.set(execution.execution_id, ProgressStatusMessage.CANCELLED);
+        }
+      }
+    }
+    
+    // Only update if we found relevant parallel executions
+    if (initialStatusMap.size > 0) {
+      setAgentProgressStatuses(initialStatusMap);
+    }
+  }, [session?.session_id, loading]);
   
   // Bottom cancel dialog state
   const [showBottomCancelDialog, setShowBottomCancelDialog] = useState(false);
@@ -405,8 +478,57 @@ function SessionDetailPageBase({
       
       // Update progress status based on event
       if (eventType.startsWith('stage.') || eventType === 'session.progress_update') {
-        const newStatus = mapEventToProgressStatus(update);
-        setProgressStatus(newStatus);
+        // Check if this is a parallel-related event (child or parent)
+        // Use explicit presence checks to handle parallel_index === 0 correctly
+        const isParallelChildUpdate = (eventType === 'session.progress_update' && update.stage_execution_id !== undefined && update.stage_execution_id !== null && update.parallel_index !== undefined && update.parallel_index !== null) || 
+                                      (eventType.startsWith('stage.') && update.parent_stage_execution_id !== undefined && update.parent_stage_execution_id !== null);
+        const isParallelParentEvent = eventType.startsWith('stage.') && update.expected_parallel_count && update.expected_parallel_count > 0;
+        const isParallelUpdate = isParallelChildUpdate || isParallelParentEvent;
+        
+        if (isParallelUpdate) {
+          
+          // Per-agent status update for parallel execution (child agents only)
+          if (eventType === 'session.progress_update' && isParallelChildUpdate) {
+            // Update session-level status when FIRST parallel child update arrives
+            const parentId = update.parent_stage_execution_id;
+            if (parentId !== undefined && parentId !== null && parentId !== parallelStageStatusUpdated.current) {
+              parallelStageStatusUpdated.current = parentId;
+              setProgressStatus('Processing...');
+            }
+            const statusInfo = mapEventToProgressStatus(update, true);
+            if (statusInfo.stageExecutionId) {
+              setAgentProgressStatuses(prev => {
+                const newMap = new Map(prev);
+                newMap.set(statusInfo.stageExecutionId!, statusInfo.status);
+                return newMap;
+              });
+            }
+          } else if (eventType === 'stage.completed' || eventType === 'stage.failed') {
+            // Backend sends stage_id, not stage_execution_id in completion events
+            const executionId = update.stage_execution_id || update.stage_id;
+            if (executionId && isParallelChildUpdate) {
+              // Set terminal status when this specific parallel child stage completes or fails
+              // Use executionId (from stage_id or stage_execution_id) to match the key format from mapEventToProgressStatus
+              const terminalStatus = eventType === 'stage.completed' ? ProgressStatusMessage.COMPLETED : ProgressStatusMessage.FAILED;
+              setAgentProgressStatuses(prev => {
+                const newMap = new Map(prev);
+                newMap.set(executionId, terminalStatus);
+                return newMap;
+              });
+            } else if (update.expected_parallel_count && update.expected_parallel_count > 0 && (update.parent_stage_execution_id === undefined || update.parent_stage_execution_id === null)) {
+              // Clear all agent statuses when the parallel parent completes or fails
+              // Parent stages have expected_parallel_count > 0 and no parent_stage_execution_id
+              parallelStageStatusUpdated.current = null;
+              setAgentProgressStatuses(new Map());
+            }
+          }
+          // For parallel-related events (child stages and parent stages),
+          // don't update session-level status
+        } else {
+          // Session-level status update (non-parallel or stage events)
+          const newStatus = mapEventToProgressStatus(update);
+          setProgressStatus(newStatus);
+        }
       }
       
       // Handle chat events (EP-0027)
@@ -475,7 +597,7 @@ function SessionDetailPageBase({
           };
           
           handleParallelStageStarted(parentStage);
-        } else if (eventType === 'stage.started' && update.parent_stage_execution_id) {
+        } else if (eventType === 'stage.started' && update.parent_stage_execution_id !== undefined && update.parent_stage_execution_id !== null) {
           console.log('🔄 Parallel child stage starting - will replace placeholder');
           // Child stage starting - will be handled by full refresh which will replace placeholder
         }
@@ -798,9 +920,58 @@ function SessionDetailPageBase({
             {/* Timeline Content - Conditional based on view type */}
             {session.stages && session.stages.length > 0 ? (
               <Suspense fallback={timelineSkeleton}>
-                {timelineComponent(session, autoScrollEnabled, progressStatus)}
+                {(() => {
+                  // Compute display status based on selected agent and parallel execution state
+                  const displayStatus = (() => {
+                    // If Map is empty, we're not in parallel execution → use session-level status
+                    if (agentProgressStatuses.size === 0) {
+                      return progressStatus;
+                    }
+                    
+                    if (!selectedAgentExecutionId) {
+                      // No agent selected in parallel context, use session-level status
+                      return progressStatus;
+                    }
+                    
+                    // Get the selected agent's status from the map
+                    const agentStatus = agentProgressStatuses.get(selectedAgentExecutionId);
+                    
+                    if (!agentStatus) {
+                      // Agent hasn't received its first status update yet → starting
+                      return 'Starting...';
+                    }
+                    
+                    if (isTerminalProgressStatus(agentStatus)) {
+                      // Agent has finished (completed/failed/cancelled)
+                      // Check if other agents are still running (have non-terminal statuses)
+                      const otherAgentsRunning = Array.from(agentProgressStatuses.entries())
+                        .some(([id, status]) => id !== selectedAgentExecutionId && !isTerminalProgressStatus(status));
+                      
+                      if (otherAgentsRunning) {
+                        return 'Waiting for other agents...';
+                      }
+                      
+                      // All agents are done, use session-level status
+                      return progressStatus;
+                    }
+                    
+                    // Agent is running, show its specific status
+                    return agentStatus;
+                  })();
+                  
+                  return timelineComponent(session, autoScrollEnabled, displayStatus, agentProgressStatuses, setSelectedAgentExecutionId);
+                })()}
               </Suspense>
+            ) : (session.status === SESSION_STATUS.PENDING || session.status === SESSION_STATUS.IN_PROGRESS) ? (
+              // Session is active but stages haven't been created yet - show loading state
+              <Box sx={{ py: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                <CircularProgress size={48} />
+                <Typography variant="body1" color="text.secondary">
+                  Initializing investigation...
+                </Typography>
+              </Box>
             ) : (
+              // Session is terminal or inactive but has no stages - this is an error
               <Alert severity="error" sx={{ mb: 2 }}>
                 <Typography variant="h6" gutterBottom>
                   Backend Chain Execution Error

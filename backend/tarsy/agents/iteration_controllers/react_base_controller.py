@@ -11,6 +11,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Optional
 
 from ...config.settings import get_settings
+from ...models.constants import LLMInteractionType
 from ...models.unified_interactions import LLMConversation, MessageRole
 from ..parsers.react_parser import ReActParser
 from .base_controller import IterationController
@@ -60,6 +61,7 @@ class ReactController(IterationController):
         
         # 2. Track last interaction success for failure detection
         last_interaction_failed = False
+        last_error_message: Optional[str] = None  # Track actual error message for better diagnostics
         consecutive_timeout_failures = 0  # Track consecutive timeout failures specifically
         
         # 3. ReAct iteration loop with timeout protection  
@@ -195,6 +197,10 @@ class ReactController(IterationController):
                 consecutive_timeout_failures += 1
                 self.logger.warning(f"Iteration timeout ({consecutive_timeout_failures} consecutive)")
                 
+                # Mark this interaction as failed and capture error message
+                last_interaction_failed = True
+                last_error_message = error_msg
+                
                 # Check if we should stop
                 if consecutive_timeout_failures >= 2:
                     raise Exception(f"Stopping after {consecutive_timeout_failures} consecutive iteration timeouts") from None
@@ -210,8 +216,9 @@ class ReactController(IterationController):
                     f"session_id={context.session_id}, stage_execution_id={stage_execution_id}",
                     exc_info=True
                 )
-                # Mark this interaction as failed
+                # Mark this interaction as failed and capture error message
                 last_interaction_failed = True
+                last_error_message = str(e)  # Capture the raw exception message
                 
                 # Check if it's a timeout-related failure
                 error_str = str(e).lower()
@@ -233,14 +240,81 @@ class ReactController(IterationController):
                 conversation.append_observation(format_reminder)
                 continue
                 
-        # 8. Max iterations reached - pause for user action or fail
-        self._raise_max_iterations_exception(
-            max_iterations=max_iterations,
-            last_interaction_failed=last_interaction_failed,
-            conversation=conversation,
-            context=context,
-            logger=self.logger
+        # 8. Max iterations reached - check if we should pause or force conclusion
+        from ..exceptions import ForceConclusion
+        
+        try:
+            self._raise_max_iterations_exception(
+                max_iterations=max_iterations,
+                last_interaction_failed=last_interaction_failed,
+                conversation=conversation,
+                context=context,
+                logger=self.logger,
+                last_error_message=last_error_message
+            )
+        except ForceConclusion as e:
+            # Force conclusion was requested
+            return await self._force_conclusion(
+                conversation=e.conversation,
+                context=context,
+                iteration=e.iteration
+            )
+        # If SessionPaused is raised, it will propagate up (existing behavior)
+
+    def _get_forced_conclusion_prompt(self, iteration: int) -> str:
+        """
+        Get ReAct-specific forced conclusion prompt with Final Answer requirement.
+        
+        Args:
+            iteration: Iteration count when limit reached
+            
+        Returns:
+            ReAct-formatted prompt requesting Final Answer
+        """
+        return self.prompt_builder.build_react_forced_conclusion_prompt(iteration)
+    
+    async def _call_llm_for_forced_conclusion(
+        self,
+        conversation: LLMConversation,
+        context: 'StageContext',
+        timeout: int
+    ) -> str:
+        """
+        ReAct-specific LLM call using LangChain generate_response().
+        
+        Args:
+            conversation: Current conversation with forced conclusion prompt already added
+            context: Stage context
+            timeout: Timeout in seconds
+            
+        Returns:
+            Conclusion text from LLM
+            
+        Raises:
+            asyncio.TimeoutError: If LLM call times out
+            Exception: On LLM communication failures
+        """
+        agent = context.agent
+        stage_execution_id = agent.get_current_stage_execution_id()
+        
+        response = await asyncio.wait_for(
+            self.llm_manager.generate_response(
+                conversation=conversation,
+                session_id=context.session_id,
+                stage_execution_id=stage_execution_id,
+                interaction_type=LLMInteractionType.FORCED_CONCLUSION.value,
+                provider=self._llm_provider_name,
+                # NO mcp_event_id or tools - pure LLM call
+            ),
+            timeout=timeout
         )
+        
+        # Extract final message
+        final_message = response.get_latest_assistant_message()
+        if final_message:
+            return final_message.content
+        else:
+            return "Unable to generate conclusion (no response from LLM)"
 
     @abstractmethod
     def build_initial_conversation(self, context: 'StageContext') -> 'LLMConversation':

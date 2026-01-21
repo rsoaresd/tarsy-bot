@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react';
-import { Box, Skeleton, Alert, Typography } from '@mui/material';
+import { Box, Skeleton, Alert, Typography, CircularProgress } from '@mui/material';
 import type { DetailedSession } from '../types';
 import { ProgressStatusMessage } from '../utils/statusMapping';
+import { SESSION_STATUS } from '../utils/statusConstants';
 
 // Lazy load timeline component
 const NestedAccordionTimeline = lazy(() => import('./NestedAccordionTimeline'));
@@ -37,8 +38,20 @@ function TechnicalTimeline({
   autoScroll = true,
   progressStatus = ProgressStatusMessage.PROCESSING
 }: TechnicalTimelineProps) {
-  
   if (!session.stages || session.stages.length === 0) {
+    // If session is active (pending or in_progress), stages may not be created yet - show loading state
+    if (session.status === SESSION_STATUS.PENDING || session.status === SESSION_STATUS.IN_PROGRESS) {
+      return (
+        <Box sx={{ py: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          <CircularProgress size={48} />
+          <Typography variant="body1" color="text.secondary">
+            Initializing investigation...
+          </Typography>
+        </Box>
+      );
+    }
+    
+    // Session is terminal or inactive but has no stages - this is an error
     return (
       <Alert severity="error" sx={{ mb: 2 }}>
         <Typography variant="h6" gutterBottom>

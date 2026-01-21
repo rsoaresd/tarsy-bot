@@ -163,6 +163,9 @@ class SummarizationConfig(BaseModel):
 # AGENT CONFIGURATION MODELS
 # =============================================================================
 
+# Module-level tracking for deprecation warnings to prevent log noise
+_warned_deprecated: set = set()
+
 
 class AgentConfigModel(BaseModel):
     """Configuration model for a single agent.
@@ -187,6 +190,15 @@ class AgentConfigModel(BaseModel):
         default=IterationStrategy.REACT,
         description="Iteration strategy for alert processing (REACT, REACT_STAGE, or REACT_FINAL_ANALYSIS)",
     )
+    max_iterations: Optional[int] = Field(
+        default=None,
+        description="Maximum number of LLM->MCP iterative loops (overrides system default if set)",
+        ge=1,
+    )
+    force_conclusion_at_max_iterations: Optional[bool] = Field(
+        default=None,
+        description="Force LLM to conclude when max iterations reached instead of pausing (overrides system default if set)",
+    )
 
 
 class MCPServerConfigModel(BaseModel):
@@ -199,19 +211,25 @@ class MCPServerConfigModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    server_id: str = Field(
-        ...,
-        description="Unique server identifier used in agent configurations",
-        min_length=1,
+    # DEPRECATED FIELDS - maintained for backward compatibility only
+    # These fields are ignored and will be removed in a future version
+    server_id: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Server ID is now inferred from YAML dictionary key",
     )
-    server_type: str = Field(
-        ...,
-        description="Server type categorization (e.g., 'security', 'monitoring', 'kubernetes')",
-        min_length=1,
+    server_type: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Server type categorization is no longer used",
     )
-    enabled: bool = Field(
-        default=True, description="Whether this server is enabled for use"
+    enabled: Optional[bool] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: To disable a server, comment it out or remove from config",
     )
+    
+    # Active configuration fields
     transport: TransportConfig = Field(
         ...,
         description="Transport-specific configuration (stdio, HTTP, or SSE)",
@@ -229,6 +247,38 @@ class MCPServerConfigModel(BaseModel):
         default_factory=lambda: SummarizationConfig(),
         description="Summarization configuration for large results",
     )
+    
+    @model_validator(mode="after")
+    def warn_deprecated_fields(self) -> "MCPServerConfigModel":
+        """Log warnings for deprecated fields that should be removed.
+        
+        Uses module-level tracking to warn only once per unique combination of
+        deprecated fields, preventing log noise when multiple servers have the
+        same deprecated fields.
+        """
+        from ..utils.logger import get_module_logger
+        
+        logger = get_module_logger(__name__)
+        
+        deprecated_fields = []
+        if self.server_id is not None:
+            deprecated_fields.append("server_id")
+        if self.server_type is not None:
+            deprecated_fields.append("server_type")
+        if self.enabled is not None:
+            deprecated_fields.append("enabled")
+        
+        # Create a hashable key for this combination of deprecated fields
+        warning_key = tuple(sorted(deprecated_fields))
+        if deprecated_fields and warning_key not in _warned_deprecated:
+            _warned_deprecated.add(warning_key)
+            logger.warning(
+                f"MCP server configuration uses deprecated fields: {', '.join(deprecated_fields)}. "
+                "These fields are ignored and will be removed in a future version. "
+                "Please remove them from your agents.yaml configuration."
+            )
+        
+        return self
 
 
 class ParallelAgentConfig(BaseModel):
@@ -246,6 +296,20 @@ class ParallelAgentConfig(BaseModel):
     )
     iteration_strategy: Optional[IterationStrategy] = Field(
         None, description="Optional iteration strategy override for this agent"
+    )
+    max_iterations: Optional[int] = Field(
+        default=None,
+        description="Maximum number of iterations for this parallel agent (highest precedence override)",
+        ge=1,
+    )
+    force_conclusion_at_max_iterations: Optional[bool] = Field(
+        default=None,
+        description="Force conclusion at max iterations for this parallel agent (highest precedence override)",
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        None,
+        description="Optional MCP server override for this parallel agent (highest configuration precedence)",
+        min_length=1,
     )
 
 
@@ -287,6 +351,16 @@ class ChatConfig(BaseModel):
         None,
         description="LLM provider for chat (uses chain/system default if not specified)",
     )
+    mcp_servers: Optional[List[str]] = Field(
+        None,
+        description="Optional MCP server override for chat (overrides chain-level MCP config)",
+        min_length=1,
+    )
+    max_iterations: Optional[int] = Field(
+        default=None,
+        description="Maximum number of iterations for chat agent (overrides chain/agent defaults)",
+        ge=1,
+    )
 
 
 class ChainStageConfigModel(BaseModel):
@@ -322,6 +396,20 @@ class ChainStageConfigModel(BaseModel):
     llm_provider: Optional[str] = Field(
         None,
         description="Optional LLM provider override for this stage (uses chain's provider if not specified)",
+    )
+    max_iterations: Optional[int] = Field(
+        default=None,
+        description="Maximum number of iterations for this stage (overrides chain/agent/system defaults)",
+        ge=1,
+    )
+    force_conclusion_at_max_iterations: Optional[bool] = Field(
+        default=None,
+        description="Force conclusion at max iterations for this stage (overrides chain/agent/system defaults)",
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        None,
+        description="Optional MCP server override for this stage",
+        min_length=1,
     )
     synthesis: Optional[SynthesisConfig] = Field(
         None, description="Optional synthesis configuration for parallel stages"
@@ -401,6 +489,20 @@ class ChainConfigModel(BaseModel):
     llm_provider: Optional[str] = Field(
         None,
         description="Optional LLM provider for all stages in this chain (uses global default if not specified)",
+    )
+    max_iterations: Optional[int] = Field(
+        default=None,
+        description="Maximum number of iterations for all stages in this chain (overrides agent/system defaults)",
+        ge=1,
+    )
+    force_conclusion_at_max_iterations: Optional[bool] = Field(
+        default=None,
+        description="Force conclusion at max iterations for all stages in this chain (overrides agent/system defaults)",
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        None,
+        description="Optional MCP server override for all stages in this chain",
+        min_length=1,
     )
 
 
@@ -497,12 +599,3 @@ class CombinedConfigModel(BaseModel):
                 )
         return self
 
-    @model_validator(mode="after")
-    def validate_server_ids(self) -> "CombinedConfigModel":
-        """Validate that MCP server IDs in configs match their dictionary keys."""
-        for server_id, server_config in self.mcp_servers.items():
-            if server_config.server_id != server_id:
-                raise ValueError(
-                    f"MCP server key '{server_id}' does not match server_id '{server_config.server_id}'"
-                )
-        return self

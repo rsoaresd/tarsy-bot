@@ -173,7 +173,10 @@ class ConfigurationLoader:
                                 {
                                     "name": agent.name,
                                     "llm_provider": agent.llm_provider,
-                                    "iteration_strategy": agent.iteration_strategy
+                                    "iteration_strategy": agent.iteration_strategy,
+                                    "max_iterations": agent.max_iterations,
+                                    "force_conclusion_at_max_iterations": agent.force_conclusion_at_max_iterations,
+                                    "mcp_servers": agent.mcp_servers
                                 }
                                 for agent in stage.agents
                             ] if stage.agents else None,
@@ -181,6 +184,9 @@ class ConfigurationLoader:
                             "success_policy": stage.success_policy,
                             "iteration_strategy": stage.iteration_strategy,
                             "llm_provider": stage.llm_provider,
+                            "max_iterations": stage.max_iterations,
+                            "force_conclusion_at_max_iterations": stage.force_conclusion_at_max_iterations,
+                            "mcp_servers": stage.mcp_servers,
                             "synthesis": {
                                 "agent": stage.synthesis.agent,
                                 "iteration_strategy": stage.synthesis.iteration_strategy,
@@ -191,11 +197,16 @@ class ConfigurationLoader:
                     ],
                     "description": chain_config.description,
                     "llm_provider": chain_config.llm_provider,
+                    "max_iterations": chain_config.max_iterations,
+                    "force_conclusion_at_max_iterations": chain_config.force_conclusion_at_max_iterations,
+                    "mcp_servers": chain_config.mcp_servers,
                     "chat": {
                         "enabled": chain_config.chat.enabled,
                         "agent": chain_config.chat.agent,
                         "iteration_strategy": chain_config.chat.iteration_strategy,
-                        "llm_provider": chain_config.chat.llm_provider
+                        "llm_provider": chain_config.chat.llm_provider,
+                        "mcp_servers": chain_config.chat.mcp_servers,
+                        "max_iterations": chain_config.chat.max_iterations
                     } if chain_config.chat else None
                 }
             
@@ -207,16 +218,22 @@ class ConfigurationLoader:
     
     def _validate_mcp_server_references(self, config: CombinedConfigModel) -> None:
         """
-        Validate all agent MCP server references exist in unified registry.
+        Validate all MCP server references exist at all configuration levels.
         
-        This method ensures that all MCP servers referenced by configured agents
-        exist in either the built-in MCP servers or the configured MCP servers.
+        This method ensures that all MCP servers referenced in configurations exist
+        in either the built-in MCP servers or the configured MCP servers.
+        
+        Validates MCP servers at all configuration levels:
+        - Agent level (agents.*.mcp_servers)
+        - Chain level (agent_chains.*.mcp_servers)
+        - Stage level (agent_chains.*.stages.*.mcp_servers)
+        - Parallel agent level (agent_chains.*.stages.*.agents.*.mcp_servers)
         
         Args:
             config: The parsed configuration to validate
             
         Raises:
-            ConfigurationError: If any agent references a non-existent MCP server
+            ConfigurationError: If any configuration references a non-existent MCP server
         """
         # Get all available MCP servers (built-in + configured)
         available_servers = set(self.BUILTIN_MCP_SERVERS)
@@ -224,7 +241,7 @@ class ConfigurationLoader:
         
         logger.debug(f"Available MCP servers for validation: {available_servers}")
         
-        # Validate each agent's MCP server references
+        # Validate agent-level MCP server references
         for agent_name, agent_config in config.agents.items():
             logger.debug(f"Validating MCP server references for agent '{agent_name}': {agent_config.mcp_servers}")
             
@@ -237,7 +254,75 @@ class ConfigurationLoader:
                     logger.error(error_msg)
                     raise ConfigurationError(error_msg)
         
-        logger.debug("All MCP server references validated successfully")
+        # Validate chain/stage/parallel-agent level MCP server references
+        for chain_id, chain_config in config.agent_chains.items():
+            # Validate chain-level MCP servers
+            if chain_config.mcp_servers:
+                logger.debug(f"Validating chain '{chain_id}' MCP servers: {chain_config.mcp_servers}")
+                for server_id in chain_config.mcp_servers:
+                    if server_id not in available_servers:
+                        error_msg = (
+                            f"Chain '{chain_id}' references unknown MCP server '{server_id}'. "
+                            f"Available servers: {sorted(available_servers)}"
+                        )
+                        logger.error(error_msg)
+                        raise ConfigurationError(error_msg)
+            
+            # Validate stage-level MCP servers
+            for stage in chain_config.stages:
+                if stage.mcp_servers:
+                    logger.debug(
+                        f"Validating chain '{chain_id}' stage '{stage.name}' MCP servers: "
+                        f"{stage.mcp_servers}"
+                    )
+                    for server_id in stage.mcp_servers:
+                        if server_id not in available_servers:
+                            error_msg = (
+                                f"Chain '{chain_id}' stage '{stage.name}' references unknown "
+                                f"MCP server '{server_id}'. Available servers: {sorted(available_servers)}"
+                            )
+                            logger.error(error_msg)
+                            raise ConfigurationError(error_msg)
+                
+                # Validate parallel-agent level MCP servers
+                if stage.agents:
+                    for agent_config in stage.agents:
+                        if agent_config.mcp_servers:
+                            logger.debug(
+                                f"Validating chain '{chain_id}' stage '{stage.name}' "
+                                f"parallel agent '{agent_config.name}' MCP servers: "
+                                f"{agent_config.mcp_servers}"
+                            )
+                            for server_id in agent_config.mcp_servers:
+                                if server_id not in available_servers:
+                                    error_msg = (
+                                        f"Chain '{chain_id}' stage '{stage.name}' "
+                                        f"parallel agent '{agent_config.name}' references unknown "
+                                        f"MCP server '{server_id}'. "
+                                        f"Available servers: {sorted(available_servers)}"
+                                    )
+                                    logger.error(error_msg)
+                                    raise ConfigurationError(error_msg)
+                
+                # Note: Synthesis config validation for MCP servers not needed
+                # SynthesisAgent performs pure analysis and doesn't use MCP tools
+            
+            # Validate chat config MCP servers
+            if chain_config.chat and chain_config.chat.mcp_servers:
+                logger.debug(
+                    f"Validating chain '{chain_id}' chat config MCP servers: "
+                    f"{chain_config.chat.mcp_servers}"
+                )
+                for server_id in chain_config.chat.mcp_servers:
+                    if server_id not in available_servers:
+                        error_msg = (
+                            f"Chain '{chain_id}' chat config references unknown MCP server '{server_id}'. "
+                            f"Available servers: {sorted(available_servers)}"
+                        )
+                        logger.error(error_msg)
+                        raise ConfigurationError(error_msg)
+        
+        logger.debug("All MCP server references validated successfully at all levels")
     
     def _log_configuration_overrides(self, config: CombinedConfigModel) -> None:
         """
@@ -400,21 +485,6 @@ class ConfigurationLoader:
                     f"MCP server '{server_id}' has no transport configured. "
                     f"Each MCP server must have transport configuration."
                 )
-        
-        # Warn about disabled MCP servers that are still referenced
-        disabled_servers = {
-            server_id for server_id, server_config in config.mcp_servers.items()
-            if not server_config.enabled
-        }
-        
-        if disabled_servers:
-            for agent_name, agent_config in config.agents.items():
-                referenced_disabled = set(agent_config.mcp_servers) & disabled_servers
-                if referenced_disabled:
-                    logger.warning(
-                        f"Agent '{agent_name}' references disabled MCP servers: {referenced_disabled}. "
-                        f"This may cause runtime failures when processing alerts."
-                    )
         
         logger.debug("Configuration completeness validation passed")
     
