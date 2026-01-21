@@ -2715,7 +2715,7 @@ requires-dist = [
     { name = "respx", marker = "extra == 'test'", specifier = ">=0.22.0" },
     { name = "ruff", marker = "extra == 'all'", specifier = ">=0.1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
-    { name = "slack-sdk", specifier = ">=3.23.0" },
+    { name = "slack-sdk", specifier = ">=3.34.0" },
     { name = "sqlalchemy", specifier = ">=2.0.41" },
     { name = "sqlmodel", specifier = ">=0.0.14" },
     { name = "tiktoken", specifier = ">=0.7.0" },

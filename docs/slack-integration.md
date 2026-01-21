@@ -70,6 +70,7 @@ Or find it in the channel URL: `https://your-workspace.slack.com/archives/C12345
 
 Edit `backend/.env` and add your Slack credentials:
 
+```
 # =============================================================================
 # Slack Notification Configuration
 # =============================================================================
@@ -79,9 +80,11 @@ SLACK_BOT_TOKEN=xoxb-your-token-here
 
 # Slack channel ID (e.g., C12345678 or channel-name)
 SLACK_CHANNEL=C12345678
+```
 
 You should also add your Dashboard URL in CORS_ORIGIN setting:
 
+```
 # =============================================================================
 # CORS Configuration
 # =============================================================================
@@ -89,7 +92,7 @@ You should also add your Dashboard URL in CORS_ORIGIN setting:
 # For development, include your alert dev UI URL
 # For production, use your actual domain
 CORS_ORIGINS=<your-dashboard-url>
-
+```
 
 ## Alert Data Format
 Alert data must include a fingerprint field. Example:

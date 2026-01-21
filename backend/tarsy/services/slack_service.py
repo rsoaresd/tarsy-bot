@@ -6,7 +6,7 @@ Handles sending notifications to Slack channel for alert processing events.
 import time
 from typing import Any, Dict, Optional
 
-from slack_sdk import WebClient
+from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.errors import SlackApiError
 
 from tarsy.config.settings import Settings
@@ -44,11 +44,11 @@ class SlackService:
         )
 
         if self.enabled:
-            self.client = WebClient(self.settings.slack_bot_token)
+            self.client = AsyncWebClient(self.settings.slack_bot_token)
             logger.info(f"Slack notifications enabled for channel {self.settings.slack_channel}")
         else:
             self.client = None
-            logger.info("Slack notifications disabled - no webhook URL configured")
+            logger.info("Slack notifications disabled - missing Slack bot token or channel configuration")
 
     async def send_alert_notification(
         self,
@@ -129,7 +129,7 @@ class SlackService:
             oldest = current_time - lookback_seconds
 
             # Search for messages in the channel
-            history = self.client.conversations_history(
+            history = await self.client.conversations_history(
                 channel=self.settings.slack_channel,
                 oldest=str(int(oldest)),
                 limit=20
@@ -172,7 +172,7 @@ class SlackService:
             
             message_data = self._format_alert_message(session_id=session_id, analysis=analysis, error=error)
             
-            self.client.chat_postMessage(
+            await self.client.chat_postMessage(
                 channel=channel_id,
                 attachments=message_data["attachments"],
                 thread_ts=message_ts
