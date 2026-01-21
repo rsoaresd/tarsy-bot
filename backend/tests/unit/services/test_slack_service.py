@@ -109,7 +109,7 @@ class TestSlackServiceInitialization:
     - Channel configuration validation
     """
     
-    def test_initialization_enabled(self, mock_settings_enabled):
+    def test_initialization_enabled(self, mock_settings_enabled) -> None:
         """Test initialization with Slack enabled creates client."""
         with patch('tarsy.services.slack_service.AsyncWebClient') as mock_webclient:
             service = SlackService(mock_settings_enabled)
@@ -119,7 +119,7 @@ class TestSlackServiceInitialization:
             assert service.settings == mock_settings_enabled
             mock_webclient.assert_called_once_with("xoxb-test-token")
     
-    def test_initialization_disabled_no_token(self, mock_settings_disabled):
+    def test_initialization_disabled_no_token(self, mock_settings_disabled) -> None:
         """Test initialization with no Slack token disables service."""
         with patch('tarsy.services.slack_service.AsyncWebClient'):
             service = SlackService(mock_settings_disabled)
@@ -128,7 +128,7 @@ class TestSlackServiceInitialization:
             assert service.client is None
             assert service.settings == mock_settings_disabled
     
-    def test_initialization_disabled_empty_token(self):
+    def test_initialization_disabled_empty_token(self) -> None:
         """Test initialization with empty/whitespace token disables service."""
         settings = MockFactory.create_mock_settings(
             slack_bot_token="   ",
@@ -140,7 +140,7 @@ class TestSlackServiceInitialization:
 
             assert service.enabled is False
     
-    def test_initialization_disabled_no_channel(self):
+    def test_initialization_disabled_no_channel(self) -> None:
         """Test initialization with no Slack channel disables service."""
         settings = MockFactory.create_mock_settings(
             slack_bot_token="xoxb-test-token",
@@ -152,7 +152,7 @@ class TestSlackServiceInitialization:
 
             assert service.enabled is False
     
-    def test_initialization_disabled_empty_channel(self):
+    def test_initialization_disabled_empty_channel(self) -> None:
         """Test initialization with empty channel disables service."""
         settings = MockFactory.create_mock_settings(
             slack_bot_token="xoxb-test-token",
@@ -185,7 +185,7 @@ class TestSendAlertNotification:
     """
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_success(self, slack_service_enabled):
+    async def test_send_alert_notification_success(self, slack_service_enabled) -> None:
         """Test successful alert notification with analysis."""
         # Setup mocks
         slack_service_enabled.find_alert_message = AsyncMock(return_value="1234567890.123456")
@@ -211,7 +211,7 @@ class TestSendAlertNotification:
         )
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_with_error(self, slack_service_enabled):
+    async def test_send_alert_notification_with_error(self, slack_service_enabled) -> None:
         """Test sending alert notification with error instead of analysis."""
         slack_service_enabled.find_alert_message = AsyncMock(return_value="1234567890.123456")
         slack_service_enabled.reply_to_alert_directly = AsyncMock(return_value=True)
@@ -231,7 +231,7 @@ class TestSendAlertNotification:
         )
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_disabled(self, mock_settings_disabled):
+    async def test_send_alert_notification_disabled(self, mock_settings_disabled) -> None:
         """Test notification returns False when Slack is disabled."""
         with patch('tarsy.services.slack_service.AsyncWebClient'):
             service = SlackService(mock_settings_disabled)
@@ -245,7 +245,7 @@ class TestSendAlertNotification:
             assert result is False
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_no_fingerprint(self, slack_service_enabled):
+    async def test_send_alert_notification_no_fingerprint(self, slack_service_enabled) -> None:
         """Test notification fails when no fingerprint provided."""
         result = await slack_service_enabled.send_alert_notification(
             session_id="test-session-123",
@@ -256,7 +256,7 @@ class TestSendAlertNotification:
         assert result is False
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_empty_fingerprint(self, slack_service_enabled):
+    async def test_send_alert_notification_empty_fingerprint(self, slack_service_enabled) -> None:
         """Test notification fails when empty fingerprint provided."""
         result = await slack_service_enabled.send_alert_notification(
             session_id="test-session-123",
@@ -267,7 +267,7 @@ class TestSendAlertNotification:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_send_alert_notification_whitespace_fingerprint(self, slack_service_enabled):
+    async def test_send_alert_notification_whitespace_fingerprint(self, slack_service_enabled) -> None:
         """Test notification fails when whitespace-only fingerprint provided."""
         result = await slack_service_enabled.send_alert_notification(
             session_id="test-session-123",
@@ -278,7 +278,7 @@ class TestSendAlertNotification:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_send_notification_both_analysis_and_error(self, slack_service_enabled):
+    async def test_send_notification_both_analysis_and_error(self, slack_service_enabled) -> None:
         """Test that providing both analysis and error is handled (should not happen)."""
         result = await slack_service_enabled.send_alert_notification(
             session_id="test-session",
@@ -290,7 +290,7 @@ class TestSendAlertNotification:
         assert result is False
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_message_not_found(self, slack_service_enabled):
+    async def test_send_alert_notification_message_not_found(self, slack_service_enabled) -> None:
         """Test notification fails when original message not found in Slack."""
         slack_service_enabled.find_alert_message = AsyncMock(return_value=None)
         
@@ -306,7 +306,7 @@ class TestSendAlertNotification:
         )
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_reply_fails(self, slack_service_enabled):
+    async def test_send_alert_notification_reply_fails(self, slack_service_enabled) -> None:
         """Test notification handles reply failure gracefully."""
         slack_service_enabled.find_alert_message = AsyncMock(return_value="1234567890.123456")
         slack_service_enabled.reply_to_alert_directly = AsyncMock(return_value=False)
@@ -320,7 +320,7 @@ class TestSendAlertNotification:
         assert result is False
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_exception_handling(self, slack_service_enabled):
+    async def test_send_alert_notification_exception_handling(self, slack_service_enabled) -> None:
         """Test notification handles exceptions gracefully and returns False."""
         slack_service_enabled.find_alert_message = AsyncMock(
             side_effect=Exception("Connection timeout")
@@ -354,7 +354,7 @@ class TestFindAlertMessage:
     """
     
     @pytest.mark.asyncio
-    async def test_find_alert_message_in_text(self, slack_service_enabled, mock_slack_history):
+    async def test_find_alert_message_in_text(self, slack_service_enabled, mock_slack_history) -> None:
         """Test finding alert message by fingerprint in message text."""
         slack_service_enabled.client.conversations_history = AsyncMock(return_value=mock_slack_history)
         
@@ -368,7 +368,7 @@ class TestFindAlertMessage:
         self, 
         slack_service_enabled,
         mock_slack_history_with_attachments
-    ):
+    ) -> None:
         """Test finding alert message by fingerprint in message attachments."""
         slack_service_enabled.client.conversations_history = AsyncMock(
             return_value=mock_slack_history_with_attachments
@@ -380,7 +380,7 @@ class TestFindAlertMessage:
         assert result == "1234567890.123456"
 
     @pytest.mark.asyncio
-    async def test_find_alert_message_no_attachments_key(self, slack_service_enabled):
+    async def test_find_alert_message_no_attachments_key(self, slack_service_enabled) -> None:
         """Test handling messages without 'attachments' key."""
         mock_history = {
             "messages": [
@@ -398,7 +398,7 @@ class TestFindAlertMessage:
         assert result == "1234567890.123456"
     
     @pytest.mark.asyncio
-    async def test_find_alert_message_not_found(self, slack_service_enabled):
+    async def test_find_alert_message_not_found(self, slack_service_enabled) -> None:
         """Test when alert message with fingerprint is not found."""
         mock_history = {
             "messages": [
@@ -417,7 +417,7 @@ class TestFindAlertMessage:
         assert result is None
     
     @pytest.mark.asyncio
-    async def test_find_alert_message_empty_history(self, slack_service_enabled):
+    async def test_find_alert_message_empty_history(self, slack_service_enabled) -> None:
         """Test handling of empty message history."""
         mock_history = {"messages": []}
         slack_service_enabled.client.conversations_history = AsyncMock(return_value=mock_history)
@@ -428,7 +428,7 @@ class TestFindAlertMessage:
         assert result is None
     
     @pytest.mark.asyncio
-    async def test_find_alert_message_api_error(self, slack_service_enabled):
+    async def test_find_alert_message_api_error(self, slack_service_enabled) -> None:
         """Test handling Slack API error during message search."""
         # Create a proper response object that supports subscript access
         mock_response = Mock()
@@ -460,7 +460,7 @@ class TestReplyToAlert:
     """
     
     @pytest.mark.asyncio
-    async def test_reply_to_alert_success(self, slack_service_enabled):
+    async def test_reply_to_alert_success(self, slack_service_enabled) -> None:
         """Test successful threaded reply to alert message."""
         slack_service_enabled.client.chat_postMessage = AsyncMock()
         
@@ -481,7 +481,7 @@ class TestReplyToAlert:
         assert 'attachments' in call_kwargs
     
     @pytest.mark.asyncio
-    async def test_reply_to_alert_with_error(self, slack_service_enabled):
+    async def test_reply_to_alert_with_error(self, slack_service_enabled) -> None:
         """Test replying with error message instead of analysis."""
         slack_service_enabled.client.chat_postMessage = AsyncMock()
         
@@ -500,7 +500,7 @@ class TestReplyToAlert:
         assert any("Error" in str(att) for att in attachments)
     
     @pytest.mark.asyncio
-    async def test_reply_to_alert_api_error(self, slack_service_enabled):
+    async def test_reply_to_alert_api_error(self, slack_service_enabled) -> None:
         """Test handling Slack API error during reply."""
         mock_response = Mock()
         mock_response.__getitem__ = Mock(return_value="message_not_found")
@@ -535,7 +535,7 @@ class TestMessageFormatting:
     - Includes dashboard link for detailed analysis
     """
     
-    def test_format_alert_message_with_analysis(self, slack_service_enabled):
+    def test_format_alert_message_with_analysis(self, slack_service_enabled) -> None:
         """Test formatting message with successful analysis."""
         result = slack_service_enabled._format_alert_message(
             session_id="test-session-123",
@@ -553,7 +553,7 @@ class TestMessageFormatting:
         assert "Alert resolved: Pod restarted successfully" in attachment['text']
         assert "*View Analysis Details:* http://localhost:5173/sessions/test-session-123" in attachment['text']
         
-    def test_format_alert_message_with_error(self, slack_service_enabled):
+    def test_format_alert_message_with_error(self, slack_service_enabled) -> None:
         """Test formatting message with processing error."""
         result = slack_service_enabled._format_alert_message(
             session_id="test-session-456",

@@ -22,8 +22,8 @@ class TestSlackNotificationIntegration:
     async def test_successful_processing_sends_slack_notification(
         self,
         alert_service_with_slack,
-        sample_alert_with_fingerprint
-    ):
+        sample_alert_with_fingerprint,
+    ) -> None:
         """Test that successful alert processing sends Slack notification with summary."""
         alert_service = alert_service_with_slack
         
@@ -48,8 +48,8 @@ class TestSlackNotificationIntegration:
     async def test_failed_processing_sends_error_notification(
         self,
         alert_service_with_slack,
-        sample_alert_with_fingerprint
-    ):
+        sample_alert_with_fingerprint,
+    ) -> None:
         """Test that failed processing sends Slack notification with error."""
         alert_service = alert_service_with_slack
         

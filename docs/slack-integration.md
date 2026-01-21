@@ -32,7 +32,7 @@ When enabled, TARSy automatically:
 
 ### Step 1: Create a Slack App
 
-1. Go to https://api.slack.com/apps
+1. Go to the Slack Apps page: [Slack Apps](https://api.slack.com/apps)
 2. Create your Slack app
 
 ### Step 2: Configure Bot Permissions
