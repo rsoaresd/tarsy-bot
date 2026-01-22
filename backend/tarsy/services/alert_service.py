@@ -449,11 +449,13 @@ class AlertService:
                 
                 # Generate executive summary for dashboard display and external notifications
                 # Use chain-level provider for executive summary (or global if not set)
+                logger.info(f"Generating executive summary for session {chain_context.session_id}, analysis length: {len(analysis)}")
                 summary_result = await self.final_analysis_summarizer.generate_executive_summary(
                     content=analysis,
                     session_id=chain_context.session_id,
                     provider=chain_definition.llm_provider
                 )
+                logger.info(f"Executive summary result - summary: {summary_result.summary[:100] if summary_result.summary else None}, error: {summary_result.error}")
 
                 # Mark history session as completed successfully
                 self.session_manager.update_session_status(
