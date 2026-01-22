@@ -36,24 +36,75 @@ class SlackService:
         self.settings = settings
 
         # Check if Slack is configured
-        self.enabled = bool(
-            self.settings.slack_bot_token and 
-            self.settings.slack_bot_token.strip() and
-            self.settings.slack_channel and 
-            self.settings.slack_channel.strip()
-        )
+        has_slack_token = bool(self.settings.slack_bot_token and self.settings.slack_bot_token.strip())
+        has_slack_channel = bool(self.settings.slack_channel and self.settings.slack_channel.strip())
+        
+        self.enabled = has_slack_token and has_slack_channel
 
         if self.enabled:
             self.client = AsyncWebClient(self.settings.slack_bot_token)
             logger.info(f"Slack notifications enabled for channel {self.settings.slack_channel}")
         else:
             self.client = None
-            logger.info("Slack notifications disabled - missing Slack bot token or channel configuration")
+            if has_slack_token and not has_slack_channel:
+                logger.warning("Slack bot token configured but channel is missing - Slack notifications disabled")
+            elif has_slack_channel and not has_slack_token:
+                logger.warning("Slack channel configured but bot token is missing - Slack notifications disabled")
+            else:
+                logger.info("Slack notifications disabled - missing Slack bot token and channel configuration")
 
-    async def send_alert_notification(
+    async def send_alert_analysis_notification(
         self,
         session_id: str,
-        fingerprint: Optional[str] = None,
+        analysis: str,
+        slack_message_fingerprint: Optional[str] = None,
+    ) -> bool:
+        """
+        Send notification for successful alert processing.
+        
+        Args:
+            session_id: Session ID for tracking
+            analysis: Analysis result from successful processing
+            slack_message_fingerprint: Optional fingerprint for threading
+                    
+        Returns:
+            bool: True if notification sent successfully, False otherwise
+        """
+        return await self._send_alert_notification(
+            session_id=session_id,
+            slack_message_fingerprint=slack_message_fingerprint,
+            analysis=analysis,
+            error=None,
+        )
+
+    async def send_alert_error_notification(
+        self,
+        session_id: str,
+        error: str,
+        slack_message_fingerprint: Optional[str] = None,
+    ) -> bool:
+        """
+        Send notification for failed alert processing.
+        
+        Args:
+            session_id: Session ID for tracking
+            error: Error message describing the failure
+            slack_message_fingerprint: Optional fingerprint for threading
+                    
+        Returns:
+            bool: True if notification sent successfully, False otherwise
+        """
+        return await self._send_alert_notification(
+            session_id=session_id,
+            slack_message_fingerprint=slack_message_fingerprint,
+            analysis=None,
+            error=error,
+        )
+
+    async def _send_alert_notification(
+        self,
+        session_id: str,
+        slack_message_fingerprint: Optional[str] = None,
         analysis: Optional[str] = None,
         error: Optional[str] = None,
     ) -> bool:
@@ -62,7 +113,7 @@ class SlackService:
         
         Args:
             session_id: Session ID for tracking
-            fingerprint: Fingerprint of the alert
+            slack_message_fingerprint: Slack message fingerprint for Slack notification threading
             analysis: Analysis result (for successful processing)
             error: Error message (for failed processing)
                     
@@ -74,35 +125,21 @@ class SlackService:
             return False
 
         try:
-            if not fingerprint or not fingerprint.strip():
-                logger.error(f"No fingerprint found for {session_id}")
-                return False
-
-            if analysis and error:
-                logger.error(f"Both analysis and error provided for session {session_id}")
-                return False
-
-            find_alert_message = await self.find_alert_message(
-                fingerprint=fingerprint,
-            )
-
-            if not find_alert_message:
-                logger.error(f"Failed to find alert message for session {session_id}")
-                return False
-        
-            success = await self.reply_to_alert_directly(
+            if slack_message_fingerprint and slack_message_fingerprint.strip():
+                logger.info(f"Slack notification threading is provided for session {session_id}, sending threaded notification")
+                return await self.post_threaded_reply(
                     session_id=session_id,
-                    message_ts=find_alert_message,
+                    slack_message_fingerprint=slack_message_fingerprint,
                     analysis=analysis,
                     error=error,
                 )
 
-            if success:
-                logger.info(f"Slack notification sent for session {session_id}")
-            else:
-                logger.warning(f"Failed to send Slack notification for session {session_id}")
-
-            return success
+            logger.info(f"Slack notification threading is not provided for session {session_id}, sending standard notification")
+            return await self.reply_to_chat_directly(
+                session_id=session_id,
+                analysis=analysis,
+                error=error,
+            )
 
         except Exception as e:
             logger.error(f"Error sending Slack notification for session {session_id}: {str(e)}")
@@ -110,13 +147,13 @@ class SlackService:
 
     async def find_alert_message(
         self, 
-        fingerprint: str,
+        slack_message_fingerprint: str,
     ) -> Optional[str]:
-        """
-        Find the target alert message to reply to.
+        """ 
+        Find the target message to reply to in the Slack channel history.
         
         Args:
-            fingerprint: identifier of the alert
+            slack_message_fingerprint: Slack message fingerprint for Slack message threading
         
         Returns:
             Message timestamp (ts) if found, None otherwise
@@ -134,8 +171,8 @@ class SlackService:
                 oldest=str(int(oldest)),
                 limit=20
             )
-            
-            # Find message containing the fingerprint identifier
+
+            # Find message containing the slack_fingerprint identifier
             for message in history["messages"]:
                 # Check in message text
                 message_text = message.get("text", "")
@@ -147,29 +184,35 @@ class SlackService:
                     message_text += " " + attachment_text
                 
                 # Search for fingerprint in combined text
-                if fingerprint in message_text:
-                    logger.info(f"Found message with fingerprint {fingerprint}: ts={message['ts']}")
+                if slack_message_fingerprint in message_text:
+                    logger.info(f"Found message with fingerprint {slack_message_fingerprint}: ts={message['ts']}")
                     return message["ts"]
             
-            logger.error(f"No message found with fingerprint: {fingerprint}")
+            logger.error(f"No message found with slack_message_fingerprint: {slack_message_fingerprint}")
             return None
 
         except SlackApiError as e:
-            logger.error(f"Slack API error: {e.response['error']}")
+            logger.error(f"Slack API error while finding alert message: {e.response['error']}")
             return None
 
-    async def reply_to_alert_directly(
+    async def post_threaded_reply(
         self,
         session_id: str,
-        message_ts: str,
+        slack_message_fingerprint: str,
         analysis: Optional[str] = None,
         error: Optional[str] = None,
     ) -> bool:
         """Reply directly to a message using its ts - no search needed."""
 
         try:
+            message_ts = await self.find_alert_message(
+                slack_message_fingerprint=slack_message_fingerprint,
+            )
+            if not message_ts:
+                logger.error(f"Failed to find alert message for session {session_id}")
+                return False
+
             channel_id = self.settings.slack_channel
-            
             message_data = self._format_alert_message(session_id=session_id, analysis=analysis, error=error)
             
             await self.client.chat_postMessage(
@@ -178,9 +221,41 @@ class SlackService:
                 thread_ts=message_ts
             )
             
+            logger.info(f"Slack threaded notification sent for session {session_id}")
             return True
         except SlackApiError as e:
-            logger.error(f"Slack API error: {e.response['error']}")
+            logger.error(f"Failed to send Slack threaded notification for session {session_id}: {e.response['error']}")
+            return False
+
+    async def reply_to_chat_directly(
+        self,
+        analysis: Optional[str] = None,
+        error: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Reply in a chat conversation thread.
+        
+        Args:
+            thread_ts: Thread timestamp to reply to
+            message: Chat message content
+            session_id: Optional session ID for dashboard link
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            channel_id = self.settings.slack_channel
+            message_data = self._format_alert_message(session_id=session_id, analysis=analysis, error=error)
+                
+            await self.client.chat_postMessage(
+                    channel=channel_id,
+                    attachments=message_data["attachments"],
+            )
+            logger.info(f"Slack notification sent for session {session_id}")
+            return True
+        except SlackApiError as e:
+            logger.error(f"Failed to send Slack notification for session {session_id}: {e.response['error']}")
             return False
 
     def _format_alert_message(

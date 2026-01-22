@@ -7,7 +7,8 @@ Test Organization:
 - TestSlackServiceInitialization: Service setup and configuration
 - TestSendAlertNotification: Notification delivery workflows
 - TestFindAlertMessage: Message discovery in Slack history
-- TestReplyToAlert: Threaded reply functionality
+- TestReplyDirectly: Reply directly to Slack channel (non-threaded)
+- TestPostThreadedReply: Post threaded reply functionality
 - TestMessageFormatting: Slack message formatting
 """
 
@@ -60,13 +61,9 @@ def mock_slack_history() -> Dict:
             {
                 "ts": "1234567890.123456",
                 "text": """Fingerprint: fingerprint-abc123
-UserSignup: user
-Cluster: rm1
-Namespace: user-dev
-Details:
-name: sentiment-0
-node: ip-1-1-1-1.ec2.internal
-ec2_instance: i-1-1-1-1""",
+Cluster: main-cluster
+Namespace: test-namespace
+Message: Namespace is terminating""",
                 "attachments": []
             },
             {
@@ -88,7 +85,7 @@ def mock_slack_history_with_attachments() -> Dict:
                 "text": "Alert notification",
                 "attachments": [
                     {
-                        "text": "Fingerprint: fingerprint-xyz789",
+                        "text": "Fingerprint: fingerprint-xyz789\nMessage: Test message",
                         "fallback": "Alert details"
                     }
                 ]
@@ -188,24 +185,20 @@ class TestSendAlertNotification:
     async def test_send_alert_notification_success(self, slack_service_enabled) -> None:
         """Test successful alert notification with analysis."""
         # Setup mocks
-        slack_service_enabled.find_alert_message = AsyncMock(return_value="1234567890.123456")
-        slack_service_enabled.reply_to_alert_directly = AsyncMock(return_value=True)
+        slack_service_enabled.post_threaded_reply = AsyncMock(return_value=True)
         
        
-        result = await slack_service_enabled.send_alert_notification(
+        result = await slack_service_enabled.send_alert_analysis_notification(
             session_id="test-session-123",
-            fingerprint="alert-fingerprint-456",
+            slack_message_fingerprint="alert-fingerprint-456",
             analysis="Alert analysis completed successfully",
         )
         
 
         assert result is True
-        slack_service_enabled.find_alert_message.assert_called_once_with(
-            fingerprint="alert-fingerprint-456"
-        )
-        slack_service_enabled.reply_to_alert_directly.assert_called_once_with(
+        slack_service_enabled.post_threaded_reply.assert_called_once_with(
             session_id="test-session-123",
-            message_ts="1234567890.123456",
+            slack_message_fingerprint="alert-fingerprint-456",
             analysis="Alert analysis completed successfully",
             error=None,
         )
@@ -213,19 +206,18 @@ class TestSendAlertNotification:
     @pytest.mark.asyncio
     async def test_send_alert_notification_with_error(self, slack_service_enabled) -> None:
         """Test sending alert notification with error instead of analysis."""
-        slack_service_enabled.find_alert_message = AsyncMock(return_value="1234567890.123456")
-        slack_service_enabled.reply_to_alert_directly = AsyncMock(return_value=True)
+        slack_service_enabled.post_threaded_reply = AsyncMock(return_value=True)
         
-        result = await slack_service_enabled.send_alert_notification(
+        result = await slack_service_enabled.send_alert_error_notification(
             session_id="test-session-123",
-            fingerprint="alert-fingerprint-456",
+            slack_message_fingerprint="alert-fingerprint-456",
             error="Processing failed: timeout",
         )
         
         assert result is True
-        slack_service_enabled.reply_to_alert_directly.assert_called_once_with(
+        slack_service_enabled.post_threaded_reply.assert_called_once_with(
             session_id="test-session-123",
-            message_ts="1234567890.123456",
+            slack_message_fingerprint="alert-fingerprint-456",
             analysis=None,
             error="Processing failed: timeout",
         )
@@ -236,9 +228,9 @@ class TestSendAlertNotification:
         with patch('tarsy.services.slack_service.AsyncWebClient'):
             service = SlackService(mock_settings_disabled)
             
-            result = await service.send_alert_notification(
+            result = await service.send_alert_analysis_notification(
                 session_id="test-session",
-                fingerprint="test-fingerprint",
+                slack_message_fingerprint="test-fingerprint",
                 analysis="test analysis"
             )
             
@@ -246,74 +238,86 @@ class TestSendAlertNotification:
     
     @pytest.mark.asyncio
     async def test_send_alert_notification_no_fingerprint(self, slack_service_enabled) -> None:
-        """Test notification fails when no fingerprint provided."""
-        result = await slack_service_enabled.send_alert_notification(
+        """Test notification sends direct message when no fingerprint provided."""
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=True)
+        
+        result = await slack_service_enabled.send_alert_analysis_notification(
             session_id="test-session-123",
-            fingerprint=None,
+            slack_message_fingerprint=None,
             analysis="test analysis"
         )
         
-        assert result is False
+        assert result is True
+        slack_service_enabled.reply_to_chat_directly.assert_called_once_with(
+            session_id="test-session-123",
+            analysis="test analysis",
+            error=None,
+        )
     
     @pytest.mark.asyncio
     async def test_send_alert_notification_empty_fingerprint(self, slack_service_enabled) -> None:
-        """Test notification fails when empty fingerprint provided."""
-        result = await slack_service_enabled.send_alert_notification(
+        """Test notification sends direct message when empty fingerprint provided."""
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=True)
+        
+        result = await slack_service_enabled.send_alert_analysis_notification(
             session_id="test-session-123",
-            fingerprint="",
+            slack_message_fingerprint="",
             analysis="test analysis"
         )
         
-        assert result is False
+        assert result is True
+        slack_service_enabled.reply_to_chat_directly.assert_called_once_with(
+            session_id="test-session-123",
+            analysis="test analysis",
+            error=None,
+        )
 
     @pytest.mark.asyncio
     async def test_send_alert_notification_whitespace_fingerprint(self, slack_service_enabled) -> None:
-        """Test notification fails when whitespace-only fingerprint provided."""
-        result = await slack_service_enabled.send_alert_notification(
+        """Test notification sends direct message when whitespace-only fingerprint provided."""
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=True)
+        
+        result = await slack_service_enabled.send_alert_analysis_notification(
             session_id="test-session-123",
-            fingerprint="   ",
+            slack_message_fingerprint="   ",
             analysis="test analysis"
         )
         
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_send_notification_both_analysis_and_error(self, slack_service_enabled) -> None:
-        """Test that providing both analysis and error is handled (should not happen)."""
-        result = await slack_service_enabled.send_alert_notification(
-            session_id="test-session",
-            fingerprint="test-fingerprint",
-            analysis="Some analysis",
-            error="Some error"
+        assert result is True
+        slack_service_enabled.reply_to_chat_directly.assert_called_once_with(
+            session_id="test-session-123",
+            analysis="test analysis",
+            error=None,
         )
-        
-        assert result is False
+
     
     @pytest.mark.asyncio
     async def test_send_alert_notification_message_not_found(self, slack_service_enabled) -> None:
         """Test notification fails when original message not found in Slack."""
-        slack_service_enabled.find_alert_message = AsyncMock(return_value=None)
+        slack_service_enabled.post_threaded_reply = AsyncMock(return_value=False)
         
-        result = await slack_service_enabled.send_alert_notification(
+        result = await slack_service_enabled.send_alert_analysis_notification(
             session_id="test-session-123",
-            fingerprint="unknown-fingerprint",
+            slack_message_fingerprint="unknown-fingerprint",
             analysis="test analysis"
         )
         
         assert result is False
-        slack_service_enabled.find_alert_message.assert_called_once_with(
-            fingerprint="unknown-fingerprint"
+        slack_service_enabled.post_threaded_reply.assert_called_once_with(
+            session_id="test-session-123",
+            slack_message_fingerprint="unknown-fingerprint",
+            analysis="test analysis",
+            error=None,
         )
     
     @pytest.mark.asyncio
     async def test_send_alert_notification_reply_fails(self, slack_service_enabled) -> None:
         """Test notification handles reply failure gracefully."""
-        slack_service_enabled.find_alert_message = AsyncMock(return_value="1234567890.123456")
-        slack_service_enabled.reply_to_alert_directly = AsyncMock(return_value=False)
+        slack_service_enabled.post_threaded_reply = AsyncMock(return_value=False)
         
-        result = await slack_service_enabled.send_alert_notification(
+        result = await slack_service_enabled.send_alert_analysis_notification(
             session_id="test-session-123",
-            fingerprint="alert-fingerprint",
+            slack_message_fingerprint="alert-fingerprint",
             analysis="test analysis"
         )
         
@@ -322,13 +326,13 @@ class TestSendAlertNotification:
     @pytest.mark.asyncio
     async def test_send_alert_notification_exception_handling(self, slack_service_enabled) -> None:
         """Test notification handles exceptions gracefully and returns False."""
-        slack_service_enabled.find_alert_message = AsyncMock(
+        slack_service_enabled.post_threaded_reply = AsyncMock(
             side_effect=Exception("Connection timeout")
         )
         
-        result = await slack_service_enabled.send_alert_notification(
+        result = await slack_service_enabled.send_alert_analysis_notification(
             session_id="test-session-123",
-            fingerprint="alert-fingerprint",
+            slack_message_fingerprint="alert-fingerprint",
             analysis="test analysis"
         )
         
@@ -445,28 +449,27 @@ class TestFindAlertMessage:
 
 
 @pytest.mark.unit
-class TestReplyToAlert:
+class TestReplyDirectly:
     """
-    Test replying to alert messages in Slack threads.
+    Test replying directly to Slack channel (non-threaded).
     
     Covers:
-    - Successful threaded reply with analysis
-    - Threaded reply with error messages
+    - Successful direct reply with analysis
+    - Direct reply with error messages
     - Slack API errors during posting
     
-    Threading Behavior:
+    Behavior:
     - Formats message via _format_alert_message()
-    - Posts to configured channel
+    - Posts to configured channel without threading
     """
     
     @pytest.mark.asyncio
-    async def test_reply_to_alert_success(self, slack_service_enabled) -> None:
-        """Test successful threaded reply to alert message."""
+    async def test_reply_directly_success(self, slack_service_enabled) -> None:
+        """Test successful direct reply to channel."""
         slack_service_enabled.client.chat_postMessage = AsyncMock()
         
-        result = await slack_service_enabled.reply_to_alert_directly(
+        result = await slack_service_enabled.reply_to_chat_directly(
             session_id="test-session-123",
-            message_ts="1234567890.123456",
             analysis="Analysis completed",
             error=None
         )
@@ -477,17 +480,16 @@ class TestReplyToAlert:
         # Verify call structure
         call_kwargs = slack_service_enabled.client.chat_postMessage.call_args.kwargs
         assert call_kwargs['channel'] == "C12345678"
-        assert call_kwargs['thread_ts'] == "1234567890.123456"
+        assert 'thread_ts' not in call_kwargs  # Direct message, no threading
         assert 'attachments' in call_kwargs
     
     @pytest.mark.asyncio
-    async def test_reply_to_alert_with_error(self, slack_service_enabled) -> None:
+    async def test_reply_directly_with_error(self, slack_service_enabled) -> None:
         """Test replying with error message instead of analysis."""
         slack_service_enabled.client.chat_postMessage = AsyncMock()
         
-        result = await slack_service_enabled.reply_to_alert_directly(
+        result = await slack_service_enabled.reply_to_chat_directly(
             session_id="test-session-123",
-            message_ts="1234567890.123456",
             analysis=None,
             error="Processing failed"
         )
@@ -500,8 +502,104 @@ class TestReplyToAlert:
         assert any("Error" in str(att) for att in attachments)
     
     @pytest.mark.asyncio
-    async def test_reply_to_alert_api_error(self, slack_service_enabled) -> None:
+    async def test_reply_directly_api_error(self, slack_service_enabled) -> None:
         """Test handling Slack API error during reply."""
+        mock_response = Mock()
+        mock_response.__getitem__ = Mock(return_value="channel_not_found")
+        
+        slack_service_enabled.client.chat_postMessage = AsyncMock(
+            side_effect=SlackApiError("Error", mock_response)
+        )
+        
+        result = await slack_service_enabled.reply_to_chat_directly(
+            session_id="test-session",
+            analysis="test"
+        )
+        
+        assert result is False
+
+
+@pytest.mark.unit
+class TestPostThreadedReply:
+    """
+    Test posting threaded replies to alert messages.
+    
+    Covers:
+    - Successful threaded reply with analysis
+    - Threaded reply with error messages
+    - Message not found scenario
+    - Slack API errors during posting
+    
+    Threading Behavior:
+    - Finds original message via find_alert_message()
+    - Formats message via _format_alert_message()
+    - Posts to configured channel as threaded reply
+    """
+    
+    @pytest.mark.asyncio
+    async def test_post_threaded_reply_success(self, slack_service_enabled) -> None:
+        """Test successful threaded reply to alert message."""
+        slack_service_enabled.find_alert_message = AsyncMock(return_value="1234567890.123456")
+        slack_service_enabled.client.chat_postMessage = AsyncMock()
+        
+        result = await slack_service_enabled.post_threaded_reply(
+            session_id="test-session-123",
+            slack_message_fingerprint="fingerprint-abc123",
+            analysis="Analysis completed",
+            error=None
+        )
+        
+        assert result is True
+        slack_service_enabled.find_alert_message.assert_called_once_with(
+            slack_message_fingerprint="fingerprint-abc123"
+        )
+        slack_service_enabled.client.chat_postMessage.assert_called_once()
+        
+        # Verify call structure includes thread_ts
+        call_kwargs = slack_service_enabled.client.chat_postMessage.call_args.kwargs
+        assert call_kwargs['channel'] == "C12345678"
+        assert call_kwargs['thread_ts'] == "1234567890.123456"
+        assert 'attachments' in call_kwargs
+    
+    @pytest.mark.asyncio
+    async def test_post_threaded_reply_with_error(self, slack_service_enabled) -> None:
+        """Test threaded reply with error message instead of analysis."""
+        slack_service_enabled.find_alert_message = AsyncMock(return_value="1234567890.123456")
+        slack_service_enabled.client.chat_postMessage = AsyncMock()
+        
+        result = await slack_service_enabled.post_threaded_reply(
+            session_id="test-session-123",
+            slack_message_fingerprint="fingerprint-abc123",
+            analysis=None,
+            error="Processing failed"
+        )
+        
+        assert result is True
+        
+        # Verify error is included in message
+        call_kwargs = slack_service_enabled.client.chat_postMessage.call_args.kwargs
+        attachments = call_kwargs['attachments']
+        assert any("Error" in str(att) for att in attachments)
+    
+    @pytest.mark.asyncio
+    async def test_post_threaded_reply_message_not_found(self, slack_service_enabled) -> None:
+        """Test threaded reply fails when original message not found."""
+        slack_service_enabled.find_alert_message = AsyncMock(return_value=None)
+        
+        result = await slack_service_enabled.post_threaded_reply(
+            session_id="test-session-123",
+            slack_message_fingerprint="nonexistent-fingerprint",
+            analysis="test analysis"
+        )
+        
+        assert result is False
+        slack_service_enabled.find_alert_message.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_post_threaded_reply_api_error(self, slack_service_enabled) -> None:
+        """Test handling Slack API error during threaded reply."""
+        slack_service_enabled.find_alert_message = AsyncMock(return_value="1234567890.123456")
+        
         mock_response = Mock()
         mock_response.__getitem__ = Mock(return_value="message_not_found")
         
@@ -509,9 +607,9 @@ class TestReplyToAlert:
             side_effect=SlackApiError("Error", mock_response)
         )
         
-        result = await slack_service_enabled.reply_to_alert_directly(
+        result = await slack_service_enabled.post_threaded_reply(
             session_id="test-session",
-            message_ts="1234567890.123456",
+            slack_message_fingerprint="test-fingerprint",
             analysis="test"
         )
         

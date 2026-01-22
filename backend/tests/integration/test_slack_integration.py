@@ -36,13 +36,12 @@ class TestSlackNotificationIntegration:
         assert "# Alert Analysis Report" in result
         
         # Verify Slack notification was sent
-        alert_service.slack_service.send_alert_notification.assert_called_once()
-        call_kwargs = alert_service.slack_service.send_alert_notification.call_args.kwargs
+        alert_service.slack_service.send_alert_analysis_notification.assert_called_once()
+        call_kwargs = alert_service.slack_service.send_alert_analysis_notification.call_args.kwargs
         
         assert call_kwargs['session_id'] == chain_context.session_id
-        assert call_kwargs['fingerprint'] == "test-fingerprint-abc123"
+        assert call_kwargs['slack_message_fingerprint'] == "test-fingerprint-abc123"
         assert 'analysis' in call_kwargs
-        assert call_kwargs.get('error') is None
     
     @pytest.mark.asyncio
     async def test_failed_processing_sends_error_notification(
@@ -78,11 +77,11 @@ class TestSlackNotificationIntegration:
             assert "# Alert Processing Error" in result
             
             # Verify Slack error notification was sent
-            alert_service.slack_service.send_alert_notification.assert_called_once()
-            call_kwargs = alert_service.slack_service.send_alert_notification.call_args.kwargs
+            alert_service.slack_service.send_alert_error_notification.assert_called_once()
+            call_kwargs = alert_service.slack_service.send_alert_error_notification.call_args.kwargs
             
             assert call_kwargs['session_id'] == chain_context.session_id
-            assert call_kwargs['fingerprint'] == "test-fingerprint-abc123"
+            assert call_kwargs['slack_message_fingerprint'] == "test-fingerprint-abc123"
             assert 'error' in call_kwargs
             assert call_kwargs['error'] is not None
         finally:

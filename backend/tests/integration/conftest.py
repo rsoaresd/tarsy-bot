@@ -1325,15 +1325,20 @@ def alert_service_with_slack(alert_service, mock_slack_settings_enabled):
         slack_service.client = Mock()
         slack_service.enabled = True
         
-        # Mock the send_alert_notification method to track calls
-        slack_service.send_alert_notification = AsyncMock(return_value=True)
+        # Mock the send_alert notification methods to track calls
+        slack_service.send_alert_analysis_notification = AsyncMock(return_value=True)
+        slack_service.send_alert_error_notification = AsyncMock(return_value=True)
+        
+        # Mock internal Slack service methods
+        slack_service.find_alert_message = AsyncMock(return_value="1234567890.123456")
+        slack_service.post_threaded_reply = AsyncMock(return_value=True)
+        slack_service.reply_to_chat_directly = AsyncMock(return_value=True)
         
         # Mock Slack API calls
-        slack_service.client.conversations_history = Mock(return_value={
+        slack_service.client.conversations_history = AsyncMock(return_value={
             "messages": [{
                 "ts": "1234567890.123456",
                 "text": """Fingerprint: test-fingerprint-abc123
-UserSignup: user
 Namespace: test-namespace
 Cluster: main-cluster
 Severity: critical
@@ -1342,7 +1347,7 @@ Namespace is terminating""",
                 "attachments": []
             }]
         })
-        slack_service.client.chat_postMessage = Mock()
+        slack_service.client.chat_postMessage = AsyncMock()
         
         # Inject into alert service
         alert_service.slack_service = slack_service
@@ -1365,13 +1370,13 @@ def sample_alert_with_fingerprint():
         alert_type="kubernetes",
         runbook="https://github.com/company/runbooks/blob/main/k8s.md",
         timestamp=now_us(),
+        slack_message_fingerprint="test-fingerprint-abc123",
         data={
             "severity": "critical",
             "environment": "production",
             "cluster": "main-cluster",
             "namespace": "test-namespace",
             "message": "Namespace is terminating",
-            "alert": "NamespaceTerminating",
-            "fingerprint": "test-fingerprint-abc123"
+            "alert": "NamespaceTerminating"
         }
     )

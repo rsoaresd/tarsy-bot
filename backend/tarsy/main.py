@@ -715,6 +715,8 @@ async def mark_session_as_failed(alert: Optional[ChainContext], error_msg: str) 
         from tarsy.services.events.event_helpers import publish_session_failed
         await publish_session_failed(alert.session_id)
 
+        await alert_service._send_slack_error_notification(alert, error_msg=error_msg)
+
 async def process_alert_background(session_id: str, alert: ChainContext) -> None:
     """Background task to process an alert with comprehensive error handling and concurrency control."""
     if alert_processing_semaphore is None or alert_service is None:

@@ -38,6 +38,7 @@ class TestMarkSessionAsFailedFunction:
         mock_session_manager = Mock()
         mock_session_manager.update_session_error = Mock()
         mock_alert_service.session_manager = mock_session_manager
+        mock_alert_service._send_slack_error_notification = AsyncMock()
         
         # Mock the event publisher inside tarsy.main
         with patch('tarsy.main.alert_service', mock_alert_service), \
@@ -123,6 +124,7 @@ class TestTimeoutErrorHandlingInMain:
         mock_session_manager = Mock()
         mock_session_manager.update_session_error = Mock()
         mock_alert_service.session_manager = mock_session_manager
+        mock_alert_service._send_slack_error_notification = AsyncMock()
         
         # Mock the event publisher
         with patch('tarsy.main.alert_service', mock_alert_service), \
@@ -181,6 +183,7 @@ class TestTimeoutErrorHandlingInMain:
         mock_session_manager = Mock()
         mock_session_manager.update_session_error = Mock()
         mock_alert_service.session_manager = mock_session_manager
+        mock_alert_service._send_slack_error_notification = AsyncMock()
         
         with patch('tarsy.main.alert_service', mock_alert_service), \
              patch('tarsy.main.alert_processing_semaphore', asyncio.Semaphore(1)), \

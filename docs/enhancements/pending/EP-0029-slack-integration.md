@@ -53,7 +53,68 @@ SRE teams need immediate visibility into alert analysis without constantly monit
 
 ## Use Cases
 
-### UC-1: Alert Notification
+### UC-1: Standard Slack Notification
+**Actor**: SRE Engineer  
+**Scenario**: Suspicious activity alert
+
+1. TARSy receives an alert
+2. TARSy processes alert
+3. AI generates analysis and 1-4 line analysis summary
+4. Slack notification sent to the Slack team channel
+
+---
+
+## Design
+
+### Architecture
+
+### High-Level Flow (Phase 1: Summary)
+
+```text
+┌─────────────────────────────────────────────────┐
+│ 1. Session Completion                           │
+│    Alert Processing → Final Analysis → Summary  │
+└─────────────────────────────────────────────────┘
+```
+
+### High-Level Flow (Phase 2: Slack Integration)
+
+```text
+┌─────────────────────────────────────────────────┐
+│ 1. External System (e.g. GuardDuty)             │
+│    Posts alert to Slack channel                 │
+└──────────────────┬──────────────────────────────┘
+                   |
+                   ▼
+┌─────────────────────────────────────────────────┐
+│ 2. Slack Channel (e.g. #guardydutty-alerts)     │
+│    Finding in us-east-1 ....                    │
+└──────────────────┬──────────────────────────────┘
+                   |
+                   | TARSy processes alert
+                   ▼
+┌─────────────────────────────────────────────────┐
+│ 3. Session Completion                           │
+│    Alert Processing → Final Analysis → Summary  │
+└──────────────────┬──────────────────────────────┘
+                   |
+                   ▼
+┌─────────────────────────────────────────────────┐
+│ 4. Slack Service                                │
+│    if slack_service.enabled:                    │
+│     1. Send message with analysis summary       │
+└──────────────────┬──────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────┐
+│ 5. Slack Channel (e.g. #guardydutty-alerts)     │
+│    Analysis: The security alert is a false.     │
+│ positive, triggered by ...                      │
+│    View Analysis Details: http://localhost:...  │
+└─────────────────────────────────────────────────┘
+```
+
+### UC-2: Slack Notification Threading
 **Actor**: SRE Engineer  
 **Scenario**: Suspicious activity alert
 

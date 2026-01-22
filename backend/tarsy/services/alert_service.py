@@ -327,6 +327,8 @@ class AlertService:
                 
                 # Update history session with error
                 self.session_manager.update_session_error(chain_context.session_id, error_msg)
+
+                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
                     
                 return format_error_response(chain_context, error_msg)
             
@@ -406,12 +408,7 @@ class AlertService:
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(chain_context.session_id)
 
-                if self.slack_service.enabled:
-                    await self.slack_service.send_alert_notification(
-                        session_id=chain_context.session_id,
-                        fingerprint=chain_context.processing_alert.fingerprint,
-                        error=error_msg,
-                    )
+                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
 
                 return format_error_response(chain_context, error_msg)
             
@@ -453,12 +450,7 @@ class AlertService:
                     final_analysis_summary=final_result_summary
                 )
 
-                if self.slack_service.enabled:
-                    await self.slack_service.send_alert_notification(
-                        session_id=chain_context.session_id,
-                        fingerprint=chain_context.processing_alert.fingerprint,
-                        analysis=final_result_summary,
-                    )
+                await self._send_slack_analysis_notification(chain_context, analysis=final_result_summary)
                 
                 # Publish session.completed event
                 from tarsy.services.events.event_helpers import (
@@ -491,12 +483,7 @@ class AlertService:
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(chain_context.session_id)
 
-                if self.slack_service.enabled:
-                    await self.slack_service.send_alert_notification(
-                        session_id=chain_context.session_id,
-                        fingerprint=chain_context.processing_alert.fingerprint,
-                        error=error_msg,
-                    )
+                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
                 
                 return format_error_response(chain_context, error_msg)
                 
@@ -511,13 +498,7 @@ class AlertService:
             from tarsy.services.events.event_helpers import publish_session_failed
             await publish_session_failed(chain_context.session_id)
 
-            if self.slack_service.enabled:
-                await self.slack_service.send_alert_notification(
-                    session_id=chain_context.session_id,
-                    fingerprint=chain_context.processing_alert.fingerprint,
-                    error=error_msg,
-                )
-            
+            await self._send_slack_error_notification(chain_context, error_msg=error_msg)
             return format_error_response(chain_context, error_msg)
         
         finally:
@@ -1243,12 +1224,7 @@ class AlertService:
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(session_id)
 
-                if self.slack_service.enabled:
-                    await self.slack_service.send_alert_notification(
-                        session_id=session_id,
-                        fingerprint=chain_context.processing_alert.fingerprint,
-                        error=error_msg,
-                    )
+                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
                 
                 return format_error_response(chain_context, error_msg)
         
@@ -1787,6 +1763,50 @@ class AlertService:
         
         # If no analysis found, return a simple summary (this should be rare)
         return f"Chain {chain_context.chain_id} completed with {len(chain_context.stage_outputs)} stage outputs."
+    
+    async def _send_slack_error_notification(
+        self,
+        chain_context: ChainContext,
+        error_msg: str,
+    ) -> None:
+        """
+        Helper to send Slack error notification for failed alert processing.
+        
+        Extracts necessary data from chain_context and delegates to slack_service.
+        The slack_service handles enabled/disabled state internally.
+        
+        Args:
+            chain_context: Chain execution context
+            error_msg: Error message to send
+        """
+
+        print(f"Sending Slack error notification for session {chain_context.session_id} with error {error_msg}")
+        await self.slack_service.send_alert_error_notification(
+            session_id=chain_context.session_id,
+            error=error_msg,
+            slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint
+        )
+
+    async def _send_slack_analysis_notification(
+        self,
+        chain_context: ChainContext,
+        analysis: str,
+    ) -> None:
+        """
+        Helper to send Slack success notification for completed alert processing.
+        
+        Extracts necessary data from chain_context and delegates to slack_service.
+        The slack_service handles enabled/disabled state internally.
+        
+        Args:
+            chain_context: Chain execution context
+            analysis: Analysis result to send
+        """
+        await self.slack_service.send_alert_analysis_notification(
+            session_id=chain_context.session_id,
+            analysis=analysis,
+            slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint
+        )
 
     async def close(self):
         """
