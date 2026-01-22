@@ -106,4 +106,4 @@ CORS_ORIGINS=<your-dashboard-url>
 ```
 
 ## Slack Notification Threading
-If you want to enable Slack notification threading, you need to provide the `slack_message_fingerprint`. when sending the request to TARSy.
+If you want to enable Slack notification threading, you need to provide the `slack_message_fingerprint`, when sending the request to TARSy.

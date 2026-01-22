@@ -1815,8 +1815,6 @@ class AlertService:
             chain_context: Chain execution context
             error_msg: Error message to send
         """
-
-        print(f"Sending Slack error notification for session {chain_context.session_id} with error {error_msg}")
         await self.slack_service.send_alert_error_notification(
             session_id=chain_context.session_id,
             error=error_msg,

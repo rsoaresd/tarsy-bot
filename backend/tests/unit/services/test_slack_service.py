@@ -182,12 +182,12 @@ class TestSendAlertNotification:
     """
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_success(self, slack_service_enabled) -> None:
+    async def test_send_alert_notification_success_with_threading(self, slack_service_enabled) -> None:
         """Test successful alert notification with analysis."""
         # Setup mocks
         slack_service_enabled.post_threaded_reply = AsyncMock(return_value=True)
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=False)
         
-       
         result = await slack_service_enabled.send_alert_analysis_notification(
             session_id="test-session-123",
             slack_message_fingerprint="alert-fingerprint-456",
@@ -202,12 +202,14 @@ class TestSendAlertNotification:
             analysis="Alert analysis completed successfully",
             error=None,
         )
+        slack_service_enabled.reply_to_chat_directly.assert_not_called()
     
     @pytest.mark.asyncio
-    async def test_send_alert_notification_with_error(self, slack_service_enabled) -> None:
+    async def test_send_alert_notification_with_error_with_threading(self, slack_service_enabled) -> None:
         """Test sending alert notification with error instead of analysis."""
         slack_service_enabled.post_threaded_reply = AsyncMock(return_value=True)
-        
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=False)
+
         result = await slack_service_enabled.send_alert_error_notification(
             session_id="test-session-123",
             slack_message_fingerprint="alert-fingerprint-456",
@@ -219,8 +221,30 @@ class TestSendAlertNotification:
             session_id="test-session-123",
             slack_message_fingerprint="alert-fingerprint-456",
             analysis=None,
-            error="Processing failed: timeout",
+            error="Processing failed: timeout"
         )
+        slack_service_enabled.reply_to_chat_directly.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_alert_notification_success_without_threading(self, slack_service_enabled) -> None:
+        """Test successful alert notification without threading."""
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=True)
+        slack_service_enabled.post_threaded_reply = AsyncMock(return_value=False)
+        
+        result = await slack_service_enabled.send_alert_analysis_notification(
+            session_id="test-session-123",
+            slack_message_fingerprint=None,
+            analysis="Alert analysis completed successfully",    
+        )
+        
+        assert result is True
+        slack_service_enabled.reply_to_chat_directly.assert_called_once_with(
+            session_id="test-session-123",
+            analysis="Alert analysis completed successfully",
+            error=None,
+        )
+
+        slack_service_enabled.post_threaded_reply.assert_not_called() 
     
     @pytest.mark.asyncio
     async def test_send_alert_notification_disabled(self, mock_settings_disabled) -> None:

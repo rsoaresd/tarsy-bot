@@ -230,30 +230,29 @@ Generate concise 1-4 line AI-powered summaries of alert analysis results for qui
 Create a Slack service that finds the target alert notification in a Slack channel and replies with TARSy's AI-generated analysis as a threaded response.
 
 #### 1. Alert Correlation Strategy Research
-   - Find the best way to locate the target alert message in Slack
+  - Find the best way to locate the target alert message in Slack
 
 #### 2. **Core Service**
-   - Implement `SlackService` with API client initialization
-   - Implement message search functionality
-   - Implement threaded reply posting
-   - Success notifications with summary
-   - Failure notifications with error details
-   - Session link to dashboard for detailed analysis
-   - Add message formatting
-   - Optional enablement
+  - Implement `SlackService` with API client initialization
+  - Implement message search functionality
+  - Implement threaded reply posting
+  - Success notifications with summary
+  - Failure notifications with error details
+  - Session link to dashboard for detailed analysis
+  - Add message formatting
+  - Optional enablement
 
 #### 3. **Integration**
-   - Integrate with `AlertService` completion flow
+  - Integrate with `AlertService` completion flow
 
 #### 4. **Testing** 
-   - Unit tests for `SlackService` methods
-   - Integration tests with mocked Slack API
-   - E2E tests
+  - Unit tests for `SlackService` methods
+  - Integration tests with mocked Slack API
+  - E2E tests
 
 #### 5. **Documentation**
-   - Update configuration guide
-   - Document Slack app setup process
-
+  - Update configuration guide
+  - Document Slack app setup process
 ---
 
 ## Benefits

@@ -234,7 +234,7 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = () => {
   // Common fields
   const [alertType, setAlertType] = useState('');
   const [runbook, setRunbook] = useState<string | null>(DEFAULT_RUNBOOK);
-  const [slackMessageFingerprint, setSlackMessageFingerprint] = useState<string | null>(null);
+  const [slackMessageFingerprint, setSlackMessageFingerprint] = useState('');
   const [mcpSelection, setMcpSelection] = useState<MCPSelectionConfig | undefined>(undefined);
   
   // Mode selection (0 = Structured, 1 = Text) - Default to Text
