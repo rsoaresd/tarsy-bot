@@ -50,7 +50,7 @@ from tarsy.services.response_formatter import (
 from tarsy.services.runbook_service import RunbookService
 from tarsy.services.session_manager import SessionManager
 from tarsy.services.stage_execution_manager import StageExecutionManager
-from tarsy.utils.agent_execution_utils import extract_cancellation_reason, get_stage_agent_label
+from tarsy.utils.agent_execution_utils import get_stage_agent_label
 from tarsy.utils.logger import get_module_logger
 from tarsy.utils.timestamp import now_us
 from tarsy.services.slack_service import SlackService
@@ -402,12 +402,25 @@ class AlertService:
             except asyncio.TimeoutError:
                 error_msg = f"Alert processing exceeded {self.settings.alert_processing_timeout}s timeout"
                 logger.error(f"{error_msg} for session {chain_context.session_id}")
-                # Update history session with timeout error
-                self.session_manager.update_session_error(chain_context.session_id, error_msg)
-                # Publish session.failed event
-                from tarsy.services.events.event_helpers import publish_session_failed
-                await publish_session_failed(chain_context.session_id)
-
+                
+                # Check tracker: if user requested cancel → CANCELLED, otherwise → TIMED_OUT
+                from tarsy.services.cancellation_tracker import is_user_cancel
+                if is_user_cancel(chain_context.session_id):
+                    # User requested cancellation - override error_msg with cancellation message
+                    error_msg = "Session cancelled by user"
+                    self.session_manager.update_session_status(
+                        chain_context.session_id,
+                        AlertSessionStatus.CANCELLED.value,
+                        error_message=error_msg
+                    )
+                    from tarsy.services.events.event_helpers import publish_session_cancelled
+                    await publish_session_cancelled(chain_context.session_id)
+                else:
+                    # System timeout
+                    self.session_manager.update_session_timed_out(chain_context.session_id, error_msg)
+                    from tarsy.services.events.event_helpers import publish_session_timed_out
+                    await publish_session_timed_out(chain_context.session_id)
+                
                 await self._send_slack_error_notification(chain_context, error_msg=error_msg)
 
                 return format_error_response(chain_context, error_msg)
@@ -436,7 +449,7 @@ class AlertService:
                 
                 # Generate executive summary for dashboard display and external notifications
                 # Use chain-level provider for executive summary (or global if not set)
-                final_result_summary = await self.final_analysis_summarizer.generate_executive_summary(
+                summary_result = await self.final_analysis_summarizer.generate_executive_summary(
                     content=analysis,
                     session_id=chain_context.session_id,
                     provider=chain_definition.llm_provider
@@ -447,10 +460,11 @@ class AlertService:
                     chain_context.session_id, 
                     AlertSessionStatus.COMPLETED.value,
                     final_analysis=final_result,
-                    final_analysis_summary=final_result_summary
+                    final_analysis_summary=summary_result.summary,
+                    executive_summary_error=summary_result.error
                 )
 
-                await self._send_slack_analysis_notification(chain_context, analysis=final_result_summary)
+                await self._send_slack_analysis_notification(chain_context, analysis=summary_result.summary)
                 
                 # Publish session.completed event
                 from tarsy.services.events.event_helpers import (
@@ -482,9 +496,9 @@ class AlertService:
                 # Publish session.failed event
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(chain_context.session_id)
-
-                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
                 
+                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
+
                 return format_error_response(chain_context, error_msg)
                 
         except Exception as e:
@@ -497,8 +511,9 @@ class AlertService:
             # Publish session.failed event
             from tarsy.services.events.event_helpers import publish_session_failed
             await publish_session_failed(chain_context.session_id)
-
+            
             await self._send_slack_error_notification(chain_context, error_msg=error_msg)
+
             return format_error_response(chain_context, error_msg)
         
         finally:
@@ -937,7 +952,7 @@ class AlertService:
                 final_result = result.final_analysis or "No analysis provided"
 
                 # Generate executive summary
-                summary = await self.final_analysis_summarizer.generate_executive_summary(
+                summary_result = await self.final_analysis_summarizer.generate_executive_summary(
                     content=final_result,
                     session_id=session_id,
                     provider=chain_definition.llm_provider
@@ -947,7 +962,8 @@ class AlertService:
                     session_id,
                     AlertSessionStatus.COMPLETED.value,
                     final_analysis=final_result,
-                    final_analysis_summary=summary
+                    final_analysis_summary=summary_result.summary,
+                    executive_summary_error=summary_result.error
                 )
                 from tarsy.services.events.event_helpers import publish_session_completed
                 await publish_session_completed(session_id)
@@ -965,7 +981,7 @@ class AlertService:
             final_result = synthesis_result.result_summary
             
             # Generate executive summary
-            summary = await self.final_analysis_summarizer.generate_executive_summary(
+            summary_result = await self.final_analysis_summarizer.generate_executive_summary(
                 content=final_result,
                 session_id=session_id,
                 provider=chain_definition.llm_provider
@@ -975,7 +991,8 @@ class AlertService:
                 session_id,
                 AlertSessionStatus.COMPLETED.value,
                 final_analysis=final_result,
-                final_analysis_summary=summary
+                final_analysis_summary=summary_result.summary,
+                executive_summary_error=summary_result.error
             )
             from tarsy.services.events.event_helpers import publish_session_completed
             await publish_session_completed(session_id)
@@ -1188,7 +1205,7 @@ class AlertService:
                 
                 # Generate executive summary for resumed sessions too
                 # Use chain-level provider for executive summary (or global if not set)
-                final_result_summary = await self.final_analysis_summarizer.generate_executive_summary(
+                summary_result = await self.final_analysis_summarizer.generate_executive_summary(
                     content=analysis,
                     session_id=session_id,
                     provider=chain_definition.llm_provider
@@ -1198,7 +1215,8 @@ class AlertService:
                     session_id,
                     AlertSessionStatus.COMPLETED.value,
                     final_analysis=final_result,
-                    final_analysis_summary=final_result_summary,
+                    final_analysis_summary=summary_result.summary,
+                    executive_summary_error=summary_result.error,
                 )
                 from tarsy.services.events.event_helpers import (
                     publish_session_completed,
@@ -1225,7 +1243,7 @@ class AlertService:
                 await publish_session_failed(session_id)
 
                 await self._send_slack_error_notification(chain_context, error_msg=error_msg)
-                
+
                 return format_error_response(chain_context, error_msg)
         
         except Exception as e:
@@ -1408,6 +1426,11 @@ class AlertService:
                                         error=error_msg,
                                         timestamp_us=now_us()
                                     )
+                            except asyncio.CancelledError:
+                                # Synthesis cancelled (timeout or user-requested) - re-raise to let
+                                # the outer handler set the correct session status
+                                logger.info(f"Synthesis for parallel stage '{stage.name}' was cancelled")
+                                raise
                             except Exception as e:
                                 # Synthesis exception - stop chain execution immediately
                                 error_msg = f"Automatic synthesis failed for parallel stage '{stage.name}': {str(e)}"
@@ -1553,17 +1576,30 @@ class AlertService:
                     # Cancellation is a normal control-flow event (user cancel, timeout, shutdown).
                     # In Python 3.13+, CancelledError derives from BaseException and will not be
                     # caught by `except Exception`.
-                    reason = extract_cancellation_reason(e)
+                    #
+                    # Check tracker: if user requested cancel → CANCELLED, otherwise → TIMED_OUT
+                    from tarsy.services.cancellation_tracker import is_user_cancel
+                    
+                    if is_user_cancel(chain_context.session_id):
+                        error_msg = f"Stage '{stage.name}' cancelled by user"
+                    else:
+                        error_msg = f"Stage '{stage.name}' timed out"
+                    
                     logger.info(
-                        "Stage '%s' cancelled (reason=%s) in session %s",
-                        stage.name,
-                        reason,
+                        "%s in session %s",
+                        error_msg,
                         chain_context.session_id,
                     )
                     if stage_execution_id:
-                        await self.stage_manager.update_stage_execution_cancelled(
-                            stage_execution_id, reason
-                        )
+                        # Use appropriate status based on tracker
+                        if is_user_cancel(chain_context.session_id):
+                            await self.stage_manager.update_stage_execution_cancelled(
+                                stage_execution_id, error_msg
+                            )
+                        else:
+                            await self.stage_manager.update_stage_execution_timed_out(
+                                stage_execution_id, error_msg
+                            )
                     raise
 
                 except Exception as e:
@@ -1763,7 +1799,7 @@ class AlertService:
         
         # If no analysis found, return a simple summary (this should be rare)
         return f"Chain {chain_context.chain_id} completed with {len(chain_context.stage_outputs)} stage outputs."
-    
+
     async def _send_slack_error_notification(
         self,
         chain_context: ChainContext,
@@ -1806,7 +1842,7 @@ class AlertService:
             session_id=chain_context.session_id,
             analysis=analysis,
             slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint
-        )
+        )   
 
     async def close(self):
         """
