@@ -1815,11 +1815,14 @@ class AlertService:
             chain_context: Chain execution context
             error_msg: Error message to send
         """
-        await self.slack_service.send_alert_error_notification(
+        try:   
+            await self.slack_service.send_alert_error_notification(
             session_id=chain_context.session_id,
-            error=error_msg,
-            slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint
-        )
+                error=error_msg,
+                slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint
+            )
+        except Exception as e:
+            logger.error(f"Error sending Slack error notification for session {chain_context.session_id}: {str(e)}")
 
     async def _send_slack_analysis_notification(
         self,
@@ -1836,11 +1839,14 @@ class AlertService:
             chain_context: Chain execution context
             analysis: Analysis result to send
         """
-        await self.slack_service.send_alert_analysis_notification(
-            session_id=chain_context.session_id,
-            analysis=analysis,
-            slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint
-        )   
+        try:
+            await self.slack_service.send_alert_analysis_notification(
+                session_id=chain_context.session_id,
+                analysis=analysis,
+                slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint
+            )   
+        except Exception as e:
+            logger.error(f"Error sending Slack analysis notification for session {chain_context.session_id}: {str(e)}")
 
     async def close(self):
         """
