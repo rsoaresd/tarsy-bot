@@ -252,17 +252,15 @@ class TestSettingsLLMConfiguration:
     
     def test_get_llm_config_success(self):
         """Test successful LLM config retrieval."""
-        settings = Settings(
-            google_api_key="test-google-key",
-            openai_api_key="test-openai-key"
-        )
-        
-        # Get config for built-in provider
-        config = settings.get_llm_config("google-default")
-        
-        assert config.type == LLMProviderType.GOOGLE
-        assert config.api_key == "test-google-key"
-        assert hasattr(config, 'disable_ssl_verification')
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test-google-key"}, clear=False):
+            settings = Settings()
+
+            # Get config for built-in provider
+            config = settings.get_llm_config("google-default")
+
+            assert config.type == LLMProviderType.GOOGLE
+            assert config.api_key == "test-google-key"
+            assert hasattr(config, 'disable_ssl_verification')
     
     def test_get_llm_config_unknown_provider(self):
         """Test error for unknown provider."""
@@ -273,25 +271,30 @@ class TestSettingsLLMConfiguration:
     
     def test_get_llm_config_api_key_mapping(self):
         """Test correct API key mapping by provider type."""
-        settings = Settings(
-            google_api_key="google-key",
-            openai_api_key="openai-key", 
-            xai_api_key="xai-key",
-            anthropic_api_key="anthropic-key"
-        )
-        
-        # Test each provider type gets correct API key
-        google_config = settings.get_llm_config("google-default")
-        assert google_config.api_key == "google-key"
-        
-        openai_config = settings.get_llm_config("openai-default") 
-        assert openai_config.api_key == "openai-key"
-        
-        xai_config = settings.get_llm_config("xai-default")
-        assert xai_config.api_key == "xai-key"
-        
-        anthropic_config = settings.get_llm_config("anthropic-default")
-        assert anthropic_config.api_key == "anthropic-key"
+        with patch.dict(
+            os.environ,
+            {
+                "GOOGLE_API_KEY": "google-key",
+                "OPENAI_API_KEY": "openai-key",
+                "XAI_API_KEY": "xai-key",
+                "ANTHROPIC_API_KEY": "anthropic-key"
+            },
+            clear=False
+        ):
+            settings = Settings()
+
+            # Test each provider type gets correct API key from env vars
+            google_config = settings.get_llm_config("google-default")
+            assert google_config.api_key == "google-key"
+
+            openai_config = settings.get_llm_config("openai-default")
+            assert openai_config.api_key == "openai-key"
+
+            xai_config = settings.get_llm_config("xai-default")
+            assert xai_config.api_key == "xai-key"
+
+            anthropic_config = settings.get_llm_config("anthropic-default")
+            assert anthropic_config.api_key == "anthropic-key"
     
     def test_get_llm_config_ssl_verification_setting(self):
         """Test SSL verification setting is included in config."""
@@ -326,6 +329,248 @@ class TestSettingsLLMConfiguration:
         anthropic_config = settings.get_llm_config("anthropic-default")
         assert anthropic_config.max_tool_result_tokens == 150000
 
+    def test_get_llm_config_builtin_provider_uses_standard_env_var(self):
+        """Test that built-in providers read from their standard environment variables."""
+        # For built-in providers, api_key_env matches the standard env var name
+        # So both primary and fallback paths read from the same env var
+        with patch.dict(
+            os.environ,
+            {
+                "GOOGLE_API_KEY": "google-test-key",
+                "OPENAI_API_KEY": "openai-test-key"
+            },
+            clear=False
+        ):
+            settings = Settings()
+
+            google_config = settings.get_llm_config("google-default")
+            assert google_config.api_key == "google-test-key"
+
+            openai_config = settings.get_llm_config("openai-default")
+            assert openai_config.api_key == "openai-test-key"
+
+    def test_get_llm_config_custom_env_var_takes_precedence(self):
+        """Test that custom api_key_env takes precedence over standard env var for provider type."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            content = {
+                'llm_providers': {
+                    'custom-openai': {
+                        'type': 'openai',
+                        'model': 'gpt-4-custom',
+                        'api_key_env': 'CUSTOM_OPENAI_KEY'  # Custom env var name
+                    }
+                }
+            }
+            import yaml
+            yaml.safe_dump(content, f)
+            temp_file = f.name
+
+        try:
+            # Set both custom env var and standard env var
+            with patch.dict(
+                os.environ,
+                {
+                    "CUSTOM_OPENAI_KEY": "custom-value",  # Should use this
+                    "OPENAI_API_KEY": "standard-value"    # Should NOT use this
+                },
+                clear=False
+            ):
+                settings = Settings(llm_config_path=temp_file)
+                config = settings.get_llm_config("custom-openai")
+
+                # Should use CUSTOM_OPENAI_KEY (from api_key_env), not OPENAI_API_KEY
+                assert config.api_key == "custom-value"
+        finally:
+            os.unlink(temp_file)
+
+    def test_get_llm_config_custom_env_var_fallback_to_standard(self):
+        """Test fallback to standard env var when custom api_key_env is not set."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            content = {
+                'llm_providers': {
+                    'custom-openai': {
+                        'type': 'openai',
+                        'model': 'gpt-4-custom',
+                        'api_key_env': 'CUSTOM_OPENAI_KEY'
+                    }
+                }
+            }
+            import yaml
+            yaml.safe_dump(content, f)
+            temp_file = f.name
+
+        try:
+            # Don't set CUSTOM_OPENAI_KEY, but set OPENAI_API_KEY
+            with patch.dict(
+                os.environ,
+                {"OPENAI_API_KEY": "fallback-value"},
+                clear=False
+            ):
+                # Make sure CUSTOM_OPENAI_KEY is not set
+                env_clean = {k: v for k, v in os.environ.items() if k != "CUSTOM_OPENAI_KEY"}
+                env_clean["OPENAI_API_KEY"] = "fallback-value"
+
+                with patch.dict(os.environ, env_clean, clear=True):
+                    settings = Settings(llm_config_path=temp_file)
+                    config = settings.get_llm_config("custom-openai")
+
+                    # Should fall back to OPENAI_API_KEY (Settings field reads from env var)
+                    assert config.api_key == "fallback-value"
+        finally:
+            os.unlink(temp_file)
+
+    def test_get_llm_config_custom_env_var_whitespace_fallback(self):
+        """Test fallback when custom env var contains only whitespace."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            content = {
+                'llm_providers': {
+                    'custom-openai': {
+                        'type': 'openai',
+                        'model': 'gpt-4-custom',
+                        'api_key_env': 'CUSTOM_OPENAI_KEY'
+                    }
+                }
+            }
+            import yaml
+            yaml.safe_dump(content, f)
+            temp_file = f.name
+
+        try:
+            # Set custom env var to whitespace, standard env var to a value
+            with patch.dict(
+                os.environ,
+                {
+                    "CUSTOM_OPENAI_KEY": "   \t\n   ",  # Whitespace only
+                    "OPENAI_API_KEY": "fallback-value"
+                },
+                clear=False
+            ):
+                settings = Settings(llm_config_path=temp_file)
+                config = settings.get_llm_config("custom-openai")
+
+                # Should fall back when custom is whitespace-only
+                assert config.api_key == "fallback-value"
+        finally:
+            os.unlink(temp_file)
+
+    def test_get_llm_config_strips_env_var_whitespace(self):
+        """Test that environment variable values have whitespace stripped."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "  key-with-spaces  \n"}, clear=False):
+            settings = Settings()
+            config = settings.get_llm_config("google-default")
+
+            # Should strip whitespace
+            assert config.api_key == "key-with-spaces"
+
+    def test_get_llm_config_vertexai_provider_uses_gcp_env_vars(self):
+        """Test that VertexAI provider uses GCP standard env vars (project and location)."""
+        # Test with both env vars set
+        with patch.dict(os.environ, {
+            "GOOGLE_CLOUD_PROJECT": "my-project",
+            "GOOGLE_CLOUD_LOCATION": "us-central1"
+        }, clear=False):
+            settings = Settings()
+            config = settings.get_llm_config("vertexai-default")
+
+            # Should use env var values
+            assert config.project == "my-project"
+            assert config.location == "us-central1"
+
+        # Test with only project set (location should use default)
+        env_clean = {k: v for k, v in os.environ.items() if k not in ["GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"]}
+        with patch.dict(os.environ, {**env_clean, "GOOGLE_CLOUD_PROJECT": "test-project"}, clear=True):
+            settings = Settings()
+            config = settings.get_llm_config("vertexai-default")
+
+            # Should use env var for project and default for location
+            assert config.project == "test-project"
+            assert config.location == "us-east5"  # Default location
+
+        # Test without any env vars set (should use Settings field defaults)
+        env_clean = {k: v for k, v in os.environ.items() if k not in ["GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"]}
+        with patch.dict(os.environ, env_clean, clear=True):
+            settings = Settings()
+            config = settings.get_llm_config("vertexai-default")
+
+            # Should use Settings field defaults
+            assert config.project == ""  # google_cloud_project default
+            assert config.location == "us-east5"  # google_cloud_location default
+
+    def test_get_llm_config_vertexai_does_not_populate_api_key(self):
+        """Test that VertexAI provider does not populate api_key field."""
+        with patch.dict(os.environ, {
+            "GOOGLE_CLOUD_PROJECT": "my-project"
+        }, clear=False):
+            settings = Settings()
+            config = settings.get_llm_config("vertexai-default")
+
+            # api_key should remain None for VertexAI
+            assert config.api_key is None
+            assert config.project == "my-project"
+
+    def test_get_llm_config_vertexai_custom_provider_with_different_env_vars(self):
+        """Test custom VertexAI provider with custom env var names."""
+        from tarsy.models.llm_models import LLMProviderConfig, LLMProviderType
+        
+        # Create a custom VertexAI provider with different env var names
+        custom_provider = LLMProviderConfig(
+            type=LLMProviderType.VERTEXAI,
+            model="claude-sonnet-4-5@20250929",
+            project_env="CUSTOM_PROJECT",
+            location_env="CUSTOM_LOCATION"
+        )
+        
+        with patch.dict(os.environ, {
+            "CUSTOM_PROJECT": "custom-project",
+            "CUSTOM_LOCATION": "europe-west1"
+        }, clear=False):
+            # Mock get_builtin_llm_providers to include our custom provider
+            from tarsy.config.builtin_config import get_builtin_llm_providers
+            original_providers = get_builtin_llm_providers()
+            custom_providers = {**original_providers, "custom-vertexai": custom_provider}
+            
+            with patch('tarsy.config.settings.get_builtin_llm_providers', return_value=custom_providers):
+                settings = Settings()
+                config = settings.get_llm_config("custom-vertexai")
+
+                # Should use custom env var values
+                assert config.project == "custom-project"
+                assert config.location == "europe-west1"
+
+    def test_get_llm_config_vertexai_fallback_to_settings_fields(self):
+        """Test VertexAI provider falls back to Settings fields when env vars not set."""
+        # Clean environment
+        env_clean = {k: v for k, v in os.environ.items() if k not in ["GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"]}
+        
+        with patch.dict(os.environ, env_clean, clear=True):
+            # Set values directly on Settings fields
+            settings = Settings(
+                google_cloud_project="settings-project",
+                google_cloud_location="us-west2"
+            )
+            config = settings.get_llm_config("vertexai-default")
+
+            # Should use Settings field values
+            assert config.project == "settings-project"
+            assert config.location == "us-west2"
+
+    def test_get_llm_config_vertexai_env_var_takes_precedence_over_settings(self):
+        """Test that env vars take precedence over Settings fields for VertexAI."""
+        with patch.dict(os.environ, {
+            "GOOGLE_CLOUD_PROJECT": "env-project",
+            "GOOGLE_CLOUD_LOCATION": "env-location"
+        }, clear=False):
+            # Set different values on Settings fields
+            settings = Settings(
+                google_cloud_project="settings-project",
+                google_cloud_location="settings-location"
+            )
+            config = settings.get_llm_config("vertexai-default")
+
+            # Env vars should take precedence
+            assert config.project == "env-project"
+            assert config.location == "env-location"
+
 
 @pytest.mark.unit
 class TestBuiltinLLMProvidersConfiguration:
@@ -350,20 +595,61 @@ class TestBuiltinLLMProvidersConfiguration:
             assert provider_config.max_tool_result_tokens == expected_limit
     
     def test_builtin_providers_config_structure(self):
-        """Test that built-in provider configs have all required fields."""
+        """Test that built-in provider configs have appropriate fields."""
         from tarsy.config.builtin_config import BUILTIN_LLM_PROVIDERS
         
-        required_fields = {"type", "model", "api_key_env"}
-        
         for provider_name, config in BUILTIN_LLM_PROVIDERS.items():
-            # Check all required fields are present
-            for field in required_fields:
-                assert hasattr(config, field), f"Provider {provider_name} missing required field: {field}"
+            # All providers must have type and model
+            assert hasattr(config, 'type'), f"Provider {provider_name} missing type"
+            assert hasattr(config, 'model'), f"Provider {provider_name} missing model"
             
             # Check max_tool_result_tokens is present (EP-0016 requirement)
             assert hasattr(config, 'max_tool_result_tokens'), f"Provider {provider_name} missing max_tool_result_tokens"
             assert isinstance(config.max_tool_result_tokens, int), f"Provider {provider_name} max_tool_result_tokens must be int"
             assert config.max_tool_result_tokens > 0, f"Provider {provider_name} max_tool_result_tokens must be positive"
+
+    def test_vertexai_default_uses_project_and_location_env(self):
+        """Test that vertexai-default provider uses project_env and location_env."""
+        from tarsy.config.builtin_config import BUILTIN_LLM_PROVIDERS
+        from tarsy.models.llm_models import LLMProviderType
+        
+        vertexai_config = BUILTIN_LLM_PROVIDERS["vertexai-default"]
+        
+        # Should use GCP standard env vars
+        assert vertexai_config.project_env == "GOOGLE_CLOUD_PROJECT"
+        assert vertexai_config.location_env == "GOOGLE_CLOUD_LOCATION"
+        
+        # Should be VertexAI type
+        assert vertexai_config.type == LLMProviderType.VERTEXAI
+        
+        # Should NOT have api_key_env set (optional for VertexAI)
+        assert vertexai_config.api_key_env is None
+
+    def test_non_vertexai_providers_use_api_key_env(self):
+        """Test that non-VertexAI providers use api_key_env."""
+        from tarsy.config.builtin_config import BUILTIN_LLM_PROVIDERS
+        from tarsy.models.llm_models import LLMProviderType
+        
+        non_vertexai_providers = [
+            ("openai-default", LLMProviderType.OPENAI),
+            ("google-default", LLMProviderType.GOOGLE),
+            ("xai-default", LLMProviderType.XAI),
+            ("anthropic-default", LLMProviderType.ANTHROPIC),
+        ]
+        
+        for provider_name, expected_type in non_vertexai_providers:
+            config = BUILTIN_LLM_PROVIDERS[provider_name]
+            
+            # Should have api_key_env set
+            assert config.api_key_env is not None, f"{provider_name} should have api_key_env"
+            assert isinstance(config.api_key_env, str), f"{provider_name} api_key_env should be string"
+            
+            # Should be the expected type
+            assert config.type == expected_type
+            
+            # Should NOT have project_env or location_env
+            assert config.project_env is None, f"{provider_name} should not have project_env"
+            assert config.location_env is None, f"{provider_name} should not have location_env"
 
 
 @pytest.mark.unit
@@ -679,12 +965,19 @@ class TestSettingsAPIKeyStripping:
             ("anthropic_api_key", "   test-anthropic-key", "test-anthropic-key"),
             ("anthropic_api_key", "test-anthropic-key   ", "test-anthropic-key"),
             ("anthropic_api_key", "   test-anthropic-key   ", "test-anthropic-key"),
+            # GCP project and location tests
+            ("google_cloud_project", "   my-project", "my-project"),
+            ("google_cloud_project", "my-project   ", "my-project"),
+            ("google_cloud_project", "   my-project   ", "my-project"),
+            ("google_cloud_location", "   us-east5", "us-east5"),
+            ("google_cloud_location", "us-east5   ", "us-east5"),
+            ("google_cloud_location", "   us-east5   ", "us-east5"),
         ],
     )
     def test_api_key_whitespace_stripping(
         self, api_key_field: str, input_value: str, expected_value: str
     ) -> None:
-        """Test that API keys have whitespace stripped during Settings initialization."""
+        """Test that API keys and GCP config have whitespace stripped during Settings initialization."""
         settings = Settings(**{api_key_field: input_value})
         
         actual_value = getattr(settings, api_key_field)
