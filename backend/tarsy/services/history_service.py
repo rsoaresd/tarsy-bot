@@ -1122,6 +1122,29 @@ class HistoryService:
             _get_operation
         ) or []
     
+    async def has_llm_interactions(self, session_id: str) -> bool:
+        """
+        Check if session has any LLM interactions (lightweight existence check).
+        
+        Uses LIMIT 1 query for optimal performance - avoids loading full interaction history.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            True if session has at least one LLM interaction, False otherwise
+        """
+        def _has_operation():
+            with self.get_repository() as repo:
+                if not repo:
+                    return False
+                return repo.has_llm_interactions(session_id)
+        
+        return await self._retry_database_operation_async(
+            "has_llm_interactions",
+            _has_operation
+        ) or False
+    
     async def get_llm_interactions_for_session(self, session_id: str) -> List['LLMInteraction']:
         """Get all LLM interactions for a session."""
         def _get_operation():
@@ -1365,6 +1388,50 @@ class HistoryService:
             logger.info(f"Marked {count} chat(s) as interrupted for pod {pod_id}")
         
         return count or 0
+    
+    # Queue Management Methods
+    
+    def count_sessions_by_status(self, status: str) -> int:
+        """
+        Count sessions with given status across all pods.
+        
+        Args:
+            status: Session status to count (e.g., AlertSessionStatus.IN_PROGRESS.value)
+            
+        Returns:
+            Count of sessions with the given status
+        """
+        with self.get_repository() as repo:
+            if not repo:
+                return 0
+            return repo.count_sessions_by_status(status)
+    
+    def count_pending_sessions(self) -> int:
+        """
+        Count sessions in PENDING state (for queue size check).
+        
+        Returns:
+            Count of pending sessions
+        """
+        with self.get_repository() as repo:
+            if not repo:
+                return 0
+            return repo.count_pending_sessions()
+    
+    def claim_next_pending_session(self, pod_id: str) -> Optional[AlertSession]:
+        """
+        Atomically claim next PENDING session for this pod.
+        
+        Args:
+            pod_id: Pod identifier claiming the session
+            
+        Returns:
+            Claimed AlertSession if available, None otherwise
+        """
+        with self.get_repository() as repo:
+            if not repo:
+                return None
+            return repo.claim_next_pending_session(pod_id)
 
 
 # Global history service instance

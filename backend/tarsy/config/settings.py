@@ -176,11 +176,52 @@ class Settings(BaseSettings):
         description="Enable PostgreSQL connection pool pre-ping to validate connections"
     )
     
-    # Concurrency Control Configuration
+    # Alert Queue Configuration
     max_concurrent_alerts: int = Field(
         default=5,
-        description="Maximum number of alerts that can be processed concurrently"
+        description="Maximum alerts processing concurrently across ALL pods (global limit). "
+                    "Enforced via database-backed queue with SessionClaimWorker."
     )
+    max_queue_size: Optional[int] = Field(
+        default=None,
+        description="Maximum number of alerts waiting in PENDING state. "
+                    "None = unlimited queue. Rejects new alerts with HTTP 429 when full."
+    )
+    queue_claim_interval_seconds: float = Field(
+        default=1.0,
+        description="Interval between queue claim attempts (seconds)"
+    )
+    
+    @field_validator('max_concurrent_alerts', mode='after')
+    @classmethod
+    def validate_max_concurrent_alerts(cls, v: int) -> int:
+        """Ensure max_concurrent_alerts is a positive integer."""
+        if not isinstance(v, int) or v <= 0:
+            raise ValueError(
+                f"max_concurrent_alerts must be an integer greater than 0, got: {v}"
+            )
+        return v
+    
+    @field_validator('max_queue_size', mode='after')
+    @classmethod
+    def validate_max_queue_size(cls, v: Optional[int]) -> Optional[int]:
+        """Ensure max_queue_size is either None or a non-negative integer."""
+        if v is not None and (not isinstance(v, int) or v < 0):
+            raise ValueError(
+                f"max_queue_size must be None or an integer >= 0, got: {v}"
+            )
+        return v
+    
+    @field_validator('queue_claim_interval_seconds', mode='after')
+    @classmethod
+    def validate_queue_claim_interval_seconds(cls, v: float) -> float:
+        """Ensure queue_claim_interval_seconds is a positive float."""
+        if not isinstance(v, (int, float)) or v <= 0:
+            raise ValueError(
+                f"queue_claim_interval_seconds must be a number greater than 0, got: {v}"
+            )
+        return float(v)
+    
     alert_processing_timeout: int = Field(
         default=900,
         description="Timeout in seconds for processing a single alert (default: 15 minutes)"
