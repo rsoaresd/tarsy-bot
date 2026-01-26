@@ -328,7 +328,7 @@ class AlertService:
                 # Update history session with error
                 self.session_manager.update_session_error(chain_context.session_id, error_msg)
 
-                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
+                await self.slack_service.send_alert_error_notification(chain_context, error_msg=error_msg)
                     
                 return format_error_response(chain_context, error_msg)
             
@@ -421,7 +421,7 @@ class AlertService:
                     from tarsy.services.events.event_helpers import publish_session_timed_out
                     await publish_session_timed_out(chain_context.session_id)
                 
-                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
+                await self.slack_service.send_alert_error_notification(chain_context, error_msg=error_msg)
 
                 return format_error_response(chain_context, error_msg)
             
@@ -464,8 +464,11 @@ class AlertService:
                     executive_summary_error=summary_result.error
                 )
 
-                await self._send_slack_analysis_notification(chain_context, analysis=summary_result.summary)
-                
+                if summary_result.summary:
+                    await self.slack_service.send_alert_analysis_notification(chain_context, analysis=summary_result.summary)
+                elif summary_result.error:
+                    await self.slack_service.send_alert_error_notification(chain_context, error_msg=summary_result.error)
+
                 # Publish session.completed event
                 from tarsy.services.events.event_helpers import (
                     publish_session_completed,
@@ -497,7 +500,7 @@ class AlertService:
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(chain_context.session_id)
                 
-                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
+                await self.slack_service.send_alert_error_notification(chain_context, error_msg=error_msg)
 
                 return format_error_response(chain_context, error_msg)
                 
@@ -512,7 +515,7 @@ class AlertService:
             from tarsy.services.events.event_helpers import publish_session_failed
             await publish_session_failed(chain_context.session_id)
             
-            await self._send_slack_error_notification(chain_context, error_msg=error_msg)
+            await self.slack_service.send_alert_error_notification(chain_context, error_msg=error_msg)
 
             return format_error_response(chain_context, error_msg)
         
@@ -1242,7 +1245,7 @@ class AlertService:
                 from tarsy.services.events.event_helpers import publish_session_failed
                 await publish_session_failed(session_id)
 
-                await self._send_slack_error_notification(chain_context, error_msg=error_msg)
+                await self.slack_service.send_alert_error_notification(chain_context, error_msg=error_msg)
 
                 return format_error_response(chain_context, error_msg)
         
@@ -1800,54 +1803,6 @@ class AlertService:
         # If no analysis found, return a simple summary (this should be rare)
         return f"Chain {chain_context.chain_id} completed with {len(chain_context.stage_outputs)} stage outputs."
 
-    async def _send_slack_error_notification(
-        self,
-        chain_context: ChainContext,
-        error_msg: str,
-    ) -> None:
-        """
-        Helper to send Slack error notification for failed alert processing.
-        
-        Extracts necessary data from chain_context and delegates to slack_service.
-        The slack_service handles enabled/disabled state internally.
-        
-        Args:
-            chain_context: Chain execution context
-            error_msg: Error message to send
-        """
-        try:   
-            await self.slack_service.send_alert_error_notification(
-            session_id=chain_context.session_id,
-                error=error_msg,
-                slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint
-            )
-        except Exception as e:
-            logger.error(f"Error sending Slack error notification for session {chain_context.session_id}: {str(e)}")
-
-    async def _send_slack_analysis_notification(
-        self,
-        chain_context: ChainContext,
-        analysis: str,
-    ) -> None:
-        """
-        Helper to send Slack success notification for completed alert processing.
-        
-        Extracts necessary data from chain_context and delegates to slack_service.
-        The slack_service handles enabled/disabled state internally.
-        
-        Args:
-            chain_context: Chain execution context
-            analysis: Analysis result to send
-        """
-        try:
-            await self.slack_service.send_alert_analysis_notification(
-                session_id=chain_context.session_id,
-                analysis=analysis,
-                slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint
-            )   
-        except Exception as e:
-            logger.error(f"Error sending Slack analysis notification for session {chain_context.session_id}: {str(e)}")
-
     async def close(self):
         """
         Clean up resources.
@@ -1863,6 +1818,12 @@ class AlertService:
             # Safely close health check MCP client (handle both sync and async close methods)
             if hasattr(self.health_check_mcp_client, 'close'):
                 result = self.health_check_mcp_client.close()
+                if asyncio.iscoroutine(result):
+                    await result
+
+            # Safely close Slack service (handle both sync and async close methods)
+            if hasattr(self.slack_service, 'close'):
+                result = self.slack_service.close()
                 if asyncio.iscoroutine(result):
                     await result
             

@@ -6,6 +6,7 @@ Handles sending notifications to Slack channel for alert processing events.
 import time
 from typing import Any, Dict, Optional
 
+from tarsy.models.processing_context import ChainContext
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.errors import SlackApiError
 
@@ -55,9 +56,8 @@ class SlackService:
 
     async def send_alert_analysis_notification(
         self,
-        session_id: str,
+        chain_context: ChainContext,
         analysis: str,
-        slack_message_fingerprint: Optional[str] = None,
     ) -> bool:
         """
         Send notification for successful alert processing.
@@ -71,34 +71,33 @@ class SlackService:
             bool: True if notification sent successfully, False otherwise
         """
         return await self._send_alert_notification(
-            session_id=session_id,
-            slack_message_fingerprint=slack_message_fingerprint,
+            session_id=chain_context.session_id,
+            slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint,
             analysis=analysis,
-            error=None,
+            error_msg=None,
         )
 
     async def send_alert_error_notification(
         self,
-        session_id: str,
-        error: str,
-        slack_message_fingerprint: Optional[str] = None,
+        chain_context: ChainContext,
+        error_msg: str,
     ) -> bool:
         """
         Send notification for failed alert processing.
         
         Args:
             session_id: Session ID for tracking
-            error: Error message describing the failure
+            error_msg: Error message describing the failure
             slack_message_fingerprint: Optional fingerprint for threading
                     
         Returns:
             bool: True if notification sent successfully, False otherwise
         """
         return await self._send_alert_notification(
-            session_id=session_id,
-            slack_message_fingerprint=slack_message_fingerprint,
+            session_id=chain_context.session_id,
+            slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint,
             analysis=None,
-            error=error,
+            error_msg=error_msg,
         )
 
     async def _send_alert_notification(
@@ -106,7 +105,7 @@ class SlackService:
         session_id: str,
         slack_message_fingerprint: Optional[str] = None,
         analysis: Optional[str] = None,
-        error: Optional[str] = None,
+        error_msg: Optional[str] = None,
     ) -> bool:
         """
         Send notification for alert processing event.
@@ -131,14 +130,14 @@ class SlackService:
                     session_id=session_id,
                     slack_message_fingerprint=slack_message_fingerprint,
                     analysis=analysis,
-                    error=error,
+                    error_msg=error_msg,
                 )
 
             logger.info(f"Slack notification threading is not provided for session {session_id}, sending standard notification")
             return await self.reply_to_chat_directly(
                 session_id=session_id,
                 analysis=analysis,
-                error=error,
+                error_msg=error_msg,
             )
 
         except Exception as e:
@@ -169,7 +168,7 @@ class SlackService:
             history = await self.client.conversations_history(
                 channel=self.settings.slack_channel,
                 oldest=str(int(oldest)),
-                limit=20
+                limit=50
             )
 
             # Find message containing the slack_fingerprint identifier
@@ -200,7 +199,7 @@ class SlackService:
         session_id: str,
         slack_message_fingerprint: str,
         analysis: Optional[str] = None,
-        error: Optional[str] = None,
+        error_msg: Optional[str] = None,
     ) -> bool:
         """Reply directly to a message using its ts - no search needed."""
 
@@ -213,7 +212,7 @@ class SlackService:
                 return False
 
             channel_id = self.settings.slack_channel
-            message_data = self._format_alert_message(session_id=session_id, analysis=analysis, error=error)
+            message_data = self._format_alert_message(session_id=session_id, analysis=analysis, error_msg=error_msg)
             
             await self.client.chat_postMessage(
                 channel=channel_id,
@@ -230,7 +229,7 @@ class SlackService:
     async def reply_to_chat_directly(
         self,
         analysis: Optional[str] = None,
-        error: Optional[str] = None,
+        error_msg: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> bool:
         """
@@ -246,7 +245,7 @@ class SlackService:
         """
         try:
             channel_id = self.settings.slack_channel
-            message_data = self._format_alert_message(session_id=session_id, analysis=analysis, error=error)
+            message_data = self._format_alert_message(session_id=session_id, analysis=analysis, error_msg=error_msg)
                 
             await self.client.chat_postMessage(
                     channel=channel_id,
@@ -262,15 +261,15 @@ class SlackService:
             self,
             session_id: str,
             analysis: Optional[str] = None,
-            error: Optional[str] = None,
+            error_msg: Optional[str] = None,
         ) -> Dict[str, Any]:
             """Format alert message for Slack."""
             text_parts = []
 
             if analysis:
                 text_parts.extend(["*Analysis:*", "", analysis])
-            elif error:
-                text_parts.extend(["*Error:*", "", error])
+            elif error_msg:
+                text_parts.extend(["*Error:*", "", error_msg])
 
             dashboard_url = self.settings.cors_origins[0] if self.settings.cors_origins else "http://localhost:5173"
 
@@ -289,3 +288,10 @@ class SlackService:
                     }
                 ]
             }
+    
+    async def close(self):
+        """
+        Clean up resources.
+        """
+        if self.client:
+            await self.client.close()

@@ -37,12 +37,15 @@ class TestSlackNotificationIntegration:
         
         # Verify Slack notification was sent
         alert_service.slack_service.send_alert_analysis_notification.assert_called_once()
-        call_kwargs = alert_service.slack_service.send_alert_analysis_notification.call_args.kwargs
         
-        assert call_kwargs['session_id'] == chain_context.session_id
-        assert call_kwargs['slack_message_fingerprint'] == "test-fingerprint-abc123"
+        call_args = alert_service.slack_service.send_alert_analysis_notification.call_args
+        passed_chain_context = call_args.args[0]
+        call_kwargs = call_args.kwargs
+        
+        assert passed_chain_context.session_id == chain_context.session_id
+        assert passed_chain_context.processing_alert.slack_message_fingerprint == "test-fingerprint-abc123"
         assert 'analysis' in call_kwargs
-    
+
     @pytest.mark.asyncio
     async def test_failed_processing_sends_error_notification(
         self,
@@ -78,12 +81,15 @@ class TestSlackNotificationIntegration:
             
             # Verify Slack error notification was sent
             alert_service.slack_service.send_alert_error_notification.assert_called_once()
-            call_kwargs = alert_service.slack_service.send_alert_error_notification.call_args.kwargs
             
-            assert call_kwargs['session_id'] == chain_context.session_id
-            assert call_kwargs['slack_message_fingerprint'] == "test-fingerprint-abc123"
-            assert 'error' in call_kwargs
-            assert call_kwargs['error'] is not None
+            call_args = alert_service.slack_service.send_alert_error_notification.call_args
+            passed_chain_context = call_args.args[0]
+            call_kwargs = call_args.kwargs
+            
+            assert passed_chain_context.session_id == chain_context.session_id
+            assert passed_chain_context.processing_alert.slack_message_fingerprint == "test-fingerprint-abc123"
+            assert 'error_msg' in call_kwargs
+            assert call_kwargs['error_msg'] is not None
         finally:
             alert_service.agent_factory.create_agent.side_effect = original_create
             alert_service.agent_factory.get_agent_with_config.side_effect = original_get_with_config
