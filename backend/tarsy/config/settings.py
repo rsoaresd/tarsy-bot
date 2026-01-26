@@ -17,7 +17,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from tarsy.config.builtin_config import get_builtin_llm_providers
 from tarsy.models.llm_models import LLMProviderConfig, LLMProviderType
 
-
 def is_testing() -> bool:
     """Check if we're running in a test environment."""
     return (
@@ -52,13 +51,21 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     xai_api_key: str = Field(default="")
     anthropic_api_key: str = Field(default="")
+    google_cloud_project: str = Field(
+        default="",
+        description="GCP project ID for VertexAI (Claude on Vertex AI). Maps to GOOGLE_CLOUD_PROJECT env var (standard GCP)."
+    )
+    google_cloud_location: str = Field(
+        default="us-east5",
+        description="GCP region for VertexAI (Claude on Vertex AI). Maps to GOOGLE_CLOUD_LOCATION env var (standard GCP). Default: us-east5"
+    )
     llm_provider: str = Field(default="google-default")
     disable_ssl_verification: bool = Field(default=False, description="Disable SSL certificate verification for LLM API calls (use with caution)")
     
-    @field_validator('google_api_key', 'openai_api_key', 'xai_api_key', 'anthropic_api_key', mode='after')
+    @field_validator('google_api_key', 'openai_api_key', 'xai_api_key', 'anthropic_api_key', 'google_cloud_project', 'google_cloud_location', mode='after')
     @classmethod
     def strip_api_keys(cls, v: str) -> str:
-        """Strip whitespace from API keys to avoid gRPC metadata errors."""
+        """Strip whitespace from API keys and configuration values to avoid errors."""
         return v.strip() if v else v
     
     # LLM Configuration File Path
@@ -121,7 +128,7 @@ class Settings(BaseSettings):
         description="Database name"
     )
     history_retention_days: int = Field(
-        default=90,
+        default=365,
         description="Number of days to retain alert processing history data"
     )
     history_cleanup_interval_hours: int = Field(
@@ -169,11 +176,52 @@ class Settings(BaseSettings):
         description="Enable PostgreSQL connection pool pre-ping to validate connections"
     )
     
-    # Concurrency Control Configuration
+    # Alert Queue Configuration
     max_concurrent_alerts: int = Field(
         default=5,
-        description="Maximum number of alerts that can be processed concurrently"
+        description="Maximum alerts processing concurrently across ALL pods (global limit). "
+                    "Enforced via database-backed queue with SessionClaimWorker."
     )
+    max_queue_size: Optional[int] = Field(
+        default=None,
+        description="Maximum number of alerts waiting in PENDING state. "
+                    "None = unlimited queue. Rejects new alerts with HTTP 429 when full."
+    )
+    queue_claim_interval_seconds: float = Field(
+        default=1.0,
+        description="Interval between queue claim attempts (seconds)"
+    )
+    
+    @field_validator('max_concurrent_alerts', mode='after')
+    @classmethod
+    def validate_max_concurrent_alerts(cls, v: int) -> int:
+        """Ensure max_concurrent_alerts is a positive integer."""
+        if not isinstance(v, int) or v <= 0:
+            raise ValueError(
+                f"max_concurrent_alerts must be an integer greater than 0, got: {v}"
+            )
+        return v
+    
+    @field_validator('max_queue_size', mode='after')
+    @classmethod
+    def validate_max_queue_size(cls, v: Optional[int]) -> Optional[int]:
+        """Ensure max_queue_size is either None or a non-negative integer."""
+        if v is not None and (not isinstance(v, int) or v < 0):
+            raise ValueError(
+                f"max_queue_size must be None or an integer >= 0, got: {v}"
+            )
+        return v
+    
+    @field_validator('queue_claim_interval_seconds', mode='after')
+    @classmethod
+    def validate_queue_claim_interval_seconds(cls, v: float) -> float:
+        """Ensure queue_claim_interval_seconds is a positive float."""
+        if not isinstance(v, (int, float)) or v <= 0:
+            raise ValueError(
+                f"queue_claim_interval_seconds must be a number greater than 0, got: {v}"
+            )
+        return float(v)
+    
     alert_processing_timeout: int = Field(
         default=900,
         description="Timeout in seconds for processing a single alert (default: 15 minutes)"
@@ -345,21 +393,49 @@ class Settings(BaseSettings):
             raise ValueError(f"Unsupported LLM provider: {provider}. Available: {available}")
         
         base_config = self.llm_providers[provider]
-        
-        # Get API key based on provider type (not provider name)
         provider_type = base_config.type  # Type-safe field access
         
-        if provider_type == LLMProviderType.GOOGLE:
-            api_key = self.google_api_key
-        elif provider_type == LLMProviderType.OPENAI:
-            api_key = self.openai_api_key
-        elif provider_type == LLMProviderType.XAI:
-            api_key = self.xai_api_key
-        elif provider_type == LLMProviderType.ANTHROPIC:
-            api_key = self.anthropic_api_key
-        else:
-            api_key = ""
+        # Special handling for VertexAI - uses project/location instead of api_key
+        if provider_type == LLMProviderType.VERTEXAI:
+            # Read from project_env and location_env specified in config
+            project = ""
+            location = self.google_cloud_location  # Default
+            
+            if base_config.project_env:
+                project = os.getenv(base_config.project_env, "").strip()
+                if not project:
+                    project = self.google_cloud_project  # Fallback to Settings field
+            else:
+                project = self.google_cloud_project
+                
+            if base_config.location_env:
+                env_location = os.getenv(base_config.location_env, "").strip()
+                if env_location:
+                    location = env_location
+                # else: use default from Settings field
+            
+            return base_config.model_copy(update={
+                "project": project,
+                "location": location,
+                "disable_ssl_verification": self.disable_ssl_verification
+            })
         
+        # Standard handling for other providers (api_key)
+        api_key = ""
+        if base_config.api_key_env:
+            api_key = os.getenv(base_config.api_key_env, "").strip()
+        
+        # Fallback to provider-specific Settings fields if env var not set
+        if not api_key:
+            if provider_type == LLMProviderType.GOOGLE:
+                api_key = self.google_api_key
+            elif provider_type == LLMProviderType.OPENAI:
+                api_key = self.openai_api_key
+            elif provider_type == LLMProviderType.XAI:
+                api_key = self.xai_api_key
+            elif provider_type == LLMProviderType.ANTHROPIC:
+                api_key = self.anthropic_api_key
+
         # Create new config instance with runtime fields
         return base_config.model_copy(update={
             "api_key": api_key,
