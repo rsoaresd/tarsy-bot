@@ -863,7 +863,8 @@ class AlertService:
             alert_type=session.alert_type or "unknown",
             timestamp=session.started_at_us,
             runbook_url=session.runbook_url,
-            alert_data=session.alert_data
+            alert_data=session.alert_data,
+            slack_message_fingerprint=session.slack_message_fingerprint
         )
         
         chain_context = ChainContext.from_processing_alert(

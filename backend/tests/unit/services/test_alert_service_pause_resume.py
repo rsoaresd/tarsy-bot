@@ -32,6 +32,7 @@ class TestAlertServiceResumePausedSession:
         mock_session.alert_data = {"severity": "warning", "message": "Test alert"}
         mock_session.started_at_us = 1000000
         mock_session.runbook_url = None
+        mock_session.slack_message_fingerprint = None
         mock_session.mcp_selection = None
         mock_session.author = None
         mock_chain_config = MagicMock()
@@ -255,6 +256,7 @@ class TestAlertServiceResumePausedSession:
         mock_session.alert_data = {}
         mock_session.started_at_us = 1000000
         mock_session.runbook_url = None
+        mock_session.slack_message_fingerprint = None
         mock_session.mcp_selection = None
         mock_session.author = None
         mock_chain_config = MagicMock()
@@ -325,6 +327,7 @@ class TestAlertServiceResumePausedSession:
         mock_session.alert_data = {}
         mock_session.started_at_us = 1000000
         mock_session.runbook_url = None
+        mock_session.slack_message_fingerprint = None
         mock_session.mcp_selection = None
         mock_session.author = None
         mock_chain_config = MagicMock()
@@ -398,6 +401,7 @@ class TestAlertServiceResumePausedSession:
         mock_session.alert_data = {}
         mock_session.started_at_us = 1000000
         mock_session.runbook_url = None
+        mock_session.slack_message_fingerprint = None
         mock_session.mcp_selection = None
         mock_session.author = None
         mock_chain_config = MagicMock()
@@ -486,6 +490,7 @@ class TestAlertServiceResumePausedSession:
         mock_session.alert_data = {"severity": "critical", "environment": "production"}
         mock_session.started_at_us = 1000000
         mock_session.runbook_url = None
+        mock_session.slack_message_fingerprint = None
         mock_session.mcp_selection = None
         mock_session.author = None
         mock_chain_config = MagicMock()

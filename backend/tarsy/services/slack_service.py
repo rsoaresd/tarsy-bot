@@ -63,9 +63,8 @@ class SlackService:
         Send notification for successful alert processing.
         
         Args:
-            session_id: Session ID for tracking
+            chain_context: Chain context containing session ID and processing alert
             analysis: Analysis result from successful processing
-            slack_message_fingerprint: Optional fingerprint for threading
                     
         Returns:
             bool: True if notification sent successfully, False otherwise
@@ -86,9 +85,8 @@ class SlackService:
         Send notification for failed alert processing.
         
         Args:
-            session_id: Session ID for tracking
+            chain_context: Chain context containing session ID and processing alert
             error_msg: Error message describing the failure
-            slack_message_fingerprint: Optional fingerprint for threading
                     
         Returns:
             bool: True if notification sent successfully, False otherwise
