@@ -8,6 +8,7 @@ TARSy can send automatic notifications to Slack when alert processing completes 
 - [Setup Instructions](#setup-instructions)
 - [Configuration](#configuration)
 - [Slack Notification Threading](#slack-notification-threading)
+- [How to test locally](#how-to-test-locally)
 
 ## Overview
 
@@ -106,4 +107,39 @@ CORS_ORIGINS=<your-dashboard-url>
 ```
 
 ## Slack Notification Threading
-If you want to enable Slack notification threading, you need to provide the `slack_message_fingerprint`, when sending the request to TARSy.
+If you want to enable Slack notification threading, you need to provide the `slack_message_fingerprint`, when sending the request to TARSy. Be aware that the target message that you want TARSy to reply to should contain the same fingerprint.
+
+
+# How to test locally
+
+### Standard Slack Message Notification
+
+1. Follow the [Setup Instructions](#setup-instructions)
+2. Follow the [Configuration](#configuration)
+3. Deploy TARSy
+4. Manual Alert Submission in TARSy Dashboard
+5. Check the TARSy report in the Slack channel
+
+
+### Threaded Slack Message Notification
+
+1. Follow the [Setup Instructions](#setup-instructions)
+2. Follow the [Configuration](#configuration)
+3. Deploy TARSy
+4. Post a message containing a fingerprint to your Slack Channel. TARSy will search the last 24 hours of channel history to find a message with that fingerprint and reply to it.
+
+For example:
+```
+curl -k -X POST https://slack.api.slack.com/api/chat.postMessage \
+  -H "Authorization: Bearer <slack-app-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "channel": "'"<slack-channel>"'",
+    "text": "Fingerprint: 121212\nMessage: Namespace 'test' terminating"
+  }'
+```
+
+5. Manual Alert Submission in TARSy Dashboard. Do not forget to include the fingerprint
+<img width="1625" height="420" alt="image" src="https://github.com/user-attachments/assets/b8b77435-ae82-4236-b551-7a16cfcb7bd1" />
+
+6. Check the TARSy report in the Slack message thread
