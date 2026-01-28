@@ -12,12 +12,12 @@ TARSy can send automatic notifications to Slack when alert processing completes 
 
 ## Overview
 
-When configuration enabled, TARSy automatically:
+When configured, TARSy automatically:
 - Sends Slack messages to the target Slack channel
 - Includes analysis summary with link to detailed dashboard view
 - Reports errors when alert processing fails
 
-You can also enable Slack Notification Threading by setting the Slack message fingerprint, and TARSy will correlate message with the target message via fingerprint.
+You can also enable Slack Notification Threading by setting the Slack message fingerprint, and TARSy will correlate the message with the target message via fingerprint.
 
 
 **Default State**: Slack integration is **disabled by default**. TARSy will process alerts normally without sending any Slack notifications until you configure it.
@@ -110,7 +110,7 @@ CORS_ORIGINS=<your-dashboard-url>
 If you want to enable Slack notification threading, you need to provide the `slack_message_fingerprint`, when sending the request to TARSy. Be aware that the target message that you want TARSy to reply to should contain the same fingerprint.
 
 
-# How to test locally
+## How to test locally
 
 ### Standard Slack Message Notification
 
@@ -129,7 +129,7 @@ If you want to enable Slack notification threading, you need to provide the `sla
 4. Post a message containing a fingerprint to your Slack Channel. TARSy will search the last 24 hours of channel history to find a message with that fingerprint and reply to it.
 
 For example:
-```
+```bash
 curl -k -X POST https://slack.api.slack.com/api/chat.postMessage \
   -H "Authorization: Bearer <slack-app-token>" \
   -H "Content-Type: application/json" \
