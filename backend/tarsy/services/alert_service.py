@@ -503,7 +503,9 @@ class AlertService:
                 # Publish session.timed_out event
                 from tarsy.services.events.event_helpers import publish_session_timed_out
                 await publish_session_timed_out(chain_context.session_id)
-                
+
+                await self.slack_service.send_alert_error_notification(chain_context, error_msg=error_msg)
+
                 return format_error_response(chain_context, error_msg)
             else:
                 # Handle chain processing error
@@ -1253,6 +1255,12 @@ class AlertService:
                     publish_session_completed,
                 )
                 await publish_session_completed(session_id)
+
+                if summary_result.summary:
+                    await self.slack_service.send_alert_analysis_notification(chain_context, analysis=summary_result.summary)
+                elif summary_result.error:
+                    await self.slack_service.send_alert_error_notification(chain_context, error_msg=summary_result.error)
+
                 return final_result
             elif result.status == ChainStatus.PAUSED:
                 # Session paused again - this is normal, not an error
@@ -1277,6 +1285,9 @@ class AlertService:
                 )
                 from tarsy.services.events.event_helpers import publish_session_timed_out
                 await publish_session_timed_out(session_id)
+
+                await self.slack_service.send_alert_error_notification(chain_context, error_msg=error_msg)
+
                 return format_error_response(chain_context, error_msg)
             else:
                 # Chain failed for other reasons
