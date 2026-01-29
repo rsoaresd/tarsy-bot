@@ -20,6 +20,9 @@ import {
   IconButton,
   Autocomplete,
   Paper,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 import { 
   Send as SendIcon, 
@@ -27,7 +30,9 @@ import {
   Close as CloseIcon,
   Description as DescriptionIcon,
   TableChart as TableChartIcon,
-  InfoOutlined as InfoIcon
+  InfoOutlined as InfoIcon,
+  ExpandMore as ExpandMoreIcon,
+  TuneOutlined as TuneIcon
 } from '@mui/icons-material';
 
 import type { KeyValuePair, ManualAlertFormProps, MCPSelectionConfig } from '../types';
@@ -227,6 +232,9 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = () => {
   // Default alert type to use (set by resubmit or will use API default)
   const defaultAlertTypeRef = useRef<string | null>(null);
   
+  // Advanced options accordion state
+  const [advancedOptionsExpanded, setAdvancedOptionsExpanded] = useState(false);
+  
   // Re-submission state
   const [sourceSessionId, setSourceSessionId] = useState<string | null>(null);
   const [showResubmitBanner, setShowResubmitBanner] = useState(false);
@@ -286,6 +294,13 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = () => {
       // Set MCP selection
       if (state.mcpSelection) {
         setMcpSelection(state.mcpSelection);
+      }
+      
+      // Set Slack fingerprint if present (auto-fill from original alert)
+      if (state.slackFingerprint) {
+        setSlackMessageFingerprint(state.slackFingerprint);
+        // Expand advanced options to show the auto-filled field
+        setAdvancedOptionsExpanded(true);
       }
       
       // Process alert data
@@ -753,28 +768,69 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = () => {
                   />
                 )}
               />
-
-              {/* Slack Message Fingerprint Field */}
-              <TextField
-                fullWidth
-                label="Slack Message Fingerprint"
-                value={slackMessageFingerprint}
-                onChange={(e) => setSlackMessageFingerprint(e.target.value)}
-                placeholder="e.g., fingerprint-abc123"
-                helperText="Optional: Used for Slack notification threading"
-                disabled={loading}
-                variant="filled"
-                sx={{
-                  '& .MuiFilledInput-root': {
-                    borderRadius: 2,
-                    '&:before, &:after': {
-                      display: 'none'
-                    }
-                  }
-                }}
-              />
             </Stack>
 
+          </Box>
+
+          {/* Advanced Options Section */}
+          <Box sx={{ px: 4, py: 2 }}>
+            <Accordion
+              expanded={advancedOptionsExpanded}
+              onChange={() => setAdvancedOptionsExpanded(!advancedOptionsExpanded)}
+              sx={{
+                boxShadow: 'none',
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: '8px !important',
+                '&:before': {
+                  display: 'none',
+                },
+                '& .MuiAccordionSummary-root': {
+                  minHeight: 48,
+                  '&.Mui-expanded': {
+                    minHeight: 48,
+                  },
+                },
+              }}
+            >
+              <AccordionSummary
+                expandIcon={<ExpandMoreIcon />}
+                sx={{
+                  '& .MuiAccordionSummary-content': {
+                    alignItems: 'center',
+                    gap: 1,
+                  },
+                }}
+              >
+                <TuneIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
+                <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary' }}>
+                  Advanced Options
+                </Typography>
+                {slackMessageFingerprint && (
+                  <Typography variant="caption" sx={{ ml: 1, color: 'primary.main' }}>
+                    • Slack fingerprint set
+                  </Typography>
+                )}
+              </AccordionSummary>
+              <AccordionDetails sx={{ pt: 2 }}>
+                <TextField
+                  fullWidth
+                  label="Slack Message Fingerprint"
+                  value={slackMessageFingerprint}
+                  onChange={(e) => setSlackMessageFingerprint(e.target.value)}
+                  placeholder="e.g., fingerprint-abc123"
+                  helperText="Optional: Used for Slack notification threading to reply to specific alert messages"
+                  disabled={loading}
+                  variant="outlined"
+                  size="small"
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      fontSize: '0.875rem',
+                    },
+                  }}
+                />
+              </AccordionDetails>
+            </Accordion>
           </Box>
 
           {/* MCP Server Configuration (Advanced) */}
