@@ -20,9 +20,8 @@ import {
   IconButton,
   Autocomplete,
   Paper,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  Chip,
+  Collapse,
 } from '@mui/material';
 import { 
   Send as SendIcon, 
@@ -30,9 +29,7 @@ import {
   Close as CloseIcon,
   Description as DescriptionIcon,
   TableChart as TableChartIcon,
-  InfoOutlined as InfoIcon,
-  ExpandMore as ExpandMoreIcon,
-  TuneOutlined as TuneIcon
+  InfoOutlined as InfoIcon
 } from '@mui/icons-material';
 
 import type { KeyValuePair, ManualAlertFormProps, MCPSelectionConfig } from '../types';
@@ -772,65 +769,50 @@ const ManualAlertForm: React.FC<ManualAlertFormProps> = () => {
 
           </Box>
 
-          {/* Advanced Options Section */}
+          {/* Advanced Options Section - Hybrid of Option 2 & 4 */}
           <Box sx={{ px: 4, py: 2 }}>
-            <Accordion
-              expanded={advancedOptionsExpanded}
-              onChange={() => setAdvancedOptionsExpanded(!advancedOptionsExpanded)}
-              sx={{
-                boxShadow: 'none',
-                border: '1px solid',
-                borderColor: 'divider',
-                borderRadius: '8px !important',
-                '&:before': {
-                  display: 'none',
-                },
-                '& .MuiAccordionSummary-root': {
-                  minHeight: 48,
-                  '&.Mui-expanded': {
-                    minHeight: 48,
-                  },
-                },
-              }}
-            >
-              <AccordionSummary
-                expandIcon={<ExpandMoreIcon />}
-                sx={{
-                  '& .MuiAccordionSummary-content': {
-                    alignItems: 'center',
-                    gap: 1,
-                  },
+            {/* Helper text link (Option 4 style) */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography
+                variant="caption"
+                sx={{ 
+                  color: 'text.secondary', 
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.5,
+                  '&:hover': { color: 'primary.main' }
                 }}
+                onClick={() => setAdvancedOptionsExpanded(!advancedOptionsExpanded)}
               >
-                <TuneIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
-                <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary' }}>
-                  Advanced Options
-                </Typography>
-                {slackMessageFingerprint && (
-                  <Typography variant="caption" sx={{ ml: 1, color: 'primary.main' }}>
-                    • Slack fingerprint set
-                  </Typography>
-                )}
-              </AccordionSummary>
-              <AccordionDetails sx={{ pt: 2 }}>
+                {advancedOptionsExpanded ? '▼' : '▶'} Advanced: Slack Threading
+              </Typography>
+              {slackMessageFingerprint && !advancedOptionsExpanded && (
+                <Chip 
+                  label="Set" 
+                  size="small" 
+                  color="primary" 
+                  sx={{ height: 18, fontSize: '0.65rem' }}
+                />
+              )}
+            </Box>
+
+            {/* Slide down field with border (Option 2 style) */}
+            <Collapse in={advancedOptionsExpanded}>
+              <Box sx={{ mt: 2, pl: 2, borderLeft: '2px solid', borderColor: 'primary.main' }}>
                 <TextField
                   fullWidth
+                  size="small"
                   label="Slack Message Fingerprint"
                   value={slackMessageFingerprint}
                   onChange={(e) => setSlackMessageFingerprint(e.target.value)}
                   placeholder="e.g., fingerprint-abc123"
-                  helperText="Optional: Used for Slack notification threading to reply to specific alert messages"
+                  helperText="Links this analysis to a specific Slack message thread"
                   disabled={loading}
                   variant="outlined"
-                  size="small"
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      fontSize: '0.875rem',
-                    },
-                  }}
                 />
-              </AccordionDetails>
-            </Accordion>
+              </Box>
+            </Collapse>
           </Box>
 
           {/* MCP Server Configuration (Advanced) */}
