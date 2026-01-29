@@ -162,12 +162,16 @@ class SlackService:
             lookback_seconds = 24 * 3600
             oldest = current_time - lookback_seconds
 
+            logger.debug(f"Searching for fingerprint: '{slack_message_fingerprint}' (length: {len(slack_message_fingerprint)})")
+
             # Search for messages in the channel
             history = await self.client.conversations_history(
                 channel=self.settings.slack_channel,
                 oldest=str(int(oldest)),
                 limit=50
             )
+            
+            logger.debug(f"Found {len(history['messages'])} messages in channel history")
 
             # Find message containing the slack_fingerprint identifier
             for message in history["messages"]:
@@ -180,9 +184,14 @@ class SlackService:
                     attachment_text = attachment.get("text", "") + attachment.get("fallback", "")
                     message_text += " " + attachment_text
                 
-                # Search for fingerprint in combined text
-                if slack_message_fingerprint in message_text:
+                # Normalize whitespace and case for comparison (remove extra spaces, newlines, tabs)
+                normalized_message = " ".join(message_text.split()).lower()
+                normalized_fingerprint = " ".join(slack_message_fingerprint.split()).lower()
+                
+                # Search for fingerprint in combined text (normalized and case-insensitive)
+                if normalized_fingerprint in normalized_message:
                     logger.info(f"Found message with fingerprint {slack_message_fingerprint}: ts={message['ts']}")
+                    logger.debug(f"Matched in message text: {message_text[:200]}")
                     return message["ts"]
             
             logger.error(f"No message found with slack_message_fingerprint: {slack_message_fingerprint}")

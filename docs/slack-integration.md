@@ -107,7 +107,48 @@ CORS_ORIGINS=<your-dashboard-url>
 ```
 
 ## Slack Notification Threading
-If you want to enable Slack notification threading, you need to provide the `slack_message_fingerprint`, when sending the request to TARSy. Be aware that the target message that you want TARSy to reply to should contain the same fingerprint.
+
+If you want to enable Slack notification threading, you need to provide the `slack_message_fingerprint` when sending the request to TARSy.
+
+### Fingerprint Requirements
+
+The fingerprint matching is **flexible and forgiving**:
+
+- **Case-insensitive**: `"Fingerprint: 123"`, `"fingerprint: 123"`, and `"FINGERPRINT: 123"` all match
+- **Whitespace-normalized**: Extra spaces, newlines, and tabs are ignored
+- **Position-independent**: The fingerprint can appear anywhere in the message text or attachments
+
+**Examples of valid fingerprint placements in Slack messages:**
+
+```
+# Beginning of message
+Fingerprint: alert-123
+Alert: Pod CrashLooping in namespace prod
+
+# Middle of message  
+Alert: High CPU usage
+Fingerprint: alert-456
+Environment: production
+
+# End of message (with or without newline)
+Alert: Database connection timeout
+Environment: staging
+Fingerprint: alert-789
+```
+
+**All these variations will match `"fingerprint: alert-123"`:**
+- `"Fingerprint: alert-123"` ✓
+- `"fingerprint: alert-123"` ✓
+- `"FINGERPRINT: alert-123"` ✓
+- `"Fingerprint:    alert-123"` (extra spaces) ✓
+- `"Fingerprint: alert-123\n"` (with newline) ✓
+
+### How TARSy Finds Your Message
+
+1. Searches the last **24 hours** of channel history (up to 50 messages)
+2. Checks message text and all attachment fields (`text` and `fallback`)
+3. Uses case-insensitive matching with whitespace normalization
+4. Returns the first message that contains the fingerprint
 
 
 ## How to test locally
@@ -128,18 +169,23 @@ If you want to enable Slack notification threading, you need to provide the `sla
 3. Deploy TARSy
 4. Post a message containing a fingerprint to your Slack Channel. TARSy will search the last 24 hours of channel history to find a message with that fingerprint and reply to it.
 
-For example:
+**Example: Post a message with fingerprint**
 ```bash
 curl -k -X POST https://slack.api.slack.com/api/chat.postMessage \
   -H "Authorization: Bearer <slack-app-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "channel": "'"<slack-channel>"'",
-    "text": "Fingerprint: 121212\nMessage: Namespace 'test' terminating"
+    "text": "Fingerprint: 121212\nMessage: Namespace test terminating"
   }'
 ```
 
-5. Manual Alert Submission in TARSy Dashboard. Do not forget to include the fingerprint
+**Note**: The fingerprint format is flexible - case and whitespace don't matter. All these work:
+- `"Fingerprint: 121212"`
+- `"fingerprint: 121212"`  
+- `"FINGERPRINT:121212"`
+
+5. Manual Alert Submission in TARSy Dashboard. Include the same fingerprint value (case-insensitive):
 <img width="1625" height="420" alt="image" src="https://github.com/user-attachments/assets/b8b77435-ae82-4236-b551-7a16cfcb7bd1" />
 
 6. Check the TARSy report in the Slack message thread

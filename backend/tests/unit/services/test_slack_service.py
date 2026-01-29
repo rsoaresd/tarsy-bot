@@ -465,6 +465,163 @@ class TestFindAlertMessage:
         
         assert result is None
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "message_fingerprint,search_fingerprint,should_match",
+        [
+            ("Fingerprint: ABC123", "Fingerprint: ABC123", True),
+            ("Fingerprint: ABC123", "fingerprint: abc123", True),
+            ("fingerprint: abc123", "FINGERPRINT: ABC123", True),
+            ("FINGERPRINT: ABC123", "fingerprint: abc123", True),
+            ("FiNgErPrInT: AbC123", "fingerprint: abc123", True),
+            ("Fingerprint: ABC123", "Fingerprint: XYZ789", False),
+        ],
+    )
+    async def test_find_alert_message_case_insensitive(
+        self, 
+        slack_service_enabled, 
+        message_fingerprint: str,
+        search_fingerprint: str,
+        should_match: bool
+    ) -> None:
+        """Test fingerprint matching is case-insensitive."""
+        mock_history = {
+            "messages": [
+                {
+                    "ts": "1234567890.123456",
+                    "text": f"{message_fingerprint}\nAlert: Test alert",
+                    "attachments": []
+                }
+            ]
+        }
+        slack_service_enabled.client.conversations_history = AsyncMock(return_value=mock_history)
+        
+        with patch('time.time', return_value=1000000000.0):
+            result = await slack_service_enabled.find_alert_message(search_fingerprint)
+        
+        if should_match:
+            assert result == "1234567890.123456"
+        else:
+            assert result is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "message_fingerprint,search_fingerprint",
+        [
+            ("Fingerprint: ABC123\n", "Fingerprint: ABC123"),
+            ("Fingerprint: ABC123", "Fingerprint: ABC123\n"),
+            ("Fingerprint:    ABC123", "Fingerprint: ABC123"),
+            ("Fingerprint:\tABC123", "Fingerprint: ABC123"),
+            ("Fingerprint:  \n  ABC123", "Fingerprint: ABC123"),
+            ("  Fingerprint:  ABC123  ", "Fingerprint: ABC123"),
+            ("Fingerprint:\nABC123", "Fingerprint: ABC123"),
+        ],
+    )
+    async def test_find_alert_message_whitespace_normalization(
+        self, 
+        slack_service_enabled, 
+        message_fingerprint: str,
+        search_fingerprint: str
+    ) -> None:
+        """Test fingerprint matching normalizes whitespace (spaces, tabs, newlines)."""
+        mock_history = {
+            "messages": [
+                {
+                    "ts": "1234567890.123456",
+                    "text": f"Alert: Test alert\n{message_fingerprint}\nEnvironment: prod",
+                    "attachments": []
+                }
+            ]
+        }
+        slack_service_enabled.client.conversations_history = AsyncMock(return_value=mock_history)
+        
+        with patch('time.time', return_value=1000000000.0):
+            result = await slack_service_enabled.find_alert_message(search_fingerprint)
+        
+        assert result == "1234567890.123456"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "message_text,search_fingerprint",
+        [
+            ("Fingerprint: XYZ789\nAlert message", "fingerprint: xyz789"),
+            ("Alert: High CPU\nFINGERPRINT: XYZ789", "xyz789"),
+            ("Alert message\nEnvironment: prod\nFingerprint: XYZ789", "FINGERPRINT:   XYZ789"),
+            ("Fingerprint:XYZ789", "fingerprint:xyz789"),
+            ("FINGERPRINT:\n\nXYZ789", "fingerprint: xyz789"),
+        ],
+    )
+    async def test_find_alert_message_case_and_whitespace_combined(
+        self, 
+        slack_service_enabled, 
+        message_text: str,
+        search_fingerprint: str
+    ) -> None:
+        """Test fingerprint matching with both case-insensitivity and whitespace normalization."""
+        mock_history = {
+            "messages": [
+                {
+                    "ts": "1234567890.123456",
+                    "text": message_text,
+                    "attachments": []
+                }
+            ]
+        }
+        slack_service_enabled.client.conversations_history = AsyncMock(return_value=mock_history)
+        
+        with patch('time.time', return_value=1000000000.0):
+            result = await slack_service_enabled.find_alert_message(search_fingerprint)
+        
+        assert result == "1234567890.123456"
+
+    @pytest.mark.asyncio
+    async def test_find_alert_message_in_attachment_case_insensitive(self, slack_service_enabled) -> None:
+        """Test case-insensitive matching in message attachments."""
+        mock_history = {
+            "messages": [
+                {
+                    "ts": "1234567890.123456",
+                    "text": "Alert notification",
+                    "attachments": [
+                        {
+                            "text": "FINGERPRINT: ALERT-999\nMessage: Critical issue",
+                            "fallback": "Alert details"
+                        }
+                    ]
+                }
+            ]
+        }
+        slack_service_enabled.client.conversations_history = AsyncMock(return_value=mock_history)
+        
+        with patch('time.time', return_value=1000000000.0):
+            result = await slack_service_enabled.find_alert_message("fingerprint: alert-999")
+        
+        assert result == "1234567890.123456"
+
+    @pytest.mark.asyncio
+    async def test_find_alert_message_in_fallback_normalized(self, slack_service_enabled) -> None:
+        """Test whitespace normalization in attachment fallback field."""
+        mock_history = {
+            "messages": [
+                {
+                    "ts": "1234567890.123456",
+                    "text": "Alert",
+                    "attachments": [
+                        {
+                            "text": "",
+                            "fallback": "Fingerprint:  \n  ALERT-888  \nCritical"
+                        }
+                    ]
+                }
+            ]
+        }
+        slack_service_enabled.client.conversations_history = AsyncMock(return_value=mock_history)
+        
+        with patch('time.time', return_value=1000000000.0):
+            result = await slack_service_enabled.find_alert_message("fingerprint: alert-888")
+        
+        assert result == "1234567890.123456"
+
 
 @pytest.mark.unit
 class TestReplyDirectly:
