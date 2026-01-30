@@ -222,6 +222,7 @@ class TestSendAlertNotification:
             slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint,
             analysis="Alert analysis completed successfully",
             error_msg=None,
+            is_pause=False,
         )
         slack_service_enabled.reply_to_chat_directly.assert_not_called()
     
@@ -239,7 +240,27 @@ class TestSendAlertNotification:
             session_id=chain_context.session_id,
             slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint,
             analysis=None,
-            error_msg="Processing failed: timeout"
+            error_msg="Processing failed: timeout",
+            is_pause=False,
+        )
+        slack_service_enabled.reply_to_chat_directly.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_alert_notification_with_pause_with_threading(self, slack_service_enabled, create_chain_context) -> None:
+        """Test sending alert notification for paused session."""
+        slack_service_enabled.post_threaded_reply = AsyncMock(return_value=True)
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=False)
+
+        chain_context = create_chain_context(slack_message_fingerprint="alert-fingerprint-456")
+        result = await slack_service_enabled.send_alert_paused_notification(chain_context, pause_message="Session paused after 10 iterations")
+        
+        assert result is True
+        slack_service_enabled.post_threaded_reply.assert_called_once_with(
+            session_id=chain_context.session_id,
+            slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint,
+            analysis="Session paused after 10 iterations",
+            error_msg=None,
+            is_pause=True,
         )
         slack_service_enabled.reply_to_chat_directly.assert_not_called()
 
@@ -257,6 +278,26 @@ class TestSendAlertNotification:
             session_id=chain_context.session_id,
             analysis="Alert analysis completed successfully",
             error_msg=None,
+            is_pause=False,
+        )
+
+        slack_service_enabled.post_threaded_reply.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_alert_notification_with_pause_without_threading(self, slack_service_enabled, create_chain_context) -> None:
+        """Test paused alert notification without threading."""
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=True)
+        slack_service_enabled.post_threaded_reply = AsyncMock(return_value=False)
+        
+        chain_context = create_chain_context(slack_message_fingerprint=None)
+        result = await slack_service_enabled.send_alert_paused_notification(chain_context, pause_message="Session paused - resume to continue")
+        
+        assert result is True
+        slack_service_enabled.reply_to_chat_directly.assert_called_once_with(
+            session_id=chain_context.session_id,
+            analysis="Session paused - resume to continue",
+            error_msg=None,
+            is_pause=True,
         )
 
         slack_service_enabled.post_threaded_reply.assert_not_called() 
@@ -285,6 +326,7 @@ class TestSendAlertNotification:
             session_id=chain_context.session_id,
             analysis="test analysis",
             error_msg=None,
+            is_pause=False,
         )
     
     @pytest.mark.asyncio
@@ -300,6 +342,7 @@ class TestSendAlertNotification:
             session_id=chain_context.session_id,
             analysis="test analysis",
             error_msg=None,
+            is_pause=False,
         )
 
     @pytest.mark.asyncio
@@ -315,6 +358,7 @@ class TestSendAlertNotification:
             session_id=chain_context.session_id,
             analysis="test analysis",
             error_msg=None,
+            is_pause=False,
         )
 
     
@@ -332,6 +376,7 @@ class TestSendAlertNotification:
             slack_message_fingerprint="unknown-fingerprint",
             analysis="test analysis",
             error_msg=None,
+            is_pause=False,
         )
     
     @pytest.mark.asyncio
@@ -355,6 +400,62 @@ class TestSendAlertNotification:
         result = await slack_service_enabled.send_alert_analysis_notification(chain_context, analysis="test analysis")
         
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_alert_paused_notification_disabled(self, mock_settings_disabled, create_chain_context) -> None:
+        """Test paused notification returns False when Slack is disabled."""
+        with patch('tarsy.services.slack_service.AsyncWebClient'):
+            service = SlackService(mock_settings_disabled)
+            
+            chain_context = create_chain_context(slack_message_fingerprint="test-fingerprint")
+            result = await service.send_alert_paused_notification(chain_context, pause_message="test pause")
+            
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_alert_started_notification_with_fingerprint(self, slack_service_enabled, create_chain_context) -> None:
+        """Test sending started notification with fingerprint (Slack-originated alert)."""
+        slack_service_enabled.post_threaded_reply = AsyncMock(return_value=True)
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=False)
+        
+        chain_context = create_chain_context(slack_message_fingerprint="alert-fingerprint-789")
+        result = await slack_service_enabled.send_alert_started_notification(chain_context)
+        
+        assert result is True
+        slack_service_enabled.post_threaded_reply.assert_called_once()
+        # Verify the start message contains expected text
+        call_args = slack_service_enabled.post_threaded_reply.call_args
+        assert call_args[1]['session_id'] == chain_context.session_id
+        assert call_args[1]['slack_message_fingerprint'] == "alert-fingerprint-789"
+        assert "Processing alert started" in call_args[1]['analysis']
+        assert call_args[1]['error_msg'] is None
+        
+        slack_service_enabled.reply_to_chat_directly.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_alert_started_notification_without_fingerprint(self, slack_service_enabled, create_chain_context) -> None:
+        """Test started notification is skipped when no fingerprint (non-Slack alert)."""
+        slack_service_enabled.post_threaded_reply = AsyncMock(return_value=True)
+        slack_service_enabled.reply_to_chat_directly = AsyncMock(return_value=True)
+        
+        chain_context = create_chain_context(slack_message_fingerprint=None)
+        result = await slack_service_enabled.send_alert_started_notification(chain_context)
+        
+        # Should return False and skip notification
+        assert result is False
+        slack_service_enabled.post_threaded_reply.assert_not_called()
+        slack_service_enabled.reply_to_chat_directly.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_alert_started_notification_disabled(self, mock_settings_disabled, create_chain_context) -> None:
+        """Test started notification returns False when Slack is disabled."""
+        with patch('tarsy.services.slack_service.AsyncWebClient'):
+            service = SlackService(mock_settings_disabled)
+            
+            chain_context = create_chain_context(slack_message_fingerprint="test-fingerprint")
+            result = await service.send_alert_started_notification(chain_context)
+            
+            assert result is False
 
 
 @pytest.mark.unit
@@ -821,7 +922,7 @@ class TestMessageFormatting:
         
         # Verify content
         attachment = result['attachments'][0]
-        assert attachment['color'] == "danger"
+        assert attachment['color'] == "good"
         assert "*Analysis:*" in attachment['text']
         assert "Alert resolved: Pod restarted successfully" in attachment['text']
         assert "*View Analysis Details:* http://localhost:5173/sessions/test-session-123" in attachment['text']
@@ -838,3 +939,17 @@ class TestMessageFormatting:
         assert "*Error:*" in attachment['text']
         assert "Connection timeout to Kubernetes API" in attachment['text']
         assert "*View Analysis Details:* http://localhost:5173/sessions/test-session-456" in attachment['text']
+
+    def test_format_alert_message_with_pause(self, slack_service_enabled) -> None:
+        """Test formatting message with pause status."""
+        result = slack_service_enabled._format_alert_message(
+            session_id="test-session-789",
+            analysis="Session paused after 10 iterations - resume to continue",
+            is_pause=True
+        )
+        
+        attachment = result['attachments'][0]
+        assert attachment['color'] == "warning"
+        assert "*Analysis:*" in attachment['text']
+        assert "Session paused after 10 iterations - resume to continue" in attachment['text']
+        assert "*View Analysis Details:* http://localhost:5173/sessions/test-session-789" in attachment['text']

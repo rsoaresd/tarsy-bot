@@ -1331,8 +1331,10 @@ def alert_service_with_slack(alert_service, mock_slack_settings_enabled):
         slack_service.enabled = True
         
         # Mock the send_alert notification methods to track calls
+        slack_service.send_alert_started_notification = AsyncMock(return_value=True)
         slack_service.send_alert_analysis_notification = AsyncMock(return_value=True)
         slack_service.send_alert_error_notification = AsyncMock(return_value=True)
+        slack_service.send_alert_paused_notification = AsyncMock(return_value=True)
         
         # Mock internal Slack service methods
         slack_service.find_alert_message = AsyncMock(return_value="1234567890.123456")

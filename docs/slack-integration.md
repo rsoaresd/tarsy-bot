@@ -1,6 +1,6 @@
 # Slack Integration
 
-TARSy can send automatic notifications to Slack when alert processing completes or fails. This feature is **disabled by default** and requires configuration to enable.
+TARSy can send automatic notifications to Slack when alert processing completes, fails, or pauses. This feature is **disabled by default** and requires configuration to enable.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -14,8 +14,10 @@ TARSy can send automatic notifications to Slack when alert processing completes 
 
 When configured, TARSy automatically:
 - Sends Slack messages to the target Slack channel
+- Notifies when alert processing starts (for Slack-originated alerts only)
 - Includes analysis summary with link to detailed dashboard view
 - Reports errors when alert processing fails
+- Notifies when alert processing pauses (hit max iterations)
 
 You can also enable Slack Notification Threading by setting the Slack message fingerprint, and TARSy will correlate the message with the target message via fingerprint.
 
@@ -29,16 +31,23 @@ You can also enable Slack Notification Threading by setting the Slack message fi
 1. **Alert arrives**
 2. **TARSy processes** the alert
 3. **After processing**, TARSy posts a Slack message to the target channel with:
-   - Analysis summary or error message
+   - Analysis summary (success - green color)
+   - Error message (failure - red color)
+   - Pause message (paused - yellow color)
    - Link to full analysis in dashboard (`<dashboard-url>/sessions/<session-id>`)
+
+**Note**: Start notifications are NOT sent for standard (non-threaded) alerts to avoid unnecessary noise.
 
 ### Threaded Slack Message Notification
 1. **Alert arrives** with a Slack message fingerprint (unique identifier)
-2. **TARSy processes** the alert
-3. **After processing**, TARSy searches the Slack channel history (last 24 hours) for the message with the fingerprint
-4. **Finds target message**, posts a threaded reply with:
-   - Analysis summary or error message
+2. **TARSy starts processing** and immediately sends a start notification to the thread
+3. **TARSy processes** the alert
+4. **After processing**, TARSy searches the Slack channel history (last 24 hours) for the message with the fingerprint
+5. **Finds target message**, posts a threaded reply with:
+   - Analysis summary, error message, or pause notification
    - Link to full analysis in dashboard (`<dashboard-url>/sessions/<session-id>`)
+
+**Note**: Start notifications are ONLY sent for alerts with a Slack message fingerprint (Slack-originated alerts). This provides immediate feedback in the original Slack thread that processing has begun.
 
 ## Setup Instructions
 
@@ -189,3 +198,28 @@ curl -k -X POST https://slack.api.slack.com/api/chat.postMessage \
 <img width="1625" height="420" alt="image" src="https://github.com/user-attachments/assets/b8b77435-ae82-4236-b551-7a16cfcb7bd1" />
 
 6. Check the TARSy report in the Slack message thread
+
+### Start Notifications
+
+When an alert with a Slack message fingerprint arrives (Slack-originated alert):
+1. TARSy immediately sends a start notification to the Slack thread with a green color
+2. The message includes:
+   - Start indicator (🔄) showing processing has begun
+   - Message: "Processing alert started. This may take a few minutes..."
+   - Link to session details for real-time monitoring
+
+**Key behaviors:**
+- **Only sent for Slack-originated alerts** (those with a `slack_message_fingerprint`)
+- **Not sent for standard alerts** (submitted via API/dashboard without a fingerprint)
+- Provides immediate feedback in the Slack thread
+- Allows users to track the processing lifecycle: START → (PAUSE if needed) → COMPLETE/FAIL
+
+### Pause Notifications
+
+When a session reaches its maximum iteration limit and pauses:
+1. TARSy sends a pause notification to Slack with a yellow (warning) color
+2. The message includes:
+   - Pause reason (e.g., "Stage paused after 10 iterations")
+   - Instructions to resume via the dashboard
+   - Link to session details for resuming
+3. After resuming the session and it completes or fails, a final notification is sent

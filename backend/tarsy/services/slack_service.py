@@ -22,8 +22,10 @@ class SlackService:
     Service for sending notifications to Slack channels.
     
     Supports:
+    - Alert processing started notifications (only for Slack-originated alerts)
     - Alert processing completion notifications
-    - Alert processing failure notifications  
+    - Alert processing failure notifications
+    - Alert processing paused notifications
     - System error notifications
     """
 
@@ -98,12 +100,65 @@ class SlackService:
             error_msg=error_msg,
         )
 
+    async def send_alert_paused_notification(
+        self,
+        chain_context: ChainContext,
+        pause_message: str,
+    ) -> bool:
+        """
+        Send notification for paused alert processing.
+        
+        Args:
+            chain_context: Chain context containing session ID and processing alert
+            pause_message: Message describing the pause state
+                    
+        Returns:
+            bool: True if notification sent successfully, False otherwise
+        """
+        return await self._send_alert_notification(
+            session_id=chain_context.session_id,
+            slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint,
+            analysis=pause_message,
+            error_msg=None,
+            is_pause=True,
+        )
+
+    async def send_alert_started_notification(
+        self,
+        chain_context: ChainContext,
+    ) -> bool:
+        """
+        Send notification for started alert processing.
+        
+        Only sends if a slack_message_fingerprint is present (meaning the alert
+        originated from Slack). This provides immediate feedback in the Slack thread.
+        
+        Args:
+            chain_context: Chain context containing session ID and processing alert
+                    
+        Returns:
+            bool: True if notification sent successfully, False otherwise
+        """
+        # Only send start notification if fingerprint exists
+        if not chain_context.processing_alert.slack_message_fingerprint:
+            logger.debug("No Slack fingerprint - skipping start notification")
+            return False
+            
+        start_message = "🔄 Processing alert started. This may take a few minutes..."
+        return await self._send_alert_notification(
+            session_id=chain_context.session_id,
+            slack_message_fingerprint=chain_context.processing_alert.slack_message_fingerprint,
+            analysis=start_message,
+            error_msg=None,
+        )
+
     async def _send_alert_notification(
         self,
         session_id: str,
         slack_message_fingerprint: Optional[str] = None,
         analysis: Optional[str] = None,
         error_msg: Optional[str] = None,
+        is_pause: bool = False,
     ) -> bool:
         """
         Send notification for alert processing event.
@@ -112,7 +167,8 @@ class SlackService:
             session_id: Session ID for tracking
             slack_message_fingerprint: Slack message fingerprint for Slack notification threading
             analysis: Analysis result (for successful processing)
-            error: Error message (for failed processing)
+            error_msg: Error message (for failed processing)
+            is_pause: Whether this is a pause notification (for color coding)
                     
         Returns:
             bool: True if notification sent successfully, False otherwise
@@ -129,6 +185,7 @@ class SlackService:
                     slack_message_fingerprint=slack_message_fingerprint,
                     analysis=analysis,
                     error_msg=error_msg,
+                    is_pause=is_pause,
                 )
 
             logger.info(f"Slack notification threading is not provided for session {session_id}, sending standard notification")
@@ -136,6 +193,7 @@ class SlackService:
                 session_id=session_id,
                 analysis=analysis,
                 error_msg=error_msg,
+                is_pause=is_pause,
             )
 
         except Exception as e:
@@ -207,6 +265,7 @@ class SlackService:
         slack_message_fingerprint: str,
         analysis: Optional[str] = None,
         error_msg: Optional[str] = None,
+        is_pause: bool = False,
     ) -> bool:
         """Reply directly to a message using its ts - no search needed."""
 
@@ -219,7 +278,12 @@ class SlackService:
                 return False
 
             channel_id = self.settings.slack_channel
-            message_data = self._format_alert_message(session_id=session_id, analysis=analysis, error_msg=error_msg)
+            message_data = self._format_alert_message(
+                session_id=session_id,
+                analysis=analysis,
+                error_msg=error_msg,
+                is_pause=is_pause
+            )
             
             await self.client.chat_postMessage(
                 channel=channel_id,
@@ -238,6 +302,7 @@ class SlackService:
         analysis: Optional[str] = None,
         error_msg: Optional[str] = None,
         session_id: Optional[str] = None,
+        is_pause: bool = False,
     ) -> bool:
         """
         Reply in a chat conversation thread.
@@ -246,13 +311,19 @@ class SlackService:
             thread_ts: Thread timestamp to reply to
             message: Chat message content
             session_id: Optional session ID for dashboard link
+            is_pause: Whether this is a pause notification (for color coding)
             
         Returns:
             True if successful, False otherwise
         """
         try:
             channel_id = self.settings.slack_channel
-            message_data = self._format_alert_message(session_id=session_id, analysis=analysis, error_msg=error_msg)
+            message_data = self._format_alert_message(
+                session_id=session_id,
+                analysis=analysis,
+                error_msg=error_msg,
+                is_pause=is_pause
+            )
                 
             await self.client.chat_postMessage(
                     channel=channel_id,
@@ -269,6 +340,7 @@ class SlackService:
             session_id: str,
             analysis: Optional[str] = None,
             error_msg: Optional[str] = None,
+            is_pause: bool = False,
         ) -> Dict[str, Any]:
             """Format alert message for Slack."""
             text_parts = []
@@ -285,11 +357,21 @@ class SlackService:
                 f"*View Analysis Details:* {dashboard_url}/sessions/{session_id}"
             ])
 
+            # Determine color based on content type
+            if error_msg:
+                color = "danger"  # Red for errors
+            elif is_pause:
+                color = "warning"  # Yellow for pauses (needs attention)
+            elif analysis:
+                color = "good"  # Green for success/start messages
+            else:
+                color = "warning"  # Yellow fallback
+
             return {
                 "channel": self.settings.slack_channel,
                 "attachments": [
                     {
-                        "color": "danger",
+                        "color": color,
                         "text": "\n".join(text_parts),
                         "mrkdwn_in": ["text"]
                     }

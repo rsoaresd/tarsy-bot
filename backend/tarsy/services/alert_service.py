@@ -374,6 +374,9 @@ class AlertService:
                 chain_context.processing_alert.alert_type
             )
             
+            # Send Slack notification for start (only if fingerprint exists)
+            await self.slack_service.send_alert_started_notification(chain_context)
+            
             # Step 4: Extract runbook from alert data and download once per chain
             # If no runbook URL provided, use the built-in default runbook
             runbook = chain_context.processing_alert.runbook_url
@@ -482,6 +485,10 @@ class AlertService:
                 
                 # Return a response indicating pause (not an error)
                 pause_message = chain_result.final_analysis or "Session paused - waiting for user to resume"
+                
+                # Send Slack notification for pause
+                await self.slack_service.send_alert_paused_notification(chain_context, pause_message)
+                
                 return format_chain_success_response(
                     chain_context,
                     chain_definition,
@@ -1197,6 +1204,10 @@ class AlertService:
                     )
                     await publish_session_paused(session_id)
                     
+                    # Send Slack notification for pause
+                    pause_message = f"Parallel stage '{paused_stage.stage_name}' paused again - resume to continue"
+                    await self.slack_service.send_alert_paused_notification(chain_context, pause_message)
+                    
                     result = ChainExecutionResult(
                         status=ChainStatus.PAUSED,
                         final_analysis=f"Parallel stage '{paused_stage.stage_name}' paused again",
@@ -1269,6 +1280,10 @@ class AlertService:
                 logger.info(f"Resumed session {session_id} paused again (hit max iterations)")
                 # Format the pause message consistently with initial execution path
                 pause_message = result.final_analysis or "Session paused again - waiting for user to resume"
+                
+                # Send Slack notification for pause
+                await self.slack_service.send_alert_paused_notification(chain_context, pause_message)
+                
                 return format_chain_success_response(
                     chain_context,
                     chain_definition,
@@ -1527,6 +1542,10 @@ class AlertService:
                             )
                             await publish_session_paused(chain_context.session_id, pause_metadata=pause_meta_dict)
                             
+                            # Send Slack notification for pause
+                            pause_message = f"Parallel stage '{stage.name}' paused - one or more agents need more iterations. Resume to continue."
+                            await self.slack_service.send_alert_paused_notification(chain_context, pause_message)
+                            
                             # Return paused result (not failed)
                             return ChainExecutionResult(
                                 status=ChainStatus.PAUSED,
@@ -1711,6 +1730,10 @@ class AlertService:
                             publish_session_paused,
                         )
                         await publish_session_paused(chain_context.session_id, pause_metadata=pause_meta_dict)
+                        
+                        # Send Slack notification for pause
+                        pause_message = f"Stage '{stage.name}' paused after {e.iteration} iterations. Resume to continue."
+                        await self.slack_service.send_alert_paused_notification(chain_context, pause_message)
                         
                         # Return paused result (not failed)
                         return ChainExecutionResult(

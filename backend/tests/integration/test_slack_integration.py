@@ -3,7 +3,7 @@ Integration tests for integration between AlertService and SlackService.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from tests.conftest import alert_to_api_format
 
@@ -14,8 +14,10 @@ class TestSlackNotificationIntegration:
     Test integration between AlertService and SlackService.
     
     Verifies that:
+    - Started processing triggers Slack notification with start message (if fingerprint exists)
     - Successful processing triggers Slack notification with summary
     - Failed processing triggers Slack notification with error
+    - Paused processing triggers Slack notification with pause message
     """
     
     @pytest.mark.asyncio
@@ -35,7 +37,14 @@ class TestSlackNotificationIntegration:
         assert result is not None
         assert "# Alert Analysis Report" in result
         
-        # Verify Slack notification was sent
+        # Verify Slack start notification was sent (fingerprint exists)
+        alert_service.slack_service.send_alert_started_notification.assert_called_once()
+        start_call_args = alert_service.slack_service.send_alert_started_notification.call_args
+        start_chain_context = start_call_args.args[0]
+        assert start_chain_context.session_id == chain_context.session_id
+        assert start_chain_context.processing_alert.slack_message_fingerprint == "test-fingerprint-abc123"
+        
+        # Verify Slack completion notification was sent
         alert_service.slack_service.send_alert_analysis_notification.assert_called_once()
         
         call_args = alert_service.slack_service.send_alert_analysis_notification.call_args
@@ -78,6 +87,13 @@ class TestSlackNotificationIntegration:
             
             # Verify error response
             assert "# Alert Processing Error" in result
+            
+            # Verify Slack start notification was sent (fingerprint exists)
+            alert_service.slack_service.send_alert_started_notification.assert_called_once()
+            start_call_args = alert_service.slack_service.send_alert_started_notification.call_args
+            start_chain_context = start_call_args.args[0]
+            assert start_chain_context.session_id == chain_context.session_id
+            assert start_chain_context.processing_alert.slack_message_fingerprint == "test-fingerprint-abc123"
             
             # Verify Slack error notification was sent
             alert_service.slack_service.send_alert_error_notification.assert_called_once()
