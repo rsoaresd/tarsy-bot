@@ -249,7 +249,7 @@ class SlackService:
                 # Search for fingerprint in combined text (normalized and case-insensitive)
                 if normalized_fingerprint in normalized_message:
                     logger.info(f"Found message with fingerprint {slack_message_fingerprint}: ts={message['ts']}")
-                    logger.debug(f"Matched in message text: {message_text[:200]}")
+                    logger.debug(f"Matched message at timestamp: {message['ts']}")
                     return message["ts"]
             
             logger.error(f"No message found with slack_message_fingerprint: {slack_message_fingerprint}")

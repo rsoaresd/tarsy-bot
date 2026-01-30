@@ -904,7 +904,7 @@ class TestMessageFormatting:
     
     Message Structure:
     - Uses Slack attachments API
-    - Color: "danger" for all messages
+    - Colors: "good" for analysis messages, "danger" for error messages, "warning" for pause messages
     - Text: Formatted with markdown
     - Includes dashboard link for detailed analysis
     """

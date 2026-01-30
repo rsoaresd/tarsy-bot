@@ -61,7 +61,7 @@ You can also enable Slack Notification Threading by setting the Slack message fi
 In your app's **OAuth & Permissions** page, under **Bot Token Scopes**, add these scopes:
 
 | Scope | Purpose |
-|-------|---------|
+| ------- | --------- |
 | `channels:history` | Read messages in public channels (to find original alerts) |
 | `groups:history` | Read messages in private channels |
 | `chat:write` | Post messages and replies |
@@ -178,7 +178,8 @@ Fingerprint: alert-789
 3. Deploy TARSy
 4. Post a message containing a fingerprint to your Slack Channel. TARSy will search the last 24 hours of channel history to find a message with that fingerprint and reply to it.
 
-**Example: Post a message with fingerprint**
+#### Example: Post a message with fingerprint
+
 ```bash
 curl -k -X POST https://slack.api.slack.com/api/chat.postMessage \
   -H "Authorization: Bearer <slack-app-token>" \

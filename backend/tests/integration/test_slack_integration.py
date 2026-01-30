@@ -3,7 +3,7 @@ Integration tests for integration between AlertService and SlackService.
 """
 
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from tests.conftest import alert_to_api_format
 
@@ -66,23 +66,34 @@ class TestSlackNotificationIntegration:
         
         chain_context = alert_to_api_format(sample_alert_with_fingerprint)
         
-        original_create = alert_service.agent_factory.create_agent.side_effect
-        original_get_with_config = alert_service.agent_factory.get_agent_with_config.side_effect
+        # Get the original callable methods (not side_effect which may be None)
+        original_create = alert_service.agent_factory.create_agent
+        original_get_with_config = alert_service.agent_factory.get_agent_with_config
         
         def create_failing_agent(agent_identifier, mcp_client):
+            # Call the original mocked method to get an agent
             agent = original_create(agent_identifier, mcp_client)
+            # Override process_alert to raise an exception
             agent.process_alert = AsyncMock(side_effect=Exception("Agent processing failed"))
             return agent
         
         def get_failing_agent_with_config(agent_identifier, mcp_client, execution_config):
+            # Call the original mocked method to get an agent
             agent = original_get_with_config(agent_identifier, mcp_client, execution_config)
+            # Override process_alert to raise an exception
             agent.process_alert = AsyncMock(side_effect=Exception("Agent processing failed"))
             return agent
         
-        alert_service.agent_factory.create_agent.side_effect = create_failing_agent
-        alert_service.agent_factory.get_agent_with_config.side_effect = get_failing_agent_with_config
-        
-        try:
+        # Use patch.object with wraps to intercept and modify the agent
+        with patch.object(
+            alert_service.agent_factory,
+            'create_agent',
+            side_effect=create_failing_agent
+        ), patch.object(
+            alert_service.agent_factory,
+            'get_agent_with_config',
+            side_effect=get_failing_agent_with_config
+        ):
             result = await alert_service.process_alert(chain_context)
             
             # Verify error response
@@ -106,6 +117,3 @@ class TestSlackNotificationIntegration:
             assert passed_chain_context.processing_alert.slack_message_fingerprint == "test-fingerprint-abc123"
             assert 'error_msg' in call_kwargs
             assert call_kwargs['error_msg'] is not None
-        finally:
-            alert_service.agent_factory.create_agent.side_effect = original_create
-            alert_service.agent_factory.get_agent_with_config.side_effect = original_get_with_config
