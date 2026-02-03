@@ -1,6 +1,6 @@
-import React from 'react';
-import { TableRow, TableCell, Typography, IconButton, Tooltip, Chip } from '@mui/material';
-import { OpenInNew, Chat as ChatIcon, CallSplit } from '@mui/icons-material';
+import React, { useState } from 'react';
+import { TableRow, TableCell, Typography, IconButton, Tooltip, Chip, Box, Popover, Card, Divider } from '@mui/material';
+import { OpenInNew, Chat as ChatIcon, CallSplit, Summarize } from '@mui/icons-material';
 import StatusBadge from './StatusBadge';
 import TokenUsageDisplay from './TokenUsageDisplay';
 import { highlightSearchTermNodes } from '../utils/search';
@@ -11,8 +11,11 @@ import { formatTimestamp, formatDurationMs, formatDuration } from '../utils/time
  * AlertListItem component represents a single session row in the alerts table
  * Displays basic session information with Phase 4 search highlighting support
  * Uses Unix timestamp utilities for optimal performance and consistent formatting
+ * Supports hover card executive summary preview without fetching full session details
  */
 const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick, searchTerm }) => {
+  const [summaryAnchorEl, setSummaryAnchorEl] = useState<HTMLElement | null>(null);
+  
   const handleRowClick = () => {
     if (onClick) {
       if (!session.session_id) {
@@ -31,10 +34,22 @@ const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick, searchT
       window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
+  
+  // Handle summary hover card
+  const handleSummaryMouseEnter = (e: React.MouseEvent<HTMLElement>) => {
+    setSummaryAnchorEl(e.currentTarget);
+  };
+
+  const handleSummaryMouseLeave = () => {
+    setSummaryAnchorEl(null);
+  };
 
   // Calculate duration if not provided
   const duration = session.duration_ms || 
     (session.completed_at_us ? formatDuration(session.started_at_us, session.completed_at_us) : null);
+
+  const hasSummary = session.final_analysis_summary && session.final_analysis_summary.trim().length > 0;
+  const summaryPopoverOpen = Boolean(summaryAnchorEl);
 
   return (
     <TableRow 
@@ -48,7 +63,56 @@ const AlertListItem: React.FC<AlertListItemProps> = ({ session, onClick, searchT
       }}
     >
       <TableCell>
-        <StatusBadge status={session.status} />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <StatusBadge status={session.status} />
+          {hasSummary && (
+            <>
+              <Chip
+                label="Summary"
+                size="small"
+                variant="outlined"
+                color="primary"
+                onMouseEnter={handleSummaryMouseEnter}
+                onMouseLeave={handleSummaryMouseLeave}
+                onClick={(e) => e.stopPropagation()} // Prevent row click
+                sx={(theme) => ({ 
+                  cursor: 'pointer',
+                  height: 24,
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  transition: 'all 0.2s ease-in-out',
+                  '&:hover': {
+                    backgroundColor: `${theme.palette.grey[700]} !important`,
+                    color: `${theme.palette.common.white} !important`,
+                    borderColor: `${theme.palette.grey[700]} !important`,
+                  },
+                })}
+              />
+              <Popover
+                sx={{ pointerEvents: 'none' }}
+                open={summaryPopoverOpen}
+                anchorEl={summaryAnchorEl}
+                anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
+                transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                onClose={handleSummaryMouseLeave}
+                disableRestoreFocus
+              >
+                <Card sx={{ maxWidth: 500, p: 2.5, boxShadow: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <Summarize color="primary" />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'primary.main' }}>
+                      Executive Summary
+                    </Typography>
+                  </Box>
+                  <Divider sx={{ mb: 1.5 }} />
+                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                    {session.final_analysis_summary}
+                  </Typography>
+                </Card>
+              </Popover>
+            </>
+          )}
+        </Box>
       </TableCell>
       {/* Parallel agents indicator column - narrow, no header */}
       <TableCell sx={{ width: 40, textAlign: 'center', px: 0.5 }}>
