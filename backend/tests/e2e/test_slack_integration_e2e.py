@@ -4,7 +4,7 @@ E2E Tests for Slack Integration.
 Tests the complete Slack notification flow integrated with Alert processing:
 1. Alert processing started notifications (threaded)
 2. Alert processing completed notifications (threaded and direct)
-3. Alert processing error notifications (threaded)
+3. Alert processing error notifications (threaded and direct)
 4. Alert processing paused notifications (threaded and direct)
 
 Architecture:
@@ -424,6 +424,98 @@ class TestSlackThreadedNotificationFailed:
                 assert "Error" in error_text or "failed" in error_text.lower(), "Error message should mention failure"
                 print("✅ Error notification sent with correct formatting")
 
+@pytest.mark.asyncio
+@pytest.mark.e2e
+class TestSlackDirectChannelNotificationFailed:
+    """Test Slack direct channel notification with failed session."""
+
+    async def test_slack_direct_channel_notification_with_failed_session(
+        self, 
+        e2e_test_client,
+        mock_slack_service,
+        slack_alert_without_fingerprint
+    ):
+        """
+        Test Slack direct channel notification with failed session.
+        
+        Verifies:
+        1. No started notification (direct posting, no fingerprint)
+        2. Alert processing fails (simulated LLM error)
+        3. Error notification sent directly to channel (no threading)
+        4. Error notification has 'danger' color
+        """
+        print("🚀 Testing Slack direct channel error notification...")
+        
+        # Use the mock Slack client from fixture
+        mock_slack_client = mock_slack_service
+        
+        # Configure mock for direct messages (no threading)
+        mock_slack_client.chat_postMessage = AsyncMock(return_value={"ok": True, "ts": "1234567891.123457"})
+        
+        slack_calls = []
+        track_slack_call = create_slack_call_tracker(mock_slack_client, slack_calls)
+        track_slack_call("conversations_history")
+        track_slack_call("chat_postMessage")
+        
+        # Mock LLM to raise an error
+        async def mock_astream_failing(*args, **kwargs):
+            raise Exception("LLM API connection failed - simulated error")
+        
+        streaming_mock = mock_astream_failing
+        
+        # Inject mock Slack client into the app's SlackService
+        alert_service = get_alert_service()
+        alert_service.slack_service.client = mock_slack_client
+        alert_service.slack_service.enabled = True
+        
+        with (
+            E2ETestUtils.create_llm_patch_context(streaming_mock=streaming_mock),
+            E2ETestUtils.setup_runbook_service_patching(),
+        ):
+                print("📤 Submitting alert (will fail)...")
+                response = e2e_test_client.post(
+                    "/api/v1/alerts",
+                    json=slack_alert_without_fingerprint
+                )
+                
+                assert response.status_code == 200
+                session_id = response.json()["session_id"]
+                
+                # Wait for failure
+                print("⏳ Waiting for processing to fail...")
+                session, final_status = await E2ETestUtils.wait_for_session_completion(
+                    e2e_test_client, 
+                    max_wait_seconds=30,
+                )
+                
+                assert session == session_id and final_status == "failed"
+                print(f"✅ Session failed as expected")
+                
+                # Verify Slack API calls
+                print(f"📊 Total Slack calls: {len(slack_calls)}")
+
+                # Should have exactly 1 call (error only, no started notification):
+                # 1. chat_postMessage (error notification)
+                
+                post_calls = [c for c in slack_calls if c["method"] == "chat_postMessage"]
+                assert len(post_calls) == 1, f"Expected exactly 1 error notification (no started for direct), got {len(post_calls)}"
+                
+                # Verify no conversations_history was called (no threading)
+                history_calls = [c for c in slack_calls if c["method"] == "conversations_history"]
+                assert len(history_calls) == 0, "Expected 0 history calls for direct posting"
+                
+                # Verify error notification is direct (no thread_ts)
+                error_call = post_calls[0]
+                assert "thread_ts" not in error_call["kwargs"], "Direct posting should not use thread_ts"
+                
+                # Verify error formatting
+                attachments = error_call["kwargs"].get("attachments", [])
+                assert len(attachments) > 0, "No attachments in error notification"
+                assert attachments[0]["color"] == "danger", "Error should use 'danger' color"
+                
+                error_text = attachments[0].get("text", "")
+                assert "Error" in error_text or "failed" in error_text.lower(), "Error message should mention failure"
+                print("✅ Error notification sent directly to channel with correct formatting")
 
 @pytest.mark.asyncio
 @pytest.mark.e2e
