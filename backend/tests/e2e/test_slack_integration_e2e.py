@@ -399,7 +399,7 @@ class TestSlackThreadedNotificationFailed:
                 )
                 
                 assert session == session_id and final_status == "failed"
-                print(f"✅ Session failed as expected")
+                print("✅ Session failed as expected")
                 
                 # Verify Slack API calls
                 print(f"📊 Total Slack calls: {len(slack_calls)}")
@@ -489,7 +489,7 @@ class TestSlackDirectChannelNotificationFailed:
                 )
                 
                 assert session == session_id and final_status == "failed"
-                print(f"✅ Session failed as expected")
+                print("✅ Session failed as expected")
                 
                 # Verify Slack API calls
                 print(f"📊 Total Slack calls: {len(slack_calls)}")
