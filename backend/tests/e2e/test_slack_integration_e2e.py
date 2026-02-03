@@ -145,7 +145,7 @@ class TestSlackThreadedNotificationCompleted:
         track_slack_call("chat_postMessage")
         
         # Mock LLM streaming responses at LangChain level
-        async def mock_astream(*args, **kwargs):
+        async def mock_astream(*_args, **_kwargs):
             """Mock astream that returns a simple successful response."""
             # Simple successful analysis
             response = """Final Answer: The pod is crash-looping due to memory limit exceeded. 
@@ -262,7 +262,7 @@ class TestSlackDirectChannelNotificationCompleted:
         track_slack_call("chat_postMessage")
         
         # Mock LLM streaming at LangChain level
-        async def mock_astream(*args, **kwargs):
+        async def mock_astream(*_args, **_kwargs):
             """Mock astream that returns a simple successful response."""
             response = """Final Answer: Analysis complete. Issue resolved."""
             usage = {
@@ -302,7 +302,7 @@ class TestSlackDirectChannelNotificationCompleted:
                 )
 
                 assert session == session_id and final_status == "completed"
-                print(f"✅ Session completed")
+                print(f"✅ Session completed: {final_status}")
 
                 # Verify Slack API calls
                 print(f"📊 Total Slack calls: {len(slack_calls)}")
@@ -368,7 +368,7 @@ class TestSlackThreadedNotificationFailed:
         track_slack_call("chat_postMessage")
         
         # Mock LLM to raise an error
-        async def mock_astream_failing(*args, **kwargs):
+        async def mock_astream_failing(*_args, **_kwargs):
             raise Exception("LLM API connection failed - simulated error")
         
         streaming_mock = mock_astream_failing
@@ -458,7 +458,7 @@ class TestSlackDirectChannelNotificationFailed:
         track_slack_call("chat_postMessage")
         
         # Mock LLM to raise an error
-        async def mock_astream_failing(*args, **kwargs):
+        async def mock_astream_failing(*_args, **_kwargs):
             raise Exception("LLM API connection failed - simulated error")
         
         streaming_mock = mock_astream_failing
@@ -565,7 +565,7 @@ class TestSlackThreadedNotificationPaused:
         # Mock LLM to not provide Final Answer (triggers iteration)
         call_count = [0]
         
-        async def mock_astream_iterating(*args, **kwargs):
+        async def mock_astream_iterating(*_args, **_kwargs):
             call_count[0] += 1
             
             if call_count[0] == 1:
@@ -718,7 +718,7 @@ class TestSlackDirectedNotificationPaused:
         # Mock LLM to not provide Final Answer (triggers iteration)
         call_count = [0]
         
-        async def mock_astream_iterating(*args, **kwargs):
+        async def mock_astream_iterating(*_args, **_kwargs):
             call_count[0] += 1
             
             if call_count[0] == 1:
@@ -878,7 +878,7 @@ class TestSlackThreadedNotificationMessageNotFound:
         track_slack_call("chat_postMessage")
         
         # Mock LLM streaming at LangChain level
-        async def mock_astream(*args, **kwargs):
+        async def mock_astream(*_args, **_kwargs):
             """Mock astream that returns a simple successful response."""
             response = """Final Answer: Analysis complete."""
             usage = {
@@ -984,7 +984,7 @@ class TestSlackApiErrorResilience:
         mock_slack_client.chat_postMessage = failing_post_message
         
         # Mock LLM streaming at LangChain level
-        async def mock_astream(*args, **kwargs):
+        async def mock_astream(*_args, **_kwargs):
             """Mock astream that returns a simple successful response."""
             response = """Final Answer: Analysis complete."""
             usage = {
