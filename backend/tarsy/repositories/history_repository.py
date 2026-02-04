@@ -735,6 +735,9 @@ class HistoryRepository:
                     
                     chat_message_count=session_counts.get('chat_message_count'),
                     
+                    # Executive summary for quick view
+                    final_analysis_summary=alert_session.final_analysis_summary,
+                    
                     # Optional fields that may need calculation elsewhere (defaults from SessionOverview)
                     total_stages=None,
                     completed_stages=None,
@@ -1156,7 +1159,10 @@ class HistoryRepository:
                 # Slack integration
                 slack_message_fingerprint=session.slack_message_fingerprint,
                 
-                chat_message_count=chat_message_count
+                chat_message_count=chat_message_count,
+                
+                # Executive summary for quick view
+                final_analysis_summary=session.final_analysis_summary
             )
             
         except Exception as e:
